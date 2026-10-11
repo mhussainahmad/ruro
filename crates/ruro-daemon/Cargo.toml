@@ -1,0 +1,19 @@
+[package]
+name = "ruro-daemon"
+description = "Per-machine supervisor that deploys and monitors ruro graphs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro-graph = { workspace = true }
+ruro-proto = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+zenoh = { workspace = true }
+libc = { workspace = true }

@@ -1,0 +1,21 @@
+[package]
+name = "ruro"
+description = "Fast, lightweight robotics dataflow in Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro-msg = { workspace = true }
+ruro-node = { workspace = true }
+ruro-graph = { workspace = true }
+ruro-macros = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

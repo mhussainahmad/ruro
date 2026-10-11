@@ -1,0 +1,24 @@
+[package]
+name = "ruro-transport"
+description = "Shared-memory transport for ruro wires"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+iceoryx2 = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "hop"
+harness = false
+
+[lib]
+bench = false

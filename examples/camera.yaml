@@ -1,0 +1,29 @@
+# A camera pipeline split across two processes.
+# The camera runs in its own process; the vision nodes share one and pass
+# frames to each other without copying. The wire between the two processes
+# goes through shared memory.
+name: camera-demo
+nodes:
+  camera:
+    type: std/fake-camera
+    group: camera
+    rate: 30
+    params: { width: 640, height: 480 }
+    pos: [0, 0]
+  blur:
+    type: std/blur
+    group: vision
+    params: { radius: 4 }
+    pos: [400, 0]
+  gray:
+    type: std/grayscale
+    group: vision
+    pos: [0, 230]
+  stats:
+    type: std/image-stats
+    group: vision
+    pos: [400, 230]
+wires:
+  - camera.image -> blur.image
+  - blur.out -> gray.image
+  - gray.out -> stats.image

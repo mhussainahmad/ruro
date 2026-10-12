@@ -124,7 +124,23 @@ pub fn clock(ts_ns: u64) -> String {
     )
 }
 
-pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
+/// Lines about the e-stop of the other machines running the graph: a stop
+/// engaged directly on one of them does not reach this daemon.
+pub fn peer_estop_lines(peers: &[DaemonStatus]) -> Vec<String> {
+    peers
+        .iter()
+        .filter(|p| p.estopped)
+        .map(|p| {
+            format!(
+                "emergency stop engaged on `{}` (release with `ruro --daemon {} estop --release`)",
+                p.name, p.name
+            )
+        })
+        .collect()
+}
+
+/// `peers` are the statuses of the other daemons running parts of the graph.
+pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics], peers: &[DaemonStatus]) {
     println!(
         "daemon {}  v{}  pid {}  up {}",
         status.name,
@@ -137,6 +153,9 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
             "{} (release with `ruro estop --release`)",
             paint("1;31", "EMERGENCY STOP ENGAGED")
         );
+    }
+    for line in peer_estop_lines(peers) {
+        println!("{}", paint("1;31", &line));
     }
     if let Some(r) = &status.recording {
         println!("recording to {r}");
@@ -258,5 +277,23 @@ mod tests {
         let plain = log_line_styled(&line, false);
         assert!(plain.ends_with(" ERROR vision/blur failed"), "{plain:?}");
         assert!(log_line_styled(&line, true).contains("\x1b[31mERROR\x1b[0m"));
+    }
+
+    #[test]
+    fn stops_on_other_machines_are_shown() {
+        let peer = |name: &str, estopped| DaemonStatus {
+            name: name.into(),
+            version: String::new(),
+            pid: 1,
+            uptime_s: 0.0,
+            graph: Some("g".into()),
+            groups: Vec::new(),
+            recording: None,
+            playback: None,
+            estopped,
+        };
+        let lines = peer_estop_lines(&[peer("robot", true), peer("arm", false)]);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("`robot`"), "{lines:?}");
     }
 }

@@ -136,9 +136,14 @@ enum Cmd {
     Logs,
     /// Engage the emergency stop: actuator nodes command a safe state.
     Estop {
-        /// Release the emergency stop instead.
+        /// Release the emergency stop instead: the stop engaged at this
+        /// daemon, here and on every machine it was passed on to.
         #[arg(long)]
         release: bool,
+        /// With --release, also lift stops engaged at other daemons and
+        /// passed on to this one.
+        #[arg(long, requires = "release")]
+        all: bool,
     },
     /// Record every output of the running graph into an MCAP file.
     Record {
@@ -383,8 +388,12 @@ fn run(cli: Cli) -> Result<()> {
             stream_logs(&c.session, &c.keys)?;
             wait_for_ctrl_c()
         }
-        Cmd::Estop { release } => {
-            let payload = if release { "release" } else { "engage" };
+        Cmd::Estop { release, all } => {
+            let payload = match (release, all) {
+                (false, _) => "engage",
+                (true, false) => "release",
+                (true, true) => "release-all",
+            };
             println!("{}", client()?.request(Ctl::Estop, payload)?);
             Ok(())
         }
@@ -549,9 +558,34 @@ pub fn group_metrics(c: &Client, status: &DaemonStatus) -> Result<Vec<GroupMetri
 }
 
 fn status(c: &Client) -> Result<()> {
+    // Daemons publish their status twice a second; listen while metrics
+    // are collected to find the other machines of the graph.
+    let others = c
+        .session
+        .declare_subscriber(Keys::all_status())
+        .wait()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let listening = std::time::Instant::now();
     let status = c.status()?;
     let metrics = group_metrics(c, &status)?;
-    output::print_status(&status, &metrics);
+    let mut peers: std::collections::BTreeMap<String, DaemonStatus> = Default::default();
+    loop {
+        while let Ok(Some(s)) = others.try_recv() {
+            if let Ok(peer) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes())
+                && peer.name != status.name
+                && peer.graph.is_some()
+                && peer.graph == status.graph
+            {
+                peers.insert(peer.name.clone(), peer);
+            }
+        }
+        if status.graph.is_none() || listening.elapsed() >= Duration::from_millis(700) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let peers: Vec<DaemonStatus> = peers.into_values().collect();
+    output::print_status(&status, &metrics, &peers);
     Ok(())
 }
 
@@ -618,6 +652,19 @@ mod tests {
         assert!(runs_node(&status, "imu"));
         assert!(!runs_node(&status, "drivers"));
         assert!(!runs_node(&status, "stats"));
+    }
+
+    #[test]
+    fn releasing_every_stop_needs_release() {
+        assert!(Cli::try_parse_from(["ruro", "estop", "--all"]).is_err());
+        let cli = Cli::try_parse_from(["ruro", "estop", "--release", "--all"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Estop {
+                release: true,
+                all: true
+            }
+        ));
     }
 
     #[test]

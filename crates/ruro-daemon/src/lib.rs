@@ -6,6 +6,7 @@
 //! It also latches the emergency stop, coordinates recording and replay, and
 //! forwards the groups of multi-machine graphs to the daemons that run them.
 
+mod estop;
 mod session;
 mod supervisor;
 mod upload;
@@ -32,8 +33,6 @@ pub const DEFAULT_PORT: u16 = 7447;
 
 /// How long control requests to hosts and peer daemons may take.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long a peer gets to confirm a forwarded e-stop.
-const FORWARD_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -101,36 +100,6 @@ pub fn load_registry(host: &Path) -> Result<Registry> {
     serde_json::from_slice(&out.stdout).context("parsing node registry")
 }
 
-/// E-stop requests forwarded from the daemon that deployed the graph to the
-/// peers running parts of it. Peers do not forward them further.
-const FORWARDED_ENGAGE: &str = "engage-forwarded";
-const FORWARDED_RELEASE: &str = "release-forwarded";
-
-/// Who engaged the emergency stop: someone at this daemon, or the daemon
-/// whose graph this one runs part of. A release forwarded from there does
-/// not lift a stop engaged here.
-#[derive(Debug, Default)]
-pub(crate) struct EstopBy {
-    here: bool,
-    forwarded: bool,
-}
-
-impl EstopBy {
-    fn apply(&mut self, engage: bool, forwarded: bool) {
-        match (engage, forwarded) {
-            (true, false) => self.here = true,
-            (true, true) => self.forwarded = true,
-            // A release at this daemon lifts every stop.
-            (false, false) => *self = Self::default(),
-            (false, true) => self.forwarded = false,
-        }
-    }
-
-    fn engaged(&self) -> bool {
-        self.here || self.forwarded
-    }
-}
-
 /// Everything the daemon's threads share.
 pub(crate) struct State {
     pub name: String,
@@ -141,7 +110,7 @@ pub(crate) struct State {
     pub registry: Mutex<Registry>,
     /// Whether the emergency stop is engaged, by anyone.
     pub estop: AtomicBool,
-    pub estop_by: Mutex<EstopBy>,
+    pub estop_latch: Mutex<estop::Latch>,
     pub recording: Mutex<Option<RecordSession>>,
     pub playback: Mutex<Option<Playback>>,
     /// Daemons running groups of the graph deployed here.
@@ -269,7 +238,7 @@ impl Daemon {
             host: config.host.clone(),
             registry: Mutex::new(registry),
             estop: AtomicBool::new(false),
-            estop_by: Mutex::new(EstopBy::default()),
+            estop_latch: Mutex::new(estop::Latch::default()),
             recording: Mutex::new(None),
             playback: Mutex::new(None),
             peers: Mutex::new(BTreeSet::new()),
@@ -521,84 +490,7 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             let cmd = serde_json::from_slice(payload).context("bad playback command")?;
             session::playback(st, cmd)
         }
-        "estop" => {
-            let (engage, forwarded) = match text().trim() {
-                "engage" | "" => (true, false),
-                "release" => (false, false),
-                FORWARDED_ENGAGE => (true, true),
-                FORWARDED_RELEASE => (false, true),
-                other => bail!("expected `engage` or `release`, got `{other}`"),
-            };
-            let engaged = {
-                let mut by = st.estop_by.lock();
-                by.apply(engage, forwarded);
-                by.engaged()
-            };
-            st.estop.store(engaged, Ordering::Relaxed);
-            st.sup.lock().host_state.estopped = engaged;
-            st.publish_estop();
-            tracing::warn!(
-                "emergency stop {}",
-                if engaged { "engaged" } else { "released" }
-            );
-            let done = match (engage, engaged) {
-                (true, _) => "e-stop engaged",
-                (false, false) => "e-stop released",
-                (false, true) => "e-stop stays engaged: it was engaged here",
-            };
-            if forwarded {
-                return Ok(done.into());
-            }
-            // The machines running the rest of the graph follow, without
-            // passing it further.
-            let peers: Vec<String> = st.peers.lock().iter().cloned().collect();
-            let op = if engage {
-                FORWARDED_ENGAGE
-            } else {
-                FORWARDED_RELEASE
-            };
-            // All at once, and briefly: a peer that does not answer must not
-            // hold the stop back from the others, nor outlast the client.
-            let results: Vec<(&String, Result<String>)> = std::thread::scope(|s| {
-                let pending: Vec<_> = peers
-                    .iter()
-                    .map(|p| {
-                        let ask = || {
-                            ruro_proto::request(
-                                &st.session,
-                                &Keys::new(p),
-                                Ctl::Estop,
-                                op,
-                                FORWARD_TIMEOUT,
-                            )
-                        };
-                        (p, s.spawn(ask))
-                    })
-                    .collect();
-                pending
-                    .into_iter()
-                    .map(|(p, h)| {
-                        let r = h.join().unwrap_or_else(|_| Err(anyhow!("request failed")));
-                        (p, r)
-                    })
-                    .collect()
-            });
-            let failed: Vec<String> = results
-                .iter()
-                .filter_map(|(p, r)| r.as_ref().err().map(|e| format!("`{p}` ({e:#})")))
-                .collect();
-            if !failed.is_empty() {
-                bail!("{done} here, but not on {}", failed.join(", "));
-            }
-            Ok(std::iter::once(done.to_owned())
-                .chain(
-                    results
-                        .into_iter()
-                        .filter_map(|(p, r)| Some(format!("{p}: {}", r.ok()?))),
-                )
-                .collect::<Vec<_>>()
-                .join("; "))
-        }
+        "estop" => estop::handle(st, &text()),
         "upload" => {
             let chunk: ruro_proto::UploadChunk = ruro_proto::decode(payload)?;
             let dir = st.sup.lock().hosts_dir();
@@ -683,11 +575,9 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
         origin: st.name.clone(),
         graph: graph.to_yaml()?,
     })?;
+    // A peer's hosts start stopped when the stop is engaged here.
+    estop::forward_on_deploy(st, &machines)?;
     for m in &machines {
-        // A peer's hosts start stopped when the stop is engaged here.
-        if st.estop.load(Ordering::Relaxed) {
-            st.peer_request(m, Ctl::Estop, FORWARDED_ENGAGE)?;
-        }
         st.peer_request(m, Ctl::DeployGroups, &forward)?;
         st.peers.lock().insert(m.clone());
     }
@@ -808,21 +698,6 @@ mod tests {
         let issues = placement_issues(&g, &all, offered);
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert!(issues[0].contains("`b`") && issues[0].contains("`main`"));
-    }
-
-    #[test]
-    fn a_forwarded_release_leaves_a_local_stop_engaged() {
-        let mut by = EstopBy::default();
-        by.apply(true, false);
-        by.apply(true, true);
-        by.apply(false, true);
-        assert!(by.engaged());
-        by.apply(true, true);
-        by.apply(false, false);
-        assert!(!by.engaged(), "a local release lifts both");
-        by.apply(true, true);
-        by.apply(false, true);
-        assert!(!by.engaged());
     }
 
     #[test]

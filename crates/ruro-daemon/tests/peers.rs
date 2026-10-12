@@ -378,3 +378,74 @@ fn a_daemon_given_another_graph_stops_the_groups_it_forwarded() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn releases_lift_the_stops_of_their_own_origin_wherever_they_went() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-origins-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let (robot_port, laptop_port) = (free_port(), free_port());
+    let tag = std::process::id();
+    let (robot, laptop) = (format!("orobot{tag}"), format!("olaptop{tag}"));
+    let robot_daemon = daemon(&robot, robot_port, Vec::new(), &host);
+    let laptop_daemon = daemon(
+        &laptop,
+        laptop_port,
+        vec![format!("tcp/127.0.0.1:{robot_port}")],
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{laptop_port}")).unwrap();
+    let request_to = |daemon: &str, op, payload: &str| {
+        ruro_proto::request(
+            &session,
+            &Keys::new(daemon),
+            op,
+            payload,
+            Duration::from_secs(10),
+        )
+        .unwrap()
+    };
+    let spanning = format!(
+        "name: span\ngroups:\n  far: {{ machine: {robot} }}\nnodes:\n  a: {{ type: t/x, group: far, rate: 1 }}\n  b: {{ type: t/x, rate: 1 }}\n"
+    );
+    request_to(&laptop, Ctl::Deploy, &spanning);
+    request_to(&laptop, Ctl::Estop, "engage");
+    wait_status(&session, &robot, |s| s.estopped);
+
+    // A release at the robot lifts only the robot's own stop; the laptop's
+    // stays, and the reply says whose it is.
+    request_to(&robot, Ctl::Estop, "engage");
+    let reply = request_to(&robot, Ctl::Estop, "release");
+    assert!(
+        reply.contains("stays engaged") && reply.contains(&laptop),
+        "{reply}"
+    );
+    std::thread::sleep(Duration::from_millis(600));
+    wait_status(&session, &robot, |s| s.estopped);
+    // `--all` lifts it there, but not at the laptop.
+    request_to(&robot, Ctl::Estop, "release-all");
+    wait_status(&session, &robot, |s| !s.estopped);
+    wait_status(&session, &laptop, |s| s.estopped);
+
+    // A redeploy drops the robot from the graph while it holds the laptop's
+    // stop; releasing at the laptop still reaches it.
+    request_to(&laptop, Ctl::Estop, "engage");
+    wait_status(&session, &robot, |s| s.estopped);
+    request_to(
+        &laptop,
+        Ctl::Deploy,
+        "name: alone\nnodes:\n  a: { type: t/x, rate: 1 }\n",
+    );
+    wait_status(&session, &robot, |s| s.graph.is_none() && s.estopped);
+    let reply = request_to(&laptop, Ctl::Estop, "release");
+    assert!(reply.contains("e-stop released"), "{reply}");
+    wait_status(&session, &robot, |s| !s.estopped);
+    wait_status(&session, &laptop, |s| !s.estopped);
+
+    request_to(&laptop, Ctl::Stop, "");
+    drop((robot_daemon, laptop_daemon));
+    for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -5,7 +5,7 @@ mod output;
 mod recording;
 mod soak;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -289,7 +289,7 @@ fn run(cli: Cli) -> Result<()> {
                 Graph::load(&path).with_context(|| format!("loading {}", path.display()))?;
             let registry =
                 local_or_remote_registry(&cli.connect, cli.daemon.as_deref(), &security)?;
-            let issues = ruro_graph::validate(&graph, &registry);
+            let issues = ruro_graph::validate_in(&graph, &registry, &base_dir(&path));
             if issues.is_empty() {
                 let groups = graph.groups();
                 println!(
@@ -400,9 +400,25 @@ fn run(cli: Cli) -> Result<()> {
 }
 
 fn deploy(c: &Client, path: &PathBuf) -> Result<String> {
-    let yaml =
-        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    c.request(Ctl::Deploy, &yaml)
+    c.request(Ctl::Deploy, &flattened_yaml(path)?)
+}
+
+/// Loads a graph and expands its subgraphs, resolving `graph:` file
+/// references relative to the graph's own directory. The daemon may run on
+/// another machine, so it must receive a self-contained graph.
+fn flattened_yaml(path: &Path) -> Result<String> {
+    let graph = Graph::load(path).with_context(|| format!("loading {}", path.display()))?;
+    let flat = graph
+        .flatten_in(&base_dir(path))
+        .with_context(|| format!("expanding subgraphs of {}", path.display()))?;
+    Ok(flat.to_yaml()?)
+}
+
+fn base_dir(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Connects to the daemon at `endpoint`, starting one in this process if
@@ -525,4 +541,34 @@ pub fn ctrl_c_flag() -> Result<Arc<AtomicBool>> {
 fn exec(exe: &PathBuf, args: &[String]) -> std::io::Error {
     use std::os::unix::process::CommandExt;
     std::process::Command::new(exe).args(args).exec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deploys_send_graphs_with_file_subgraphs_expanded() {
+        let dir = std::env::temp_dir().join(format!("ruro-cli-flatten-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("parts")).unwrap();
+        std::fs::write(
+            dir.join("parts/source.yaml"),
+            "name: source\noutputs:\n  value: s.value\nnodes:\n  s: { type: std/sine, rate: 10 }\n",
+        )
+        .unwrap();
+        let top = dir.join("top.yaml");
+        std::fs::write(
+            &top,
+            "name: top\nnodes:\n  src: { type: graph:parts/source.yaml }\n  g: { type: std/gain }\nwires: [src.value -> g.input]\n",
+        )
+        .unwrap();
+
+        // Resolved against the graph's directory, not the working directory.
+        let flat = Graph::from_yaml(&flattened_yaml(&top).unwrap()).unwrap();
+        let kinds: Vec<&str> = flat.nodes.values().map(|n| n.kind.as_str()).collect();
+        assert_eq!(kinds, ["std/sine", "std/gain"]);
+        assert_eq!(flat.wires.len(), 1);
+        assert_eq!(flat.wires[0].from.port, "value");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

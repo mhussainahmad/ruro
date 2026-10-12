@@ -195,10 +195,15 @@ impl Daemon {
         let dir = runtime_dir(&config.name);
         let created = !dir.exists();
         Self::start_in(config, &dir).inspect_err(|_| {
-            // Leave nothing behind for a daemon that never ran; an existing
-            // directory may belong to a running daemon or hold uploads.
-            if created {
-                let _ = std::fs::remove_dir_all(&dir);
+            // Leave nothing behind for a daemon that never ran. A directory
+            // that existed may hold uploads, and one with a socket that
+            // answers belongs to a daemon of the same name that started
+            // meanwhile; only an empty directory is removed.
+            let socket = dir.join("zenoh.sock");
+            if created && std::os::unix::net::UnixStream::connect(&socket).is_err() {
+                let _ = std::fs::remove_file(&socket);
+                let _ = std::fs::remove_file(dir.join("auth"));
+                let _ = std::fs::remove_dir(&dir);
             }
         })
     }

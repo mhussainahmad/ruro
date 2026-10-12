@@ -111,7 +111,14 @@ impl ParamKind {
     /// Checks that a JSON value belongs to this domain.
     pub fn accepts(self, v: &serde_json::Value) -> bool {
         match self {
-            ParamKind::Int => v.as_i64().is_some() || v.as_u64().is_some(),
+            // Whole numbers written as floats (`4.0`) are integers too, as
+            // nodes read them.
+            ParamKind::Int => {
+                v.as_i64().is_some()
+                    || v.as_u64().is_some()
+                    || v.as_f64()
+                        .is_some_and(|f| f.is_finite() && f.fract() == 0.0)
+            }
             ParamKind::Float => v.is_number(),
             ParamKind::Bool => v.is_boolean(),
             ParamKind::String => v.is_string(),
@@ -318,6 +325,10 @@ mod tests {
                 .contains("outside [1, ..]")
         );
         assert_eq!(param("window").parse("3").unwrap(), json!(3));
+        assert!(
+            param("window").check(&json!(4.0)).is_ok(),
+            "a whole float is an integer"
+        );
         assert_eq!(param("label").parse("5").unwrap(), json!("5"));
         assert_eq!(param("label").parse("\"a b\"").unwrap(), json!("a b"));
         assert_eq!(param("enabled").parse("true").unwrap(), json!(true));

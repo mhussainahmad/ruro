@@ -129,7 +129,7 @@ wires: [cam.image -> det.image, det.detections -> sink.detections]
         model("detector.onnx")
     ))
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     let ok = wait_until(Duration::from_secs(10), || !DETECTIONS.lock().is_empty());
     let m = exec.metrics();
     exec.stop();
@@ -166,7 +166,7 @@ wires:
         model("policy.onnx")
     ))
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     let ok = wait_until(Duration::from_secs(10), || ACTIONS.lock().len() >= 4);
     let m = exec.metrics();
     exec.stop();
@@ -182,4 +182,51 @@ wires:
             "action {i}: {a:?} vs {e:?}"
         );
     }
+}
+
+#[test]
+fn policy_sends_nothing_while_stopped_and_replans_after_the_release() {
+    use ruro::node::testing::Harness;
+    let mut h = Harness::new(
+        "ml/policy",
+        serde_json::json!({ "model": model("policy.onnx") }),
+    )
+    .unwrap();
+    let mut img = Image::new(16, 16, Encoding::Rgb8);
+    img.data.fill(51);
+    let state = |base: f64| JointState {
+        position: (1..=6).map(|j| base + j as f64).collect(),
+        ..Default::default()
+    };
+    let actions = |h: &mut Harness| -> Vec<Vec<f64>> {
+        let a: Vec<JointCommand> = h.take("action").unwrap();
+        a.into_iter().map(|a| a.position).collect()
+    };
+    let close = |a: &[f64], base: f64, k: f64| {
+        a.iter()
+            .zip(1..=6)
+            .all(|(x, j)| (x - (base + j as f64 + k)).abs() < 1e-5)
+    };
+
+    h.push("image", img).unwrap();
+    h.push("state", state(0.0)).unwrap();
+    h.step().unwrap();
+    let a = actions(&mut h);
+    assert!(a.len() == 1 && close(&a[0], 0.0, 0.2), "{a:?}");
+
+    // The second action of the chunk (+0.4) is never sent.
+    h.set_estop(true);
+    for _ in 0..3 {
+        h.push("state", state(10.0)).unwrap();
+        h.step().unwrap();
+    }
+    assert!(actions(&mut h).is_empty(), "no actions while stopped");
+
+    h.set_estop(false);
+    h.step().unwrap();
+    let a = actions(&mut h);
+    assert!(
+        a.len() == 1 && close(&a[0], 10.0, 0.2),
+        "re-planned from the latest state: {a:?}"
+    );
 }

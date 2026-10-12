@@ -411,6 +411,14 @@ pub fn rad_to_ticks(rad: f64) -> i32 {
 /// Commands goal positions with one sync write and reads back position,
 /// velocity and current with one sync read per step. Servos must be in
 /// position control mode (the factory default).
+///
+/// E-stop: the servos hold where they are. The present positions are read
+/// once and written back as the goal positions, and incoming commands are
+/// ignored while stopped. Torque stays enabled on purpose: a limp arm would
+/// fall under its own weight. (The node only drives position control, so
+/// there is no velocity setpoint to zero.) After the release the servos keep
+/// holding until a command arrives after the release (commands sent during
+/// the stop are discarded).
 #[derive(Node)]
 #[node(kind = "hw/dynamixel", rate = 100)]
 pub struct Dynamixel {
@@ -437,12 +445,35 @@ pub struct Dynamixel {
     manage_torque: bool,
     bus: Option<Bus<Box<dyn Transport>>>,
     servo_ids: Vec<u8>,
+    /// Raw goal ticks latched when the e-stop engaged.
+    hold: Option<Vec<[u8; 4]>>,
+    /// Stopped by the e-stop; commands are discarded until one arrives after the release.
+    held: bool,
 }
 
 impl Dynamixel {
     /// Uses an existing transport instead of opening `device` (tests, custom links).
     pub fn attach(&mut self, transport: Box<dyn Transport>) {
         self.bus = Some(Bus::new(transport));
+    }
+
+    /// Writes the hold positions as goals, latching the present positions
+    /// first if nothing is latched yet.
+    fn hold(&mut self) -> Result {
+        let bus = self.bus.as_mut().context("bus not open")?;
+        if self.hold.is_none() {
+            let present = bus.sync_read(x_series::PRESENT_POSITION, 4, &self.servo_ids)?;
+            self.hold = Some(present.iter().map(|p| [p[0], p[1], p[2], p[3]]).collect());
+        }
+        let goals = self.hold.as_ref().expect("latched above");
+        let items: Vec<(u8, &[u8])> = self
+            .servo_ids
+            .iter()
+            .zip(goals)
+            .map(|(&id, g)| (id, g.as_slice()))
+            .collect();
+        bus.sync_write(x_series::GOAL_POSITION, 4, &items)?;
+        Ok(())
     }
 }
 
@@ -468,7 +499,20 @@ impl Node for Dynamixel {
         Ok(())
     }
 
-    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
+        if ctx.estopped() || self.held {
+            // Commands queued while stopped are stale.
+            while self.command.recv().is_some() {}
+            if ctx.estopped() {
+                self.held = true;
+                // Keeps writing the positions latched when the stop engaged
+                // (not the present ones, which would follow any sag).
+                self.hold()?;
+            } else {
+                self.held = false;
+                self.hold = None;
+            }
+        }
         let bus = self.bus.as_mut().context("bus not open")?;
         if let Some(cmd) = self.command.latest() {
             ensure!(
@@ -505,6 +549,17 @@ impl Node for Dynamixel {
                 .push(current as f64 * self.current_unit_ma / 1000.0);
         }
         self.state.send(state)
+    }
+
+    fn on_estop(&mut self, _ctx: &mut Ctx) {
+        self.held = true;
+        self.hold = None;
+        if self.bus.is_some()
+            && let Err(e) = self.hold()
+        {
+            // The next step tries again.
+            warn!("e-stop: could not hold the servos: {e}");
+        }
     }
 
     fn stop(&mut self, _ctx: &mut Ctx) {

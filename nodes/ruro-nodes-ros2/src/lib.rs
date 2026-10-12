@@ -149,10 +149,24 @@ fn advertise<M: RosMessage>(settings: Settings) -> Result<PubState<M>> {
     })
 }
 
+/// `Some(e)` if given an expression, `None` otherwise.
+macro_rules! optional {
+    () => {
+        None
+    };
+    ($e:expr) => {
+        Some($e)
+    };
+}
+
+/// A subscriber and a publisher node for one message pair. Publishers of
+/// commands (`estop = <safe message>, "<doc>"`) publish the safe message
+/// instead of their input while the e-stop is engaged.
 macro_rules! bridge {
     (
         $sub_kind:literal, $Sub:ident, $pub_kind:literal, $Pub:ident,
         $ruro:ty, $ros:ty, $from:path, $to:path, $topic:literal, $ros_name:literal
+        $(, estop = $safe:expr, $estop_doc:literal)?
     ) => {
         #[doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message.")]
         #[derive(Node)]
@@ -202,9 +216,9 @@ macro_rules! bridge {
             }
         }
 
-        #[doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.")]
+        #[doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $estop_doc)?)]
         #[derive(Node)]
-        #[node(kind = $pub_kind, doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic."))]
+        #[node(kind = $pub_kind, doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $estop_doc)?))]
         pub struct $Pub {
             #[input]
             input: Input<$ruro>,
@@ -224,6 +238,8 @@ macro_rules! bridge {
             #[param(default = "base_link")]
             frame_id: String,
             state: Option<PubState<$ros>>,
+            /// Stopped by the e-stop; input is discarded until the release.
+            held: bool,
         }
 
         impl $Pub {
@@ -235,6 +251,21 @@ macro_rules! bridge {
                 }
                 Ok(())
             }
+
+            /// The message published instead of the input during an e-stop.
+            fn safe() -> Option<$ruro> {
+                optional!($($safe)?)
+            }
+
+            fn publish(&self, msg: &$ruro, stamp_ns: u64) -> Result {
+                let state = self.state.as_ref().expect("publisher created");
+                let pub_ctx = convert::PubContext {
+                    frame_id: self.frame_id.clone(),
+                    stamp_ns,
+                };
+                state.publisher.publish(&$to(msg, &pub_ctx)?)?;
+                Ok(())
+            }
         }
 
         impl Node for $Pub {
@@ -244,16 +275,30 @@ macro_rules! bridge {
 
             fn step(&mut self, ctx: &mut Ctx) -> Result {
                 self.ensure(ctx)?;
-                let state = self.state.as_ref().expect("publisher created");
+                if let Some(safe) = Self::safe()
+                    && (ctx.estopped() || self.held)
+                {
+                    // Input queued while stopped is stale.
+                    while self.input.recv().is_some() {}
+                    self.held = ctx.estopped();
+                    if self.held {
+                        self.publish(&safe, ruro::msg::now_ns())?;
+                    }
+                    return Ok(());
+                }
                 while let Some(sample) = self.input.recv() {
-                    let pub_ctx = convert::PubContext {
-                        frame_id: self.frame_id.clone(),
-                        stamp_ns: sample.stamp_ns,
-                    };
-                    let msg = $to(&sample.msg, &pub_ctx)?;
-                    state.publisher.publish(&msg)?;
+                    self.publish(&sample.msg, sample.stamp_ns)?;
                 }
                 Ok(())
+            }
+
+            fn on_estop(&mut self, ctx: &mut Ctx) {
+                let Some(safe) = Self::safe() else { return };
+                self.held = true;
+                let sent = self.ensure(ctx).and_then(|()| self.publish(&safe, ruro::msg::now_ns()));
+                if let Err(e) = sent {
+                    warn!("e-stop: could not publish on {}: {e:#}", self.topic);
+                }
             }
 
             fn stop(&mut self, _ctx: &mut Ctx) {
@@ -275,7 +320,12 @@ bridge!(
     convert::twist_from_ros,
     convert::twist_to_ros,
     "/cmd_vel",
-    "geometry_msgs/Twist"
+    "geometry_msgs/Twist",
+    estop = Twist::default(),
+    "E-stop: a zero twist is published as soon as the stop engages, and \
+     again for every input received while stopped, in place of the input. \
+     After the release only input received after the release is forwarded \
+     (input queued during the stop is discarded)."
 );
 bridge!(
     "ros2/sub-pose-stamped",

@@ -7,6 +7,11 @@ use crate::io::parse_list;
 /// Jogs joints with a gamepad: each mapped stick axis moves one joint's
 /// position target at up to `speed` rad/s. The targets start from the first
 /// joint state received, so the arm does not jump when teleoperation begins.
+///
+/// E-stop: no commands are sent while stopped (the drivers hold the arm), and
+/// stick input is ignored. The targets are dropped, so after the release they
+/// start again from the next joint state received, where the arm actually is,
+/// and only stick input sent after the release moves it.
 #[derive(Node)]
 #[node(kind = "hw/joint-jog", rate = 50)]
 pub struct JointJog {
@@ -37,6 +42,8 @@ pub struct JointJog {
     upper: String,
     target: Option<Vec<f64>>,
     stick: Vec<f32>,
+    /// Stopped by the e-stop; stick input is discarded until the release.
+    held: bool,
 }
 
 impl JointJog {
@@ -73,7 +80,16 @@ impl JointJog {
 
 impl Node for JointJog {
     fn step(&mut self, ctx: &mut Ctx) -> Result {
-        if let Some(j) = self.joy.latest() {
+        if ctx.estopped() || self.held {
+            // Stick input queued while stopped is stale.
+            while self.joy.recv().is_some() {}
+            self.stick.clear();
+            self.target = None;
+            self.held = ctx.estopped();
+            if self.held {
+                return Ok(());
+            }
+        } else if let Some(j) = self.joy.latest() {
             self.stick.clone_from(&j.axes);
         }
         if let Some(s) = self.state.latest()
@@ -90,6 +106,12 @@ impl Node for JointJog {
             })?;
         }
         Ok(())
+    }
+
+    fn on_estop(&mut self, _ctx: &mut Ctx) {
+        self.held = true;
+        self.target = None;
+        self.stick.clear();
     }
 }
 

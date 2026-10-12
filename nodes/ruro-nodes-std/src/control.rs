@@ -49,6 +49,11 @@ impl Node for Pid {
 }
 
 /// Simulated single joint driven by a velocity command, with inertia and friction.
+///
+/// E-stop: the commanded velocity drops to zero and the joint slows down with
+/// its usual lag; velocity commands are ignored while stopped. After the
+/// release the joint stays at rest until a new command arrives (commands sent
+/// during the stop are discarded).
 #[derive(Node)]
 #[node(kind = "std/fake-arm", rate = 200)]
 pub struct FakeArm {
@@ -67,11 +72,18 @@ pub struct FakeArm {
     command: f64,
     pos: f64,
     vel: f64,
+    /// Stopped by the e-stop; commands are discarded until one arrives after the release.
+    held: bool,
 }
 
 impl Node for FakeArm {
     fn step(&mut self, ctx: &mut Ctx) -> Result {
-        if let Some(c) = self.velocity.latest() {
+        if ctx.estopped() || self.held {
+            // Commands queued while stopped are stale.
+            while self.velocity.recv().is_some() {}
+            self.command = 0.0;
+            self.held = ctx.estopped();
+        } else if let Some(c) = self.velocity.latest() {
             self.command = c.0.clamp(-self.max_speed, self.max_speed);
         }
         let dt = ctx.dt().as_secs_f64();
@@ -84,5 +96,10 @@ impl Node for FakeArm {
             velocity: vec![self.vel],
             effort: vec![self.command - self.vel],
         })
+    }
+
+    fn on_estop(&mut self, _ctx: &mut Ctx) {
+        self.command = 0.0;
+        self.held = true;
     }
 }

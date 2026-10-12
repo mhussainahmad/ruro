@@ -91,6 +91,13 @@ pub fn lock_memory() -> Result<()> {
     Ok(())
 }
 
+/// Makes timed sleeps of the calling thread wake on time. By default Linux
+/// may delay a normal thread's timer wakeups by up to 50 µs to batch them.
+pub fn precise_timers() {
+    // SAFETY: PR_SET_TIMERSLACK only changes the calling thread's slack.
+    unsafe { libc::prctl(libc::PR_SET_TIMERSLACK, 1 as libc::c_ulong, 0, 0, 0) };
+}
+
 /// Applies the per-thread settings of `rt` to the calling thread, logging
 /// what could not be applied.
 pub fn apply_thread(rt: &Realtime, who: &str) {

@@ -208,6 +208,9 @@ pub fn run_threaded(mut r: Runner, stop: Arc<AtomicBool>, rt: Option<Realtime>) 
         rt::apply_thread(rt, &r.id);
     }
     r.stats.set_tid(current_tid());
+    if r.period.is_some() {
+        rt::precise_timers();
+    }
     if r.start() {
         // Pick up state that predates the thread, such as a latched e-stop.
         r.poll_control();
@@ -338,6 +341,7 @@ pub fn run_deterministic(
         rt::apply_thread(rt, "deterministic group");
     }
     let tid = current_tid();
+    rt::precise_timers();
     // A timer node with rate r steps every `round(cycle rate / r)` cycles.
     let mut every: Vec<u64> = Vec::with_capacity(runners.len());
     for r in &mut runners {

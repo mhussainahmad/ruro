@@ -253,28 +253,35 @@ impl<T: Message> OutputPort<T> {
         }
     }
 
-    /// Hands a stamped sample to every destination. `encode` writes the
-    /// message encoding for remote sinks and the recorder.
-    fn distribute(
-        &self,
-        sample: Arc<Sample<T>>,
-        len: usize,
-        encode: &mut dyn FnMut(&mut [u8]),
-    ) -> Result {
+    /// Hands a stamped sample to every destination. Remote sinks and the
+    /// recorder get `raw` if given (an encoding received from elsewhere),
+    /// otherwise the message is encoded for them, and only if there are any.
+    fn distribute(&self, sample: Arc<Sample<T>>, raw: Option<&[u8]>) -> Result {
         let (seq, stamp_ns) = (sample.seq, sample.stamp_ns);
         let mut result = Ok(());
-        for sink in self.remote.read().iter() {
-            let r = sink.send(seq, stamp_ns, len, encode);
-            if r.is_err() && result.is_ok() {
-                result = r;
+        let remote = self.remote.read();
+        let recording = self.recording.load(Ordering::Relaxed);
+        if !remote.is_empty() || recording {
+            let msg = &sample.msg;
+            // Sizing can cost as much as encoding (postcard sizes by
+            // serializing), so it is only done here.
+            let len = raw.map_or_else(|| msg.encoded_len(), <[u8]>::len);
+            let mut encode = |buf: &mut [u8]| match raw {
+                Some(bytes) => buf.copy_from_slice(bytes),
+                None => msg.encode_into(buf),
+            };
+            for sink in remote.iter() {
+                let r = sink.send(seq, stamp_ns, len, &mut encode);
+                if r.is_err() && result.is_ok() {
+                    result = r;
+                }
+            }
+            if recording && let Some(rec) = self.recorder.read().as_ref() {
+                // A full or failed recording must never fail the node's send.
+                let _ = rec.send(seq, stamp_ns, len, &mut encode);
             }
         }
-        if self.recording.load(Ordering::Relaxed)
-            && let Some(rec) = self.recorder.read().as_ref()
-        {
-            // A full or failed recording must never fail the node's send.
-            let _ = rec.send(seq, stamp_ns, len, encode);
-        }
+        drop(remote);
         self.tap.offer(&sample.msg, stamp_ns);
         let local = self.local.read();
         if let [rest @ .., last] = local.as_slice() {
@@ -342,27 +349,12 @@ impl<T: Message> Output<T> {
         if pooled {
             self.port.pool.keep(&sample);
         }
-        // Sizing can cost as much as encoding (postcard sizes by serializing),
-        // so skip it when nothing will encode.
-        let len = if self.port.needs_encoding() {
-            sample.msg.encoded_len()
-        } else {
-            0
-        };
-        let msg = sample.clone();
-        self.port
-            .distribute(sample, len, &mut |buf| msg.msg.encode_into(buf))
+        self.port.distribute(sample, None)
     }
 
     /// Number of messages sent so far.
     pub fn sent(&self) -> u64 {
         self.port.seq.load(Ordering::Relaxed)
-    }
-}
-
-impl<T: Message> OutputPort<T> {
-    fn needs_encoding(&self) -> bool {
-        self.recording.load(Ordering::Relaxed) || !self.remote.read().is_empty()
     }
 }
 
@@ -512,7 +504,7 @@ impl<T: Message> ErasedOutput for OutputPort<T> {
             stamp_ns,
             msg: T::decode(bytes)?,
         });
-        self.distribute(sample, bytes.len(), &mut |buf| buf.copy_from_slice(bytes))
+        self.distribute(sample, Some(bytes))
     }
 }
 

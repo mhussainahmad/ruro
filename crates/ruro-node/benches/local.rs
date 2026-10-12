@@ -50,6 +50,25 @@ fn local_hop(c: &mut Criterion) {
             criterion::BatchSize::LargeInput,
         )
     });
+    // A producer that fills a fresh frame every time: allocating it versus
+    // borrowing a pooled one.
+    c.bench_function("local_hop/1080p_image_new_frame", |b| {
+        b.iter(|| {
+            let mut frame = Image::new(1920, 1080, Encoding::Rgb8);
+            frame.data[0] = 1;
+            img_out.send(frame).unwrap();
+            img_in.recv().unwrap()
+        })
+    });
+    c.bench_function("local_hop/1080p_image_loaned", |b| {
+        b.iter(|| {
+            let mut frame = img_out.loan();
+            frame.reshape(1920, 1080, Encoding::Rgb8);
+            frame.data[0] = 1;
+            frame.send().unwrap();
+            img_in.recv().unwrap()
+        })
+    });
 }
 
 struct Noop;

@@ -1499,7 +1499,7 @@ fn studio_drives_a_real_daemon() {
     };
     config.security = security.clone();
     // Dropped last, so a failing assertion still stops the hosts.
-    let _daemon = ruro_daemon::Daemon::start(config).expect("daemon starts");
+    let daemon = ruro_daemon::Daemon::start(config).expect("daemon starts");
 
     let shots = std::env::var_os("RURO_SCREENSHOTS").map(PathBuf::from);
     let mut opts = Some(Options {
@@ -1638,5 +1638,8 @@ fn studio_drives_a_real_daemon() {
     wait(&mut h, "the graph to stop", &|st| {
         st.status.as_ref().is_some_and(|s| s.graph.is_none())
     });
+    drop(h);
+    drop(daemon);
+    let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
     let _ = std::fs::remove_dir_all(&dir);
 }

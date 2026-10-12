@@ -64,8 +64,8 @@ fn the_emergency_stop_reaches_every_machine_of_the_graph() {
     let (robot_port, laptop_port) = (free_port(), free_port());
     let tag = std::process::id();
     let (robot, laptop) = (format!("robot{tag}"), format!("laptop{tag}"));
-    let _robot = daemon(&robot, robot_port, Vec::new(), &host);
-    let _laptop = daemon(
+    let robot_daemon = daemon(&robot, robot_port, Vec::new(), &host);
+    let laptop_daemon = daemon(
         &laptop,
         laptop_port,
         vec![format!("tcp/127.0.0.1:{robot_port}")],
@@ -127,6 +127,10 @@ fn the_emergency_stop_reaches_every_machine_of_the_graph() {
     wait_status(&session, &robot, |s| !s.estopped);
 
     request_to(&robot, Ctl::Stop, "");
+    drop((robot_daemon, laptop_daemon));
+    for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -136,7 +140,7 @@ fn a_second_daemon_with_the_same_name_leaves_the_first_running() {
     std::fs::create_dir_all(&dir).unwrap();
     let host = fake_host(&dir);
     let name = format!("twin{}", std::process::id());
-    let _first = daemon(&name, free_port(), Vec::new(), &host);
+    let first = daemon(&name, free_port(), Vec::new(), &host);
 
     let mut config = ruro_daemon::Config::new();
     config.name = name.clone();
@@ -158,5 +162,7 @@ fn a_second_daemon_with_the_same_name_leaves_the_first_running() {
         Duration::from_secs(5),
     );
     assert_eq!(reply.unwrap(), name);
+    drop(first);
+    let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
     let _ = std::fs::remove_dir_all(&dir);
 }

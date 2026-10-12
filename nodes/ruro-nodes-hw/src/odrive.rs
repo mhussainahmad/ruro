@@ -95,6 +95,16 @@ pub fn setpoint(mode: Mode, axis: u8, cmd: &JointCommand, i: usize) -> Option<St
 }
 
 /// Parses the reply to `f <axis>`: position (turns) and velocity (turns/s).
+/// The command that stops an axis in `mode`: hold `turns` (position), zero
+/// velocity, or zero torque.
+pub fn hold_setpoint(mode: Mode, axis: u8, turns: f64) -> String {
+    match mode {
+        Mode::Position => format!("p {axis} {turns:.6} 0.000000 0.000000"),
+        Mode::Velocity => format!("v {axis} 0.000000 0.000000"),
+        Mode::Torque => format!("c {axis} 0.000000"),
+    }
+}
+
 pub fn parse_feedback(line: &str) -> Result<(f64, f64), String> {
     let body = unframe(line)?;
     let mut it = body.split_whitespace().map(str::parse::<f64>);
@@ -167,6 +177,17 @@ impl<T: Transport> Client<T> {
 
 /// ODrive (firmware 0.5/0.6) over the ASCII protocol. Each joint is one axis.
 /// Joint units are radians and radians/second; effort is torque in Nm.
+///
+/// E-stop: the axes stay in closed-loop control and are brought to rest. In
+/// velocity mode the velocity setpoint is set to zero; in position mode the
+/// present positions are read once and held; in torque mode the torque
+/// setpoint is set to zero (the joint goes limp). The safe setpoint is sent
+/// again every step and incoming commands are ignored while stopped. Putting
+/// the axes in `idle` instead would also stop driving them, but lets the
+/// motors coast and loaded joints drop, so it is not done here; wire your own
+/// handling if your machine needs it. After the release the axes keep the
+/// safe setpoint until a command arrives after the release (commands sent
+/// during the stop are discarded).
 #[derive(Node)]
 #[node(kind = "hw/odrive", rate = 100)]
 pub struct ODrive {
@@ -195,6 +216,39 @@ pub struct ODrive {
     checksums: bool,
     client: Option<Client<Box<dyn Transport>>>,
     axis_ids: Vec<u8>,
+    /// Safe setpoints latched when the e-stop engaged, one per axis.
+    hold: Option<Vec<String>>,
+    /// Stopped by the e-stop; commands are discarded until one arrives after the release.
+    held: bool,
+}
+
+impl ODrive {
+    /// Uses an existing transport instead of opening `device` (tests, custom links).
+    pub fn attach(&mut self, transport: Box<dyn Transport>) {
+        self.client = Some(Client::new(transport));
+    }
+
+    /// Sends the safe setpoints, working them out first if nothing is latched yet.
+    fn hold(&mut self) -> Result {
+        let mode: Mode = self.mode.parse().map_err(|e: String| anyhow!(e))?;
+        let c = self.client.as_mut().context("not connected")?;
+        if self.hold.is_none() {
+            let mut lines = Vec::with_capacity(self.axis_ids.len());
+            for &a in &self.axis_ids {
+                let turns = if mode == Mode::Position {
+                    c.feedback(a)?.0
+                } else {
+                    0.0
+                };
+                lines.push(hold_setpoint(mode, a, turns));
+            }
+            self.hold = Some(lines);
+        }
+        for line in self.hold.as_ref().expect("latched above") {
+            c.command(line)?;
+        }
+        Ok(())
+    }
 }
 
 impl Node for ODrive {
@@ -219,7 +273,18 @@ impl Node for ODrive {
         Ok(())
     }
 
-    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
+        if ctx.estopped() || self.held {
+            // Commands queued while stopped are stale.
+            while self.command.recv().is_some() {}
+            if ctx.estopped() {
+                self.held = true;
+                self.hold()?;
+            } else {
+                self.held = false;
+                self.hold = None;
+            }
+        }
         let mode: Mode = self.mode.parse().map_err(|e: String| anyhow!(e))?;
         let c = self.client.as_mut().context("not connected")?;
         if let Some(cmd) = self.command.latest() {
@@ -236,6 +301,17 @@ impl Node for ODrive {
             state.velocity.push(vel * TAU);
         }
         self.state.send(state)
+    }
+
+    fn on_estop(&mut self, _ctx: &mut Ctx) {
+        self.held = true;
+        self.hold = None;
+        if self.client.is_some()
+            && let Err(e) = self.hold()
+        {
+            // The next step tries again.
+            warn!("e-stop: could not stop the axes: {e:#}");
+        }
     }
 
     fn stop(&mut self, _ctx: &mut Ctx) {

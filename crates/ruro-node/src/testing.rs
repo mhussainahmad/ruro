@@ -13,13 +13,14 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, anyhow, bail};
 use parking_lot::Mutex;
 use ruro_msg::{Message, now_ns};
 use serde_json::Value;
 
-use crate::{Builder, BuiltNode, Ctx, RawSink, Result};
+use crate::{Builder, BuiltNode, Ctx, GraphClock, Node, NodeSpec, RawSink, Result};
 
 /// Encoded messages captured from one output.
 #[derive(Default)]
@@ -49,40 +50,75 @@ pub struct Harness {
     captured: HashMap<String, Arc<Captured>>,
     seq: u64,
     started: bool,
+    estop: Arc<AtomicBool>,
+    /// The e-stop was engaged and `on_estop` has not run yet.
+    estop_pending: bool,
 }
 
 impl Harness {
     /// Builds a node of a registered kind with the given parameters (a JSON
     /// object, or `null` for defaults) and an input queue depth of 64.
     pub fn new(kind: &str, params: Value) -> Result<Self> {
-        let params: BTreeMap<String, Value> = match params {
-            Value::Null => BTreeMap::new(),
-            Value::Object(m) => m.into_iter().collect(),
-            other => bail!("parameters must be a JSON object, got {other}"),
-        };
+        let params = param_map(params)?;
         let desc = crate::descriptor(kind).ok_or_else(|| anyhow!("unknown node type `{kind}`"))?;
-        let depths = desc.inputs.iter().map(|p| (p.name.clone(), 64)).collect();
-        let mut b = Builder::new("test", &params, depths);
+        let mut b = Builder::new("test", &params, deep_queues(&desc));
         let node = crate::build(kind, &mut b)
             .ok_or_else(|| anyhow!("unknown node type `{kind}`"))?
             .with_context(|| format!("building `{kind}`"))?;
-        let built = b.finish(node);
+        Ok(Self::from_built(b.finish(node)))
+    }
+
+    /// Builds a node of type `T` and lets `setup` adjust it before it is
+    /// wrapped, e.g. to attach a mock transport in place of a device.
+    pub fn with_node<T: Node + NodeSpec>(
+        params: Value,
+        setup: impl FnOnce(&mut T),
+    ) -> Result<Self> {
+        let params = param_map(params)?;
+        let mut b = Builder::new("test", &params, deep_queues(&T::descriptor()));
+        let mut node = T::build(&mut b)?;
+        setup(&mut node);
+        Ok(Self::from_built(b.finish(Box::new(node))))
+    }
+
+    fn from_built(built: BuiltNode) -> Self {
         let mut captured = HashMap::new();
         for (name, out) in &built.outputs {
             let c = Arc::new(Captured::default());
             out.add_remote(Box::new(Capture(c.clone())));
             captured.insert(name.clone(), c);
         }
-        Ok(Self {
+        let estop = Arc::new(AtomicBool::new(false));
+        Self {
             built,
-            ctx: Ctx::new("test"),
+            ctx: Ctx::with_runtime("test", GraphClock::wall(), estop.clone()),
             captured,
             seq: 0,
             started: false,
-        })
+            estop,
+            estop_pending: false,
+        }
     }
 
-    /// Delivers a message to an input.
+    /// Engages or releases the emergency stop. Like a host, engaging runs the
+    /// node's `on_estop` once (right away if the node has started, otherwise
+    /// after `start`), and `ctx.estopped()` reports the state on every step.
+    pub fn set_estop(&mut self, engaged: bool) {
+        let was = self.estop.swap(engaged, Ordering::Relaxed);
+        if engaged && !was {
+            self.estop_pending = true;
+            self.run_estop();
+        } else if !engaged {
+            self.estop_pending = false;
+        }
+    }
+
+    fn run_estop(&mut self) {
+        if self.started && std::mem::take(&mut self.estop_pending) {
+            self.built.node.on_estop(&mut self.ctx);
+        }
+    }
+
     pub fn push<T: Message>(&mut self, input: &str, msg: T) -> Result {
         let port = self
             .built
@@ -131,6 +167,7 @@ impl Harness {
         if !self.started {
             self.started = true;
             self.built.node.start(&mut self.ctx)?;
+            self.run_estop();
         }
         self.ctx.begin_step(std::time::Instant::now());
         let r = self.built.node.step(&mut self.ctx);
@@ -178,6 +215,19 @@ impl Harness {
     pub fn built(&self) -> &BuiltNode {
         &self.built
     }
+}
+
+fn param_map(params: Value) -> Result<BTreeMap<String, Value>> {
+    match params {
+        Value::Null => Ok(BTreeMap::new()),
+        Value::Object(m) => Ok(m.into_iter().collect()),
+        other => bail!("parameters must be a JSON object, got {other}"),
+    }
+}
+
+/// Queue depths that keep every pushed message until the node takes it.
+fn deep_queues(desc: &crate::NodeDescriptor) -> HashMap<String, usize> {
+    desc.inputs.iter().map(|p| (p.name.clone(), 64)).collect()
 }
 
 impl Drop for Harness {

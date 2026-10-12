@@ -460,6 +460,13 @@ pub fn rad_to_ticks(rad: f64, offset: i32, direction: f64) -> u16 {
 /// LeRobot SO-100/SO-101 arm: six Feetech STS3215 servos on one bus
 /// (shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper).
 /// Joint angles are in radians relative to the calibration offsets.
+///
+/// E-stop: the arm holds where it is. The present positions are read once and
+/// written back as the goal positions, and incoming commands are ignored while
+/// stopped. Torque stays enabled on purpose: without torque the arm would fall
+/// under its own weight. After the release the arm keeps holding until a
+/// command arrives after the release (commands sent during the stop are
+/// discarded).
 #[derive(Node)]
 #[node(kind = "hw/so100-arm", rate = 50)]
 pub struct So100Arm {
@@ -495,9 +502,37 @@ pub struct So100Arm {
     zero: Vec<i32>,
     dir: Vec<f64>,
     last_position: Vec<f64>,
+    /// Raw goal ticks latched when the e-stop engaged.
+    hold: Option<Vec<[u8; 2]>>,
+    /// Stopped by the e-stop; commands are discarded until one arrives after the release.
+    held: bool,
 }
 
 impl So100Arm {
+    /// Uses an existing transport instead of opening `device` (tests, custom links).
+    pub fn attach(&mut self, transport: Box<dyn Transport>) {
+        self.bus = Some(Bus::new(transport));
+    }
+
+    /// Writes the latched hold positions as goals, latching `present` (raw
+    /// position ticks per servo) first if nothing is latched yet.
+    fn hold(&mut self, present: impl FnOnce() -> Option<Vec<[u8; 2]>>) -> Result {
+        if self.hold.is_none() {
+            self.hold = present();
+        }
+        let (Some(goals), Some(bus)) = (&self.hold, self.bus.as_mut()) else {
+            return Ok(());
+        };
+        let items: Vec<(u8, &[u8])> = self
+            .servo_ids
+            .iter()
+            .zip(goals)
+            .map(|(&id, g)| (id, g.as_slice()))
+            .collect();
+        bus.sync_write(sts::GOAL_POSITION, 2, &items)?;
+        Ok(())
+    }
+
     fn configure(&mut self) -> Result {
         self.servo_ids = parse_list(&self.ids).map_err(|e| anyhow!("ids: {e}"))?;
         self.zero = parse_list(&self.offsets).map_err(|e| anyhow!("offsets: {e}"))?;
@@ -546,9 +581,22 @@ impl Node for So100Arm {
         Ok(())
     }
 
-    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
         let bus = self.bus.as_mut().context("bus not open")?;
         let raw = bus.sync_read(sts::PRESENT_POSITION, 6, &self.servo_ids)?;
+        if ctx.estopped() || self.held {
+            // Commands queued while stopped are stale.
+            while self.command.recv().is_some() {}
+            if ctx.estopped() {
+                self.held = true;
+                // Keeps writing the positions latched when the stop engaged
+                // (not the present ones, which would follow any sag).
+                self.hold(|| Some(raw.iter().map(|r| [r[0], r[1]]).collect()))?;
+            } else {
+                self.held = false;
+                self.hold = None;
+            }
+        }
         let mut state = JointState::default();
         for (i, r) in raw.iter().enumerate() {
             let pos = decode_signed(u16::from_le_bytes([r[0], r[1]]), 15);
@@ -566,6 +614,7 @@ impl Node for So100Arm {
 
         if let Some(cmd) = self.command.latest() {
             let n = self.servo_ids.len();
+            let bus = self.bus.as_mut().context("bus not open")?;
             ensure!(
                 cmd.position.len() == n,
                 "command has {} positions for {n} joints",
@@ -594,6 +643,25 @@ impl Node for So100Arm {
             bus.sync_write(sts::GOAL_POSITION, 2, &items)?;
         }
         self.state.send(state)
+    }
+
+    fn on_estop(&mut self, _ctx: &mut Ctx) {
+        self.held = true;
+        self.hold = None;
+        let Some(bus) = self.bus.as_mut() else {
+            return;
+        };
+        let present = match bus.sync_read(sts::PRESENT_POSITION, 2, &self.servo_ids) {
+            Ok(p) => Some(p.iter().map(|r| [r[0], r[1]]).collect()),
+            Err(e) => {
+                // The next step latches the positions it reads instead.
+                warn!("e-stop: could not read present positions: {e}");
+                None
+            }
+        };
+        if let Err(e) = self.hold(|| present) {
+            warn!("e-stop: could not command the hold positions: {e}");
+        }
     }
 
     fn stop(&mut self, _ctx: &mut Ctx) {

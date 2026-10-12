@@ -58,5 +58,8 @@ fn only_the_robot_nodes_differ() {
         assert_eq!(a, b, "{id}");
     }
     assert_eq!(sim.nodes["arm"].kind, "sim/mujoco");
+    // The simulation drives graph time; the real robot runs on the wall clock.
+    assert_eq!(sim.clock, ruro_graph::ClockSource::Sim);
+    assert_eq!(real.clock, ruro_graph::ClockSource::Wall);
     assert_eq!(real.nodes["arm"].kind, "hw/so100-arm");
 }

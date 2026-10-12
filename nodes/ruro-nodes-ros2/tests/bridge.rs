@@ -121,6 +121,59 @@ fn bridges_relay_through_ros2_topics() {
     assert!(cmd.publishers >= 1 && cmd.subscribers >= 1);
 }
 
+/// Waits for the subscriber to output something.
+fn received<T: ruro::msg::Message>(subscriber: &mut Harness) -> Vec<T> {
+    let start = Instant::now();
+    loop {
+        let got = subscriber.take::<T>("out").unwrap();
+        if !got.is_empty() {
+            return got;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "nothing arrived");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn twist_publisher_sends_zero_while_stopped() {
+    ruro_nodes_ros2::link();
+    let (_router, endpoint) = router();
+    let params = json!({ "topic": "/estop_vel", "router": endpoint, "domain_id": 4 });
+    let mut sub = Harness::new("ros2/sub-twist", params.clone()).unwrap();
+    sub.step().unwrap();
+    let mut publ = Harness::new("ros2/pub-twist", params).unwrap();
+    let moving = |x: f64| Twist {
+        linear: Vec3 { x, y: 0.0, z: 0.0 },
+        angular: Vec3::default(),
+    };
+    let zero = Twist::default();
+    // Discovery has finished once a message gets through.
+    relay(&mut publ, &mut sub, moving(0.5));
+    std::thread::sleep(Duration::from_millis(100));
+    sub.take::<Twist>("out").unwrap();
+
+    publ.set_estop(true);
+    assert_eq!(received::<Twist>(&mut sub), [zero], "zero on the stop");
+
+    // Input while stopped: a zero goes out in its place.
+    for _ in 0..3 {
+        publ.push("input", moving(1.0)).unwrap();
+        publ.step().unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let got = sub.take::<Twist>("out").unwrap();
+    assert_eq!(got, [zero; 3]);
+
+    // Input queued during the stop is not forwarded after the release.
+    publ.push("input", moving(2.0)).unwrap();
+    publ.set_estop(false);
+    publ.step().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(sub.take::<Twist>("out").unwrap().is_empty());
+
+    assert_eq!(relay(&mut publ, &mut sub, moving(0.25))[0], moving(0.25));
+}
+
 #[test]
 fn every_bridge_kind_is_registered() {
     ruro_nodes_ros2::link();
@@ -152,5 +205,18 @@ fn every_bridge_kind_is_registered() {
     assert_eq!(
         sub.doc,
         "Subscribes to a ROS 2 `sensor_msgs/LaserScan` topic and outputs each message."
+    );
+    // Command publishers document their e-stop behaviour.
+    let twist = reg.get("ros2/pub-twist").unwrap();
+    assert!(
+        twist.doc.contains("\n\nE-stop: a zero twist"),
+        "{}",
+        twist.doc
+    );
+    assert!(
+        !reg.get("ros2/pub-joint-state")
+            .unwrap()
+            .doc
+            .contains("E-stop")
     );
 }

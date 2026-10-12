@@ -399,7 +399,7 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn deploy(c: &Client, path: &PathBuf) -> Result<String> {
+fn deploy(c: &Client, path: &Path) -> Result<String> {
     c.request(Ctl::Deploy, &flattened_yaml(path)?)
 }
 
@@ -446,12 +446,7 @@ pub fn connect_or_start(
 }
 
 /// `ruro run`: deploy to a reachable daemon, or start one in this process.
-fn run_graph(
-    endpoint: &str,
-    name: Option<&str>,
-    security: &Security,
-    path: &PathBuf,
-) -> Result<()> {
+fn run_graph(endpoint: &str, name: Option<&str>, security: &Security, path: &Path) -> Result<()> {
     let (daemon, c) = connect_or_start(endpoint, name, security)?;
     println!("{}", deploy(&c, path)?);
     if daemon.is_none() {

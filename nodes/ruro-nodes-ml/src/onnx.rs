@@ -237,6 +237,11 @@ impl Node for Onnx {
 /// diffusion policy): joint state and, optionally, a camera image in; joint
 /// command out. Models that output an action chunk (`[1, K, D]`) have their
 /// actions executed one per step before the policy runs again.
+///
+/// E-stop: no actions are sent while stopped (the drivers hold the robot) and
+/// the rest of the current action chunk is dropped. Observations keep being
+/// read, so after the release the policy runs again on the latest joint state
+/// and image instead of resuming a chunk planned before the stop.
 #[derive(Node)]
 #[node(kind = "ml/policy", rate = 30)]
 pub struct Policy {
@@ -286,6 +291,8 @@ pub struct Policy {
     queue: VecDeque<Vec<f64>>,
     last_state: Option<Vec<f64>>,
     last_image: Option<std::sync::Arc<ruro::Sample<Image>>>,
+    /// Stopped by the e-stop.
+    held: bool,
 }
 
 fn affine(values: &mut [f32], mean: &str, std: &str, inverse: bool) -> Result<()> {
@@ -385,12 +392,20 @@ impl Node for Policy {
         Ok(())
     }
 
-    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
         if let Some(s) = self.state.latest() {
             self.last_state = Some(s.position.clone());
         }
         if let Some(i) = self.image.latest() {
             self.last_image = Some(i);
+        }
+        if ctx.estopped() || self.held {
+            // Actions planned before the stop are stale.
+            self.queue.clear();
+            self.held = ctx.estopped();
+            if self.held {
+                return Ok(());
+            }
         }
         if self.queue.is_empty() && !self.infer()? {
             return Ok(());
@@ -403,5 +418,10 @@ impl Node for Policy {
             })?;
         }
         Ok(())
+    }
+
+    fn on_estop(&mut self, _ctx: &mut Ctx) {
+        self.held = true;
+        self.queue.clear();
     }
 }

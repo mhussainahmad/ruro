@@ -200,6 +200,15 @@ impl Daemon {
         // Hosts reach the router over a private Unix socket, so they need
         // neither the network endpoint nor TLS certificates.
         let socket = dir.join("zenoh.sock");
+        // A socket that answers belongs to a daemon of the same name;
+        // removing it would cut that daemon off from its hosts.
+        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+            bail!(
+                "a daemon named `{}` is already running (socket {})",
+                config.name,
+                socket.display()
+            );
+        }
         let _ = std::fs::remove_file(&socket);
         let local = format!("unixsock-stream/{}", socket.display());
         let dictionary = match &config.security.token {

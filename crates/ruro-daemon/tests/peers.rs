@@ -1,4 +1,4 @@
-//! Two daemons sharing a graph, with a stand-in host binary.
+//! Several daemons on one machine, with a stand-in host binary.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -127,5 +127,36 @@ fn the_emergency_stop_reaches_every_machine_of_the_graph() {
     wait_status(&session, &robot, |s| !s.estopped);
 
     request_to(&robot, Ctl::Stop, "");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_second_daemon_with_the_same_name_leaves_the_first_running() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-twin-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let name = format!("twin{}", std::process::id());
+    let _first = daemon(&name, free_port(), Vec::new(), &host);
+
+    let mut config = ruro_daemon::Config::new();
+    config.name = name.clone();
+    config.listen = format!("tcp/127.0.0.1:{}", free_port());
+    config.host = host.clone();
+    let err = ruro_daemon::Daemon::start(config)
+        .err()
+        .expect("a second daemon with the same name is refused");
+    assert!(format!("{err:#}").contains("already running"), "{err:#}");
+
+    // Hosts still reach the first daemon through its socket.
+    let socket = ruro_daemon::runtime_dir(&name).join("zenoh.sock");
+    let session = ruro_proto::connect(&format!("unixsock-stream/{}", socket.display())).unwrap();
+    let reply = ruro_proto::request(
+        &session,
+        &Keys::new(&name),
+        Ctl::Ping,
+        "",
+        Duration::from_secs(5),
+    );
+    assert_eq!(reply.unwrap(), name);
     let _ = std::fs::remove_dir_all(&dir);
 }

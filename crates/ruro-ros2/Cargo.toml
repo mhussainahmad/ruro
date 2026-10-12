@@ -1,0 +1,20 @@
+[package]
+name = "ruro-ros2"
+description = "ROS 2 interoperability for ruro: CDR, message codegen, RIHS01 hashes and rmw_zenoh-compatible pub/sub"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+include = ["src/**", "interfaces/**", "build.rs", "Cargo.toml", "tests/**"]
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+zenoh = { workspace = true }
+clap = { workspace = true }
+xxhash-rust = { workspace = true }

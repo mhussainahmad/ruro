@@ -4368,6 +4368,7 @@ dependencies = [
  "ruro-msg",
  "ruro-pkg",
  "ruro-proto",
+ "ruro-ros2",
  "ruro-schema",
  "serde_json",
  "signal-hook",
@@ -4477,6 +4478,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruro-nodes-ros2"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ruro",
+ "ruro-ros2",
+ "serde_json",
+ "zenoh",
+]
+
+[[package]]
 name = "ruro-nodes-std"
 version = "0.1.0"
 dependencies = [
@@ -4524,6 +4536,20 @@ dependencies = [
  "serde-value",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "ruro-ros2"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "xxhash-rust",
+ "zenoh",
 ]
 
 [[package]]
@@ -6695,6 +6721,12 @@ name = "xml-rs"
 version = "0.8.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7"
 
 [[package]]
 name = "zbus"

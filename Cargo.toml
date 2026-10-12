@@ -25,6 +25,8 @@ ruro-schema = { path = "crates/ruro-schema" }
 ruro-tf = { path = "crates/ruro-tf" }
 ruro-pkg = { path = "crates/ruro-pkg" }
 ruro-py = { path = "crates/ruro-py" }
+ruro-ros2 = { path = "crates/ruro-ros2" }
+ruro-nodes-ros2 = { path = "nodes/ruro-nodes-ros2" }
 
 anyhow = "1"
 thiserror = "2"
@@ -56,6 +58,7 @@ toml = "1"
 tempfile = "3"
 pyo3 = "0.29"
 pyo3-build-config = "0.29"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [profile.release]
 lto = "thin"

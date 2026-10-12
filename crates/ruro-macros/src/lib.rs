@@ -193,7 +193,7 @@ fn expand_node(input: DeriveInput) -> syn::Result<TokenStream2> {
     let ident = &input.ident;
 
     let mut kind: Option<LitStr> = None;
-    let mut doc: Option<LitStr> = None;
+    let mut doc: Option<Expr> = None;
     let mut rate: Option<Expr> = None;
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("node")) {
         attr.parse_nested_meta(|meta| {
@@ -212,9 +212,14 @@ fn expand_node(input: DeriveInput) -> syn::Result<TokenStream2> {
     let kind = kind.ok_or_else(|| {
         syn::Error::new(Span::call_site(), "missing #[node(kind = \"pkg/name\")]")
     })?;
-    let doc = doc
-        .map(|d| d.value())
-        .unwrap_or_else(|| doc_string(&input.attrs));
+    // `doc` may be any string expression, e.g. `concat!(..)` inside a macro.
+    let doc = match doc {
+        Some(e) => quote!(#e),
+        None => {
+            let d = doc_string(&input.attrs);
+            quote!(#d)
+        }
+    };
     let rate = match rate {
         Some(r) => quote!(::core::option::Option::Some((#r) as f64)),
         None => quote!(::core::option::Option::None),

@@ -21,6 +21,9 @@ struct State {
     finished: bool,
     /// Offset from the start of the recording of the last delivered message.
     position_ns: u64,
+    /// Length of the recording, once [`Player::run`] has started. Seeks and
+    /// positions are clamped to it.
+    duration_ns: Option<u64>,
     /// Bumped by every command so a pacing wait can notice it.
     epoch: u64,
 }
@@ -38,6 +41,7 @@ impl PlaybackControl {
                 stop: false,
                 finished: false,
                 position_ns: 0,
+                duration_ns: None,
                 epoch: 0,
             }),
             cv: Condvar::new(),
@@ -59,10 +63,18 @@ impl PlaybackControl {
         self.update(|s| s.paused = false);
     }
 
-    /// Jumps to `position_s` seconds from the start of the recording.
+    /// Jumps to `position_s` seconds from the start of the recording. A
+    /// position past the end is taken as the end.
     pub fn seek(&self, position_s: f64) {
-        let ns = (position_s.max(0.0) * 1e9) as u64;
+        let ns = if position_s.is_finite() {
+            (position_s.max(0.0) * 1e9) as u64
+        } else if position_s > 0.0 {
+            u64::MAX
+        } else {
+            0
+        };
         self.update(|s| {
+            let ns = s.duration_ns.map_or(ns, |d| ns.min(d));
             s.seek_to_ns = Some(ns);
             s.position_ns = ns;
         });
@@ -128,6 +140,14 @@ impl Player {
     /// the playback rate. Returns at the end of the recording or when
     /// [`PlaybackControl::stop`] is called.
     pub fn run(&self, ctl: &PlaybackControl, mut sink: impl FnMut(&RecordedMessage)) -> Result<()> {
+        ctl.update(|s| {
+            let d = self.info.end_ns.saturating_sub(self.info.start_ns);
+            s.duration_ns = Some(d);
+            s.position_ns = s.position_ns.min(d);
+            if let Some(to) = &mut s.seek_to_ns {
+                *to = (*to).min(d);
+            }
+        });
         let result = self.run_inner(ctl, &mut sink);
         ctl.state.lock().finished = true;
         result
@@ -293,5 +313,30 @@ mod tests {
         let mut n = 0;
         player.run(&ctl, |_| n += 1).unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn seeking_past_the_end_stops_at_the_end() {
+        let player = Player::open(&recording("past-end.mcap")).unwrap();
+        let ctl = PlaybackControl::new(1.0);
+        // Before the player knows the length, and while it runs.
+        ctl.seek(99.0);
+        let mut got = Vec::new();
+        player
+            .run(&ctl, |m| {
+                got.push(m.data[0]);
+                if got.len() == 1 {
+                    ctl.seek(f64::INFINITY);
+                }
+            })
+            .unwrap();
+        assert_eq!(got, [49, 49], "only the last message is at the end");
+        assert!(
+            (ctl.position_s() - 0.49).abs() < 1e-9,
+            "{}",
+            ctl.position_s()
+        );
+        ctl.seek(1e6);
+        assert!(ctl.position_s() <= player.info().duration_s());
     }
 }

@@ -6,9 +6,11 @@
 //! they travel as reference-counted values.
 
 mod preview;
+mod sensor_types;
 mod std_types;
 
 pub use preview::{Preview, flatten_json};
+pub use sensor_types::*;
 pub use std_types::*;
 
 /// Error returned when a byte buffer cannot be decoded into a message.

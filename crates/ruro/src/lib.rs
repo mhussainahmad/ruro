@@ -48,8 +48,9 @@ pub use tracing;
 /// Everything a node author usually needs.
 pub mod prelude {
     pub use crate::msg::{
-        Encoding, Image, JointState, Message as _, PointCloud, Pose, Quat, Scalar, Text, Twist,
-        Vec3,
+        Bytes, CameraInfo, Encoding, Flag, Header, Image, Imu, JointCommand, JointState, Joy,
+        LaserScan, Message as _, Odometry, PointCloud, Pose, Quat, Scalar, Text, Transform,
+        Transforms, Twist, Vec3,
     };
     pub use crate::{Ctx, Input, Message, Node, Output, Result, Sample};
     pub use anyhow::{Context as _, anyhow, bail, ensure};

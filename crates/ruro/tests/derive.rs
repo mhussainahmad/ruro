@@ -43,10 +43,16 @@ impl Node for Threshold {
 
 #[test]
 fn custom_message_roundtrips_and_previews() {
-    let d = Detection { x: 1.5, y: -2.0, score: 0.9 };
+    let d = Detection {
+        x: 1.5,
+        y: -2.0,
+        score: 0.9,
+    };
     assert_eq!(Detection::TYPE, "test/Detection");
     assert_eq!(Detection::decode(&d.to_bytes()).unwrap(), d);
-    let Preview::Values(v) = d.preview() else { panic!() };
+    let Preview::Values(v) = d.preview() else {
+        panic!()
+    };
     assert_eq!(v.len(), 3);
 }
 
@@ -71,8 +77,12 @@ fn parameters_are_set_by_name() {
     let mut b = ruro::node::Builder::new("t", &params, Default::default());
     let mut node = Threshold::build(&mut b).unwrap();
     assert_eq!(node.min_score, 0.5);
-    node.set_param("min_score", &serde_json::json!(0.25)).unwrap();
+    node.set_param("min_score", &serde_json::json!(0.25))
+        .unwrap();
     assert_eq!(node.min_score, 0.25);
-    assert!(node.set_param("min_score", &serde_json::json!("high")).is_err());
+    assert!(
+        node.set_param("min_score", &serde_json::json!("high"))
+            .is_err()
+    );
     assert!(node.set_param("nope", &serde_json::json!(1)).is_err());
 }

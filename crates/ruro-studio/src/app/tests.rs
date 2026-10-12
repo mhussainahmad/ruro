@@ -1491,6 +1491,13 @@ fn studio_drives_a_real_daemon() {
     config.name = name.clone();
     config.listen = endpoint.clone();
     config.host = host;
+    // Sessions without the token are refused, so this also covers the
+    // studio's authentication.
+    let security = ruro_proto::Security {
+        token: Some("e2e-token".into()),
+        ..Default::default()
+    };
+    config.security = security.clone();
     // Dropped last, so a failing assertion still stops the hosts.
     let _daemon = ruro_daemon::Daemon::start(config).expect("daemon starts");
 
@@ -1498,6 +1505,7 @@ fn studio_drives_a_real_daemon() {
     let mut opts = Some(Options {
         endpoint,
         daemon: Some(name.clone()),
+        security,
         spawn_daemon: false,
         file: None,
         store: None,

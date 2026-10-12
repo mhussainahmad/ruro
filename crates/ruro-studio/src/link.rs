@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use ruro_graph::Registry;
 use ruro_proto::{
-    Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, PlaybackCommand, SetParam, TapFrame,
+    Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, PlaybackCommand, Security, SetParam, TapFrame,
 };
 use zenoh::Wait;
 
@@ -77,6 +77,7 @@ impl Link {
     pub fn start(
         endpoint: String,
         daemon: Option<String>,
+        security: Security,
         spawn_daemon: bool,
         ctx: egui::Context,
     ) -> Self {
@@ -85,7 +86,7 @@ impl Link {
         let emit = Emitter { tx: events_tx, ctx };
         std::thread::Builder::new()
             .name("ruro-link".into())
-            .spawn(move || run(endpoint, daemon, spawn_daemon, commands, emit))
+            .spawn(move || run(endpoint, daemon, security, spawn_daemon, commands, emit))
             .expect("spawn link thread");
         Self {
             tx,
@@ -147,6 +148,7 @@ enum Exit {
 fn run(
     endpoint: String,
     mut daemon: Option<String>,
+    security: Security,
     spawn_daemon: bool,
     commands: Receiver<Command>,
     emit: Emitter,
@@ -154,11 +156,11 @@ fn run(
     let mut spawned: Option<std::process::Child> = None;
     let mut announced_offline = false;
     loop {
-        let session = match ruro_proto::connect(&endpoint) {
+        let session = match ruro_proto::connect_with(&endpoint, &security) {
             Ok(s) => s,
             Err(e) => {
                 if spawn_daemon && spawned.is_none() && is_local(&endpoint) {
-                    spawned = start_local_daemon(&endpoint);
+                    spawned = start_local_daemon(&endpoint, security.token.as_deref());
                     std::thread::sleep(Duration::from_millis(300));
                     continue;
                 }
@@ -396,7 +398,7 @@ fn is_local(endpoint: &str) -> bool {
 }
 
 /// Starts `ruro daemon` next to this executable, so the studio works out of the box.
-fn start_local_daemon(endpoint: &str) -> Option<std::process::Child> {
+fn start_local_daemon(endpoint: &str, token: Option<&str>) -> Option<std::process::Child> {
     let exe = std::env::current_exe().ok()?.with_file_name("ruro");
     let exe = if exe.exists() {
         exe
@@ -408,6 +410,10 @@ fn start_local_daemon(endpoint: &str) -> Option<std::process::Child> {
     cmd.args(["daemon", "--listen", &listen])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null());
+    if let Some(token) = token {
+        // The daemon then accepts only sessions with the same token.
+        cmd.env("RURO_TOKEN", token);
+    }
     // SAFETY: prctl is async-signal-safe. The daemon (and the graph it runs)
     // stops when the studio that started it exits.
     unsafe {

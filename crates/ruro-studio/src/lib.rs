@@ -46,6 +46,18 @@ struct Cli {
     /// Daemon name (discovered automatically if omitted).
     #[arg(long, env = "RURO_DAEMON")]
     daemon: Option<String>,
+    /// CA certificate that signed the daemon's certificate, for `tls/` endpoints.
+    #[arg(long, env = "RURO_TLS_CA")]
+    tls_ca: Option<PathBuf>,
+    /// Client certificate, for daemons that require one (mutual TLS).
+    #[arg(long, env = "RURO_TLS_CERT")]
+    tls_cert: Option<PathBuf>,
+    /// Key of the client certificate.
+    #[arg(long, env = "RURO_TLS_KEY")]
+    tls_key: Option<PathBuf>,
+    /// Access token of daemons started with `--token`.
+    #[arg(long, env = "RURO_TOKEN", hide_env_values = true)]
+    token: Option<String>,
     /// Do not start a local daemon when none is running.
     #[arg(long)]
     no_spawn: bool,
@@ -72,6 +84,12 @@ pub fn run() -> eframe::Result<()> {
     let opts = app::Options {
         endpoint: cli.connect,
         daemon: cli.daemon,
+        security: ruro_proto::Security {
+            cert: cli.tls_cert,
+            key: cli.tls_key,
+            ca: cli.tls_ca,
+            token: cli.token.filter(|t| !t.is_empty()),
+        },
         spawn_daemon: !cli.no_spawn,
         file: files.next(),
         store: settings::Store::xdg(),

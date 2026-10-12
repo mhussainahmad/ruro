@@ -106,7 +106,9 @@ impl Keys {
 pub enum Ctl {
     /// Payload: graph YAML. Replaces the running graph.
     Deploy,
-    /// Stops the running graph.
+    /// Stops the running graph. Payload: empty, or `from <daemon>` (sent by
+    /// daemons to their peers) to stop the graph only if that daemon
+    /// forwarded it.
     Stop,
     /// Reply: JSON [`ruro_graph::Registry`].
     Registry,
@@ -123,8 +125,8 @@ pub enum Ctl {
     Playback,
     /// Payload: `engage` or `release`. Latches the emergency stop.
     Estop,
-    /// Payload: graph YAML with `machine` set on every group. Sent by the
-    /// daemon a graph was deployed to, asking a peer to run its groups.
+    /// Payload: JSON [`GroupsDeploy`]. Sent by the daemon a graph was
+    /// deployed to, asking a peer to run its groups.
     DeployGroups,
     /// Payload: postcard [`UploadChunk`]. Stores a host binary.
     Upload,
@@ -146,6 +148,15 @@ impl Ctl {
             Ctl::Upload => "upload",
         }
     }
+}
+
+/// Payload of [`Ctl::DeployGroups`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupsDeploy {
+    /// The daemon the graph was deployed to, which forwards it.
+    pub origin: String,
+    /// Graph YAML with `machine` set on every group.
+    pub graph: String,
 }
 
 /// Reply to every control request: `Ok(body)` or `Err(message)`.

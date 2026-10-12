@@ -302,3 +302,79 @@ fn a_daemon_that_fails_to_start_leaves_no_runtime_directory() {
     assert!(!ruro_daemon::runtime_dir(&name).exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_daemon_given_another_graph_stops_the_groups_it_forwarded() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-replace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let ports = [free_port(), free_port(), free_port()];
+    let tag = std::process::id();
+    let names = [
+        format!("rarm{tag}"),
+        format!("rbase{tag}"),
+        format!("rconsole{tag}"),
+    ];
+    let [arm, base, console] = &names;
+    let arm_daemon = daemon(arm, ports[0], Vec::new(), &host);
+    let base_daemon = daemon(
+        base,
+        ports[1],
+        vec![format!("tcp/127.0.0.1:{}", ports[0])],
+        &host,
+    );
+    let console_daemon = daemon(
+        console,
+        ports[2],
+        vec![format!("tcp/127.0.0.1:{}", ports[1])],
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{}", ports[2])).unwrap();
+    let request_to = |daemon: &str, op, payload: &str| {
+        ruro_proto::request(
+            &session,
+            &Keys::new(daemon),
+            op,
+            payload,
+            Duration::from_secs(10),
+        )
+    };
+
+    // The base runs a graph with a group on the arm.
+    let first = format!(
+        "name: first\ngroups:\n  joints: {{ machine: {arm} }}\nnodes:\n  a: {{ type: t/x, group: joints, rate: 1 }}\n  b: {{ type: t/x, rate: 1 }}\n"
+    );
+    request_to(base, Ctl::Deploy, &first).unwrap();
+    wait_status(&session, arm, |s| s.graph.as_deref() == Some("first"));
+
+    // The console deploys a graph that uses the base but not the arm: the
+    // base's previous graph, including its part on the arm, goes away.
+    let second = format!(
+        "name: second\ngroups:\n  drive: {{ machine: {base} }}\nnodes:\n  a: {{ type: t/x, group: drive, rate: 1 }}\n  b: {{ type: t/x, rate: 1 }}\n"
+    );
+    let start = Instant::now();
+    request_to(console, Ctl::Deploy, &second).unwrap();
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        start.elapsed()
+    );
+    wait_status(&session, base, |s| s.graph.as_deref() == Some("second"));
+    wait_status(&session, arm, |s| s.graph.is_none());
+
+    // A stop meant for a graph the arm no longer runs leaves its own alone.
+    let own = "name: own\nnodes:\n  a: { type: t/x, rate: 1 }\n";
+    request_to(arm, Ctl::Deploy, own).unwrap();
+    let reply = request_to(arm, Ctl::Stop, &format!("from {base}")).unwrap();
+    assert!(reply.contains("left running"), "{reply}");
+    wait_status(&session, arm, |s| s.graph.as_deref() == Some("own"));
+
+    request_to(console, Ctl::Stop, "").unwrap();
+    wait_status(&session, base, |s| s.graph.is_none());
+    request_to(arm, Ctl::Stop, "").unwrap();
+    drop((arm_daemon, base_daemon, console_daemon));
+    for name in &names {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

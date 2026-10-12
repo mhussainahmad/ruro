@@ -151,6 +151,9 @@ pub(crate) struct State {
     /// The graph as deployed by the client (before flattening and machine
     /// assignment), returned by `Ctl::Graph`.
     pub deployed: Mutex<Option<String>>,
+    /// The daemon whose graph this one runs part of; `None` when the graph
+    /// was deployed here (or nothing runs).
+    pub origin: Mutex<Option<String>>,
 }
 
 impl State {
@@ -272,6 +275,7 @@ impl Daemon {
             peers: Mutex::new(BTreeSet::new()),
             heartbeats: Mutex::new(HashMap::new()),
             deployed: Mutex::new(None),
+            origin: Mutex::new(None),
         });
 
         let queryable = session
@@ -436,26 +440,46 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
     match op {
         "deploy" => deploy(st, &text()),
         "deploy-groups" => {
-            let graph = Graph::from_yaml(&text())?;
-            // Part of another daemon's graph now: none of its own to forward to.
-            st.peers.lock().clear();
+            let req: ruro_proto::GroupsDeploy =
+                serde_json::from_slice(payload).context("bad forwarded deploy")?;
+            let graph = Graph::from_yaml(&req.graph)?;
+            // Part of another daemon's graph now: the groups this daemon
+            // forwarded for its own previous graph must go, except on
+            // machines the new graph uses (they get their part from the
+            // origin, which waits for this reply and must not be asked).
+            let mut keep: BTreeSet<String> = graph
+                .groups
+                .values()
+                .filter_map(|c| c.machine.clone())
+                .collect();
+            keep.insert(req.origin.clone());
+            stop_peers(st, std::mem::take(&mut *st.peers.lock()), &keep);
             session::stop_playback(st);
             st.sup.lock().stop_all();
             session::finish_recording(st, false)?;
             let n = st.sup.lock().deploy(graph)?;
-            *st.deployed.lock() = Some(text());
+            *st.deployed.lock() = Some(req.graph);
+            *st.origin.lock() = Some(req.origin);
             Ok(format!("deployed {n} group(s) on `{}`", st.name))
         }
         "stop" => {
-            session::stop_playback(st);
-            st.sup.lock().stop_all();
-            let recorded = session::finish_recording(st, false)?;
-            let peers = std::mem::take(&mut *st.peers.lock());
-            for p in peers {
-                if let Err(e) = st.peer_request(&p, Ctl::Stop, "") {
-                    tracing::warn!("{e:#}");
+            let text = text();
+            if let Some(from) = text.trim().strip_prefix("from ") {
+                // A daemon stopping what it forwarded; this daemon may have
+                // been given another graph since.
+                let origin = st.origin.lock().clone();
+                if origin.as_deref() != Some(from) {
+                    return Ok(format!(
+                        "left running: `{}` runs no graph from `{from}`",
+                        st.name
+                    ));
                 }
             }
+            session::stop_playback(st);
+            st.sup.lock().stop_all();
+            *st.origin.lock() = None;
+            let recorded = session::finish_recording(st, false)?;
+            stop_peers(st, std::mem::take(&mut *st.peers.lock()), &BTreeSet::new());
             Ok(match recorded {
                 Some(r) => format!("stopped; {r}"),
                 None => "stopped".into(),
@@ -653,19 +677,18 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
     session::stop_playback(st);
     st.sup.lock().stop_all();
     session::finish_recording(st, false)?;
-    let previous = std::mem::take(&mut *st.peers.lock());
-    for p in previous.difference(&machines) {
-        if let Err(e) = st.peer_request(p, Ctl::Stop, "") {
-            tracing::warn!("{e:#}");
-        }
-    }
-    let normalized = graph.to_yaml()?;
+    stop_peers(st, std::mem::take(&mut *st.peers.lock()), &machines);
+    *st.origin.lock() = None;
+    let forward = serde_json::to_string(&ruro_proto::GroupsDeploy {
+        origin: st.name.clone(),
+        graph: graph.to_yaml()?,
+    })?;
     for m in &machines {
         // A peer's hosts start stopped when the stop is engaged here.
         if st.estop.load(Ordering::Relaxed) {
             st.peer_request(m, Ctl::Estop, FORWARDED_ENGAGE)?;
         }
-        st.peer_request(m, Ctl::DeployGroups, &normalized)?;
+        st.peer_request(m, Ctl::DeployGroups, &forward)?;
         st.peers.lock().insert(m.clone());
     }
     let n = st.sup.lock().deploy(graph)?;
@@ -678,6 +701,18 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
             machines.into_iter().collect::<Vec<_>>().join(", ")
         )
     })
+}
+
+/// Stops the groups this daemon forwarded to `peers`, except on the
+/// machines in `keep`. A peer that has since been given a graph by another
+/// daemon keeps it.
+fn stop_peers(st: &State, peers: BTreeSet<String>, keep: &BTreeSet<String>) {
+    let from = format!("from {}", st.name);
+    for p in peers.difference(keep) {
+        if let Err(e) = st.peer_request(p, Ctl::Stop, &from) {
+            tracing::warn!("{e:#}");
+        }
+    }
 }
 
 /// Nodes placed in a group whose host does not link their type, which

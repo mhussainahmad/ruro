@@ -15,7 +15,11 @@
 //! - **GID**: XXH3-128 of the endpoint's liveliness key, low half first.
 //!
 //! Only volatile durability is implemented: transient-local late joiners
-//! need zenoh's advanced publisher cache, which this module does not use.
+//! (e.g. `/tf_static` subscribers that start after the publisher) need
+//! zenoh's advanced publisher cache, which this module does not use. The
+//! reliability setting is announced in liveliness tokens, so ROS 2 tools
+//! report it, but samples are always sent with zenoh's default reliability
+//! because zenoh only exposes that setting as an unstable API.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};

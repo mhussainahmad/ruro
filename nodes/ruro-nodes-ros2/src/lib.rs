@@ -23,6 +23,13 @@
 //! | `Scalar` | `std_msgs/Float64` | `ros2/sub-float64`, `ros2/pub-float64` |
 //! | `Text` | `std_msgs/String` | `ros2/sub-string`, `ros2/pub-string` |
 //! | `Flag` | `std_msgs/Bool` | `ros2/sub-bool`, `ros2/pub-bool` |
+//!
+//! Limitations: durability is always volatile, so a `ros2/sub-tf` on
+//! `/tf_static` only sees static transforms published after it starts, and a
+//! `ros2/pub-tf` on `/tf_static` is not latched for late ROS subscribers.
+//! Subscriber nodes send from the Zenoh callback; their own step runs at
+//! 1 Hz only to apply parameter changes, so `ruro status` shows that rate
+//! rather than the message rate.
 
 pub mod convert;
 

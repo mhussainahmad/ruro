@@ -38,7 +38,7 @@ fn quiet() {
 /// creating or removing it.
 const OPEN_RETRY: Duration = Duration::from_secs(10);
 
-/// How often a retried open looks for resources left by dead processes.
+/// How often a retried open looks for services left half-created.
 const CLEANUP_EVERY: Duration = Duration::from_millis(250);
 
 /// A service still being created after this long was left half-made by a
@@ -49,9 +49,10 @@ const HUNG_CREATION: Duration = Duration::from_secs(2);
 /// Calls `open` until it succeeds, fails with a non-transient error, or
 /// [`OPEN_RETRY`] passes. Processes of one graph start together, so one often
 /// tries to open a service at the moment another is still creating it. While
-/// retrying, resources of processes that died are removed now and then: a
-/// host that was killed while creating a service leaves it hanging in
-/// creation until then.
+/// retrying, services left half-created are removed now and then: a host
+/// that was killed while creating a service leaves it hanging in creation
+/// until then. (iceoryx2 itself removes the ports of dead processes when
+/// services are opened.)
 fn retry_while_in_flux<T, E>(
     mut open: impl FnMut() -> std::result::Result<T, E>,
     transient: impl Fn(&E) -> bool,
@@ -139,6 +140,10 @@ impl Shm {
             }
             CallbackProgression::Continue
         });
+        Self::remove_hung();
+    }
+
+    fn remove_hung() {
         remove_hung_services(HUNG_CREATION);
     }
 
@@ -190,7 +195,7 @@ impl Shm {
                         )
                 )
             },
-            Self::cleanup_stale,
+            Self::remove_hung,
         )
         .map_err(|e| anyhow!("failed to open topic `{topic}`: {e:?}"))
     }
@@ -222,7 +227,7 @@ impl Shm {
                         )
                 )
             },
-            Self::cleanup_stale,
+            Self::remove_hung,
         )
         .map_err(|e| anyhow!("failed to open event for `{topic}`: {e:?}"))
     }

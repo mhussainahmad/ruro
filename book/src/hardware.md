@@ -65,8 +65,11 @@ RURO_TEST_VCAN=vcan0 cargo test -p ruro-nodes-hw vcan_loopback
 - **Safety.** `hw/so100-arm` holds its current pose when it enables torque and
   rejects commands that move a joint more than `max_step` radians at once. Servo nodes
   disable torque on stop (`manage_torque`), ODrive axes go idle (`manage_state`).
-  The drivers do not implement the [emergency stop](runtime.md#emergency-stop) hook
-  (`on_estop`) yet: `ruro estop` does not stop them. Keep a hardware e-stop.
+  On a [software emergency stop](runtime.md#emergency-stop) (`ruro estop`) the servo
+  nodes hold their present position with torque enabled, ODrive axes come to rest in
+  closed-loop control, and `hw/joint-jog` stops following the sticks; commands are ignored
+  until one is sent after the release. This is tested against simulated devices only, so
+  keep a hardware e-stop as well.
 - **Half-duplex adapters.** The Feetech bus code discards the echo of its own
   packets, which some single-wire adapters return.
 - **RPLidar angles** are converted from the device's clockwise convention to the usual

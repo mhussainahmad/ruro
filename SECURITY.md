@@ -45,5 +45,7 @@ nodes and upload host binaries.
 - A plain `tcp/` listener on a network interface accepts anyone who can reach it. Use one
   only on trusted networks, such as the robot's own network or a VPN, and restrict access
   with a firewall.
-- The studio cannot use TLS or tokens yet; reach protected robots through an SSH tunnel.
+- The studio cannot use TLS or tokens yet, so daemons that require them can only be used
+  from the CLI. For studio use, keep the daemon on `127.0.0.1` without a token and reach it
+  through an SSH tunnel.
 - The ROS 2 bridge nodes connect to their Zenoh router without TLS or authentication.

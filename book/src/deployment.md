@@ -29,7 +29,11 @@ RURO_LOG=info,zenoh=warn
 ```
 
 The key and the file holding the token should be readable only by root and the `ruro`
-user.
+user. With this configuration every client needs the TLS and token options, including
+`ruro status` run on the robot itself (`--connect tls/<robot>:7447 --tls-ca ca.pem
+--token ...`), and the studio cannot connect at all (see [Security](security.md)). Keep the
+default `tcp/127.0.0.1:7447` listener instead if you want to use the studio over an SSH
+tunnel.
 
 The unit:
 
@@ -81,8 +85,8 @@ daemon's name defaults to its hostname; set it with `ruro daemon --name`.
 A daemon listening on `tcp/` accepts anyone who can reach it, without encryption. On any
 network you do not fully trust, use TLS and a token (see [Security](security.md)): the CLI
 then passes `--tls-ca` and `--token` (or `RURO_TLS_CA` and `RURO_TOKEN`). The studio does not
-support TLS or tokens yet; reach a protected robot from the studio through an SSH tunnel to
-the robot's local daemon instead.
+support TLS or tokens yet: for studio use, keep the robot's daemon on
+`tcp/127.0.0.1:7447` without a token and reach it through an SSH tunnel.
 
 To run one graph across several computers of a robot, see
 [Multi-machine graphs](multi-machine.md).
@@ -138,5 +142,4 @@ CI builds the ARM binaries on every push.
 - [ ] Service user in the device groups (`dialout`, `video`, ...).
 - [ ] Graph validated against the robot's daemon: `ruro --connect tcp/robot:7447 check graph.yaml`.
 - [ ] Restart policies set on nodes that must stay up.
-- [ ] A hardware emergency stop within reach: `ruro estop` is a software stop, and the
-      bundled drivers do not implement it yet.
+- [ ] A hardware emergency stop within reach: `ruro estop` is a software stop.

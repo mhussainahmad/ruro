@@ -38,6 +38,9 @@ They are part of the standard `ruro-host`.
 | `router` | `tcp/127.0.0.1:7447` | Zenoh router to connect to. |
 | `frame_id` (pub only) | `base_link` | `frame_id` for message types whose ruro counterpart has no header (PoseStamped, Image, JointState, PointCloud2). |
 
+`ros2/pub-twist` publishes a zero twist when the [emergency stop](runtime.md#emergency-stop)
+engages and in place of every input while it is engaged.
+
 In the ROS graph the nodes appear as `ruro_<node id>`. Subscriber nodes publish from the
 network callback and step once a second only to apply parameter changes, so their rate in
 `ruro status` stays near zero while data flows.

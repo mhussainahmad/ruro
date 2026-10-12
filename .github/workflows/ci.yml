@@ -46,15 +46,13 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Optional node features that the default build leaves out. `onnx`
       # downloads a CPU build of ONNX Runtime; `mujoco` only loads libmujoco at
-      # run time, so it builds without MuJoCo installed. Warnings are reported
-      # but not yet fatal here: the feature-gated tests still have a few
-      # (unused `mut` in tests/onnx.rs and tests/mujoco.rs). Add `-D warnings`
-      # once they are fixed.
+      # run time, so it builds without MuJoCo installed.
       - name: Clippy (optional node features)
         run: >
           cargo clippy --locked --all-targets
           -p ruro-nodes-ml -p ruro-nodes-sim
           --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco
+          -- -D warnings
       - name: Test (workspace, default features)
         run: cargo test --workspace --locked
       # The MuJoCo tests are skipped unless RURO_MUJOCO_LIB is set, so only the

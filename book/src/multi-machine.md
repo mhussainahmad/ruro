@@ -63,6 +63,9 @@ identifier); a graph can be given in the same command. Uploads live in the daemo
 runtime directory and are lost on reboot. Updating the daemon itself remotely is not
 supported.
 
+An uploaded [Python host](python.md) needs the `ruro` Python package installed on the
+target machine.
+
 How a group's `host` is resolved: a value with a directory part that exists on the
 daemon's machine is used as a path (relative to the daemon's working directory); a plain
 name must be an uploaded binary. Names are not looked up on `PATH`.

@@ -60,15 +60,24 @@ export RURO_MUJOCO_LIB=$(ls ~/.venvs/mujoco/lib/python3*/site-packages/mujoco/li
 | `state` (out) | `std/JointState` | position and velocity of every hinge and slide joint |
 | `bodies` (out) | `std/Transforms` | world pose of every body |
 | `sensors` (out) | `sim/SensorReadings` | all sensors, by name (only published if the model has sensors) |
-| `sim_time` (out) | `std/Scalar` | simulation time in seconds |
+| `clock` (out) | `std/Clock` | simulation time, sent after the other outputs |
 
 `real_time_factor` scales simulated time against wall time (0 steps as fast as
 `max_steps` allows). The node does not render camera images yet; the example graphs use
 `std/fake-camera` in simulation.
 
-The node does not publish a `std/Clock`, so it cannot yet drive a graph with
-[`clock: sim`](runtime.md#graph-time-and-simulation): downstream nodes run on wall time,
-and `bodies` is stamped with wall time too.
+With [`clock: sim`](runtime.md#graph-time-and-simulation) in the graph, the `clock`
+output drives graph time: every timer-driven node steps on simulated time, so a slow or
+paused simulation slows the whole graph down with it. No wire is needed; the runtime finds
+the graph's one `std/Clock` output. `examples/arm-sim.yaml` runs this way. Message stamps,
+including those of `bodies`, stay wall time.
+
+**Emergency stop.** The physics keeps running and commands are ignored while stopped. With
+`command_field: velocity` or `effort` the controls are set to zero. With
+`command_field: position`, each actuator holds the present position of its joint (actuator
+*i* driving the *i*-th hinge or slide joint); models with a different number of actuators
+and joints keep their last controls instead. After the release, the controls stay until a
+command arrives (commands sent during the stop are discarded).
 
 **Version support.** MuJoCo has no stable ABI for `mjModel`/`mjData` fields, so the
 node reads them through a layout table keyed by `mj_version()` and refuses versions it

@@ -95,12 +95,16 @@ Python 3.11 or newer is required, with its shared library (on Debian and Ubuntu,
 cargo build --release -p ruro-host-py
 ```
 
-The `ruro` Python package is embedded in the host, so nothing has to be installed for
-nodes to `import ruro`. NumPy is needed for `array()`; install it in the environment the
-host uses (see below).
+The host carries the package's native module, but takes its Python files from an
+installed `ruro` package or, failing that, from `crates/ruro-py/python` in the source tree
+it was built from (the path is recorded at build time). Running the host from its checkout
+therefore needs no installation. When the host runs anywhere else (copied to a robot,
+uploaded with `ruro deploy --host-binary`, or after the checkout moved), install the `ruro`
+package into the environment the host uses, as below. NumPy is needed for `array()`;
+install it in that environment too.
 
-To use the package outside a graph, for example to run node tests with pytest, build and
-install it in a virtual environment with [maturin](https://www.maturin.rs):
+To install the package, for example to run node tests with pytest, build it in a virtual
+environment with [maturin](https://www.maturin.rs):
 
 ```sh
 python3 -m venv .venv && source .venv/bin/activate

@@ -237,6 +237,9 @@ only needed without one.
 | `std/pid` | `setpoint: Scalar`, `measured: Scalar` | `command: Scalar` | `kp`, `ki`, `kd`, `limit` |
 | `std/fake-arm` (200 Hz) | `velocity: Scalar` | `position: Scalar`, `state: JointState` | `lag`, `max_speed` |
 
+`std/fake-arm` stops on an [emergency stop](runtime.md#emergency-stop): its commanded
+velocity drops to zero.
+
 Run `ruro nodes -v` for ranges, defaults and descriptions. The standard host also links the
 [hardware](hardware.md), [simulation](simulation.md), [machine learning](ml.md) and
 [ROS 2](ros2.md) node libraries.

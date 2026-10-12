@@ -23,7 +23,9 @@ First version, 0.1.0. Nothing has been released yet.
   benchmark.
 - **Graph time.** `clock: sim` graphs follow a `std/Clock` output instead of the wall clock.
 - **Emergency stop.** `ruro estop` latches a software stop on the daemon; nodes get an
-  `on_estop` hook and `ctx.estopped()`.
+  `on_estop` hook and `ctx.estopped()`. Every bundled actuator node (`std/fake-arm`,
+  `hw/dynamixel`, `hw/so100-arm`, `hw/odrive`, `hw/joint-jog`, `ml/policy`,
+  `ros2/pub-twist`, `sim/mujoco`) goes to a documented safe state.
 - **Node SDK.** `#[derive(Node)]`, `#[derive(Message)]` and `#[derive(Describe)]` in the
   `ruro` crate: typed ports, parameters with defaults, ranges and documentation, live
   parameter updates, timer- or data-driven execution, link-time registration of node types,
@@ -61,7 +63,8 @@ First version, 0.1.0. Nothing has been released yet.
   ODrive, WitMotion IMUs, RPLidar and Livox lidars. Tested against protocol fixtures and
   simulated devices only.
 - **Simulation.** `ruro-urdf` (URDF and MJCF parsing, forward kinematics), `sim/robot-state`,
-  and `sim/mujoco`, which loads MuJoCo 3.15.0 at run time (cargo feature `mujoco`).
+  and `sim/mujoco`, which loads MuJoCo 3.15.0 at run time (cargo feature `mujoco`) and
+  publishes a `std/Clock` that drives `clock: sim` graphs.
 - **Machine learning.** `ml/onnx` and `ml/policy` on ONNX Runtime (feature `onnx`), YOLO
   decoding (`ml/yolo-decode`), and a LeRobot v2.1 dataset recorder (feature `lerobot`).
   Example graphs that switch between a simulated and a real SO-100 arm.
@@ -98,7 +101,7 @@ First version, 0.1.0. Nothing has been released yet.
 - The studio cannot connect to daemons that require TLS or a token.
 - `ruro estop`, recording and replay act on the daemon they are sent to, not on peer
   daemons running other parts of a graph.
-- The bundled hardware drivers do not implement the emergency-stop hook.
+- Python nodes have no emergency-stop hook.
 - Flattening composite nodes drops `clock: sim`.
 
 [Unreleased]: https://github.com/mhussainahmad/ruro/commits/main

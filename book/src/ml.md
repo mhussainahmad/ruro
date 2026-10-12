@@ -38,7 +38,8 @@ are not enabled.
   `std/JointState` (`state`, + optional `std/Image` on `image`) → `std/JointCommand`
   (`action`), 30 Hz by default. Input and output names are parameters (`state_input`,
   `image_input`, `action_output`; LeRobot naming by default: `observation.state`,
-  `observation.image`; an empty `action_output` takes the first output). Models that output an action chunk `[1, K, D]` have the chunk
+  `observation.image`; an empty `action_output` takes the first output). On an emergency
+  stop it sends no actions and drops the current action chunk. Models that output an action chunk `[1, K, D]` have the chunk
   executed one action per step (or the first `actions_per_inference`) before running
   again. Optional state normalisation and action de-normalisation (`state_mean`,
   `state_std`, `action_mean`, `action_std`) for exports that leave them out.

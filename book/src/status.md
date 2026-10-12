@@ -46,10 +46,10 @@ optional ML features):
 
 ## Known gaps
 
-- The bundled hardware drivers do not implement the emergency-stop hook, and `ruro estop`
-  only reaches the daemon it is sent to.
+- `ruro estop` only reaches the daemon it is sent to, and Python nodes have no e-stop
+  hook.
 - The studio cannot connect to daemons protected with TLS or a token.
-- Flattening composite nodes drops `clock: sim`; the MuJoCo node does not publish a clock.
+- Flattening composite nodes drops `clock: sim`.
 - The daemon does not compare message schema hashes at deployment.
 - `ruro param` does not check parameter ranges.
 - ROS 2: topics only (no services or actions), volatile durability only, Jazzy-style type

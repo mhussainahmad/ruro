@@ -35,9 +35,11 @@ connect with `ruro_proto::connect_with` and a `Security` holding the certificate
 token.
 
 > **The studio does not support TLS or tokens yet.** It connects without either, so it
-> cannot reach a protected daemon. To use the studio with a remote robot, reach the robot's
-> daemon through an SSH tunnel or a VPN instead, for example
-> `ssh -L 7447:127.0.0.1:7447 robot` and `ruro-studio --connect tcp/127.0.0.1:7447`.
+> cannot reach a daemon started with TLS or a token; such daemons can only be used from the
+> CLI for now. To use the studio with a remote robot, run the robot's daemon on its default
+> `tcp/127.0.0.1:7447` without a token and reach it through an SSH tunnel (or a VPN), for
+> example `ssh -L 7447:127.0.0.1:7447 robot` and
+> `ruro-studio --connect tcp/127.0.0.1:7447`.
 
 A plain `tcp/` listener on a network interface accepts anyone who can reach the port. If
 you must use one, do so only on a network you trust (the robot's own network, a VPN), and

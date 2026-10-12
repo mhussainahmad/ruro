@@ -3,7 +3,9 @@
 #
 # ruro-host-py (the host for Python nodes) is left out on purpose: it links
 # the libpython of the build machine, which would tie the package to one
-# Python minor version. Build it from source where Python nodes are needed.
+# Python minor version, and it finds the `ruro` Python package in its source
+# tree unless the package is installed. Build it from source where Python
+# nodes are needed.
 #
 #   scripts/package-deb.sh              # release build + package
 #   scripts/package-deb.sh --no-build   # package existing target/release binaries
@@ -17,7 +19,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 build=1

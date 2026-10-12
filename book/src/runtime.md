@@ -56,9 +56,8 @@ the clock over shared memory (or the network), so every process follows the same
 - The daemon checks at deploy time that a `clock: sim` graph has exactly one `std/Clock`
   output. `ruro check` does not.
 
-None of the bundled nodes publishes `std/Clock` yet (the MuJoCo node publishes its time as
-a `std/Scalar`), so `clock: sim` is for your own simulator nodes for now. Composite nodes
-and `clock: sim` do not mix yet: flattening a graph that contains a composite drops the
+The MuJoCo node (`sim/mujoco`) publishes its simulation time as a `std/Clock`; see
+`examples/arm-sim.yaml`. Composite nodes and `clock: sim` do not mix yet: flattening a graph that contains a composite drops the
 `clock` setting, so such a graph runs on wall time.
 
 ## Emergency stop
@@ -89,12 +88,27 @@ impl Node for Wheels {
 }
 ```
 
+The bundled nodes that command actuators follow this convention. While the stop is
+engaged they ignore incoming commands, and after the release they keep their safe state
+until a command arrives that was sent after the release:
+
+| Node | Safe state |
+|---|---|
+| `std/fake-arm` | commanded velocity zero; the joint slows down with its usual lag |
+| `hw/dynamixel`, `hw/so100-arm` | the servos hold their present position; torque stays enabled so the arm does not fall |
+| `hw/odrive` | axes stay in closed-loop control: zero velocity (velocity mode), hold the present position (position mode) or zero torque (torque mode, the joint goes limp) |
+| `hw/joint-jog` | stick input is ignored and the targets follow the measured joint state, so the arm holds where it is |
+| `ml/policy` | no actions are sent and the current action chunk is dropped; after the release the policy runs on the latest observations |
+| `ros2/pub-twist` | publishes a zero twist when the stop engages and in place of every input while stopped |
+| `sim/mujoco` | zero velocity or effort controls, or hold the present joint positions for position actuators; the physics keeps running |
+
+Each node's documentation (`ruro nodes -v`) describes its behaviour in detail. Python nodes
+have no e-stop hook yet.
+
 Limits to be aware of:
 
-- **It is a software stop.** It is no substitute for a hardware emergency stop.
-- **The bundled hardware drivers do not implement `on_estop` yet**, and none of them checks
-  `ctx.estopped()`: engaging the stop does not stop a `hw/dynamixel`, `hw/so100-arm` or
-  `hw/odrive` node.
+- **It is a software stop.** It is no substitute for a hardware emergency stop, and the
+  hardware drivers have not yet been tested on the physical devices.
 - **It is per daemon.** `ruro estop` reaches the groups of the daemon it is sent to, not
   groups that run on [other machines](multi-machine.md). Send it to each daemon.
 - The studio has no e-stop control.

@@ -13,10 +13,11 @@ Both robot nodes speak the same messages: `std/JointCommand` in (joint position
 targets in radians, LeRobot joint order) and `std/JointState` out. Everything
 downstream (gamepad teleoperation, forward kinematics, LeRobot recording, or a policy
 in place of the gamepad) neither knows nor cares which one is running. The only other
-difference is the dataset directory (`datasets/so100-sim` and `datasets/so100-real`), so
-simulated and real episodes are not mixed in one dataset by accident.
-`nodes/ruro-nodes-ml/tests/examples.rs` checks that only the robot nodes and the dataset
-directory differ between the two files.
+differences are the dataset directory (`datasets/so100-sim` and `datasets/so100-real`), so
+simulated and real episodes are not mixed in one dataset by accident, and the clock: the
+simulated graph runs on MuJoCo's time (`clock: sim`), the real one on the wall clock.
+`nodes/ruro-nodes-ml/tests/examples.rs` checks that nothing else differs between the two
+files.
 
 Both graphs need node features that the standard `ruro-host` leaves out, so build a host
 with them and point the daemon at it:

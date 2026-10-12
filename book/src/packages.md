@@ -147,8 +147,9 @@ bytes, but consumers that use names break), backward-compatible (an enum variant
 unknown (opaque types) or breaking. `--json` prints the report as JSON. Run it in CI
 against the schemas of your last release to catch incompatible message changes.
 
-The daemon does not compare schema hashes when it deploys a graph yet, so hosts built from
-different versions of a message type are not detected at run time.
+Deployments and `ruro check` compare schema hashes across hosts: a wire between groups whose
+hosts were built with different definitions of its message type is reported, naming both
+groups, instead of failing to decode at run time.
 
 For a custom message, `#[derive(Message)]` derives the schema. Nested structs need
 `#[derive(Describe)]` for their layout to appear in it; `#[message(opaque)]` leaves a type

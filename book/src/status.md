@@ -49,7 +49,6 @@ optional ML features):
 - Python nodes have no e-stop hook. A stop engaged directly on a peer machine does not
   travel back to the daemon that deployed the graph.
 - Recording and replay cover only the groups of the daemon you talk to.
-- The daemon does not compare message schema hashes at deployment.
 - `ruro param` does not check parameter ranges.
 - ROS 2: topics only (no services or actions), volatile durability only, Jazzy-style type
   hashes only.

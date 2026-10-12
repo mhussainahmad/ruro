@@ -16,4 +16,4 @@
 - [ ] Documentation updated (README, `book/`, doc comments) if behaviour changed
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` for user-visible changes
 - [ ] Studio screenshots re-rendered if the UI changed
-      (`RURO_SCREENSHOTS=docs/images cargo test -p ruro-studio screenshots`)
+      (`RURO_SCREENSHOTS=book/src/images cargo test -p ruro-studio screenshots`)

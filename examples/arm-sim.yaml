@@ -1,7 +1,7 @@
 # SO-100 arm simulated in MuJoCo, teleoperated with a gamepad, recording a
 # LeRobot dataset. arm-real.yaml is the same graph with the real arm and
 # camera: only the `arm` and `camera` nodes differ, everything downstream is
-# identical. See docs/sim-to-real.md.
+# identical. See book/src/sim-to-real.md.
 #
 # Needs a host built with the MuJoCo and LeRobot features and the MuJoCo
 # library. Model paths are relative to the working directory of the daemon

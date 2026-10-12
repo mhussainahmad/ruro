@@ -1,5 +1,5 @@
 # The real SO-100 arm (Feetech STS3215 servos) and a USB camera, with the
-# same downstream nodes as arm-sim.yaml. See docs/sim-to-real.md.
+# same downstream nodes as arm-sim.yaml. See book/src/sim-to-real.md.
 #
 # Calibrate first: `offsets` are the raw servo readings (0..4095) with the arm
 # pointing straight up and the gripper closed; flip `directions` for joints

@@ -178,6 +178,19 @@ impl State {
         .with_context(|| format!("daemon `{daemon}`"))
     }
 
+    /// The machine that runs `group` of the running graph, if there is
+    /// such a group. Deploys pin every group to a machine.
+    pub fn machine_of_group(&self, group: &str) -> Option<String> {
+        let sup = self.sup.lock();
+        let graph = sup.graph()?;
+        graph.groups().contains_key(group).then(|| {
+            graph
+                .group_config(group)
+                .machine
+                .unwrap_or_else(|| self.name.clone())
+        })
+    }
+
     fn publish_estop(&self) {
         let flag = ruro_msg::Flag(self.estop.load(Ordering::Relaxed));
         let _ = self
@@ -461,9 +474,15 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
         }),
         "ping" => Ok(st.name.clone()),
         "kill" => {
-            let group = text();
-            st.sup.lock().kill(group.trim())?;
-            Ok(format!("killed `{}`", group.trim()))
+            let group = text().trim().to_owned();
+            // Groups of a graph that spans machines run where it pins them.
+            if let Some(machine) = st.machine_of_group(&group)
+                && machine != st.name
+            {
+                return st.peer_request(&machine, Ctl::Kill, &group);
+            }
+            st.sup.lock().kill(&group)?;
+            Ok(format!("killed `{group}`"))
         }
         "record" => {
             let path = text();

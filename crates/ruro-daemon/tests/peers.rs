@@ -234,6 +234,57 @@ fn an_unreachable_peer_does_not_keep_the_emergency_stop_from_the_others() {
 }
 
 #[test]
+fn killing_a_group_reaches_the_machine_that_runs_it() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-kill-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let (robot_port, laptop_port) = (free_port(), free_port());
+    let tag = std::process::id();
+    let (robot, laptop) = (format!("krobot{tag}"), format!("klaptop{tag}"));
+    let robot_daemon = daemon(&robot, robot_port, Vec::new(), &host);
+    let laptop_daemon = daemon(
+        &laptop,
+        laptop_port,
+        vec![format!("tcp/127.0.0.1:{robot_port}")],
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{laptop_port}")).unwrap();
+    let request = |op, payload: &str| {
+        ruro_proto::request(
+            &session,
+            &Keys::new(&laptop),
+            op,
+            payload,
+            Duration::from_secs(10),
+        )
+    };
+    let graph = format!(
+        "name: kill\ngroups:\n  far: {{ machine: {robot} }}\nnodes:\n  a: {{ type: t/x, group: far, rate: 1 }}\n  b: {{ type: t/x, rate: 1 }}\n"
+    );
+    request(Ctl::Deploy, &graph).unwrap();
+    wait_status(&session, &robot, |s| {
+        s.groups.iter().any(|g| g.name == "far" && g.pid.is_some())
+    });
+
+    let reply = request(Ctl::Kill, "far").unwrap();
+    assert!(reply.contains("killed `far`"), "{reply}");
+    wait_status(&session, &robot, |s| {
+        s.groups
+            .iter()
+            .any(|g| g.name == "far" && g.restarts >= 1 && g.pid.is_some())
+    });
+    let err = request(Ctl::Kill, "nowhere").unwrap_err();
+    assert!(format!("{err:#}").contains("no group `nowhere`"), "{err:#}");
+
+    request(Ctl::Stop, "").unwrap();
+    drop((robot_daemon, laptop_daemon));
+    for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_daemon_that_fails_to_start_leaves_no_runtime_directory() {
     let dir = std::env::temp_dir().join(format!("ruro-daemon-busy-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

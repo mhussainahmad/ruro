@@ -14,7 +14,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use ruro_graph::{Graph, PortRef, Registry};
-use ruro_proto::{Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, Security, SetParam, TapFrame};
+use ruro_proto::{Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, Security, TapFrame};
 use zenoh::Wait;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -349,23 +349,13 @@ fn run(cli: Cli) -> Result<()> {
             wait_for_ctrl_c()
         }
         Cmd::Param { node, name, value } => {
-            let c = client()?;
-            let keys = daemon_of(&c, &node)?;
-            // Accept bare words as strings: `ruro param cam mode fast`.
-            let json = serde_json::from_str::<serde_json::Value>(&value)
-                .unwrap_or(serde_json::Value::String(value))
-                .to_string();
-            let msg = SetParam {
-                name: name.clone(),
-                value: json.clone(),
-            };
-            c.session
-                .put(keys.param(&node), ruro_proto::encode(&msg))
-                .wait()
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            // Give the publication a moment to leave before the session closes.
-            std::thread::sleep(Duration::from_millis(100));
-            println!("{node}.{name} = {json}");
+            // The daemon checks the value against the node's type and
+            // replies once the node has applied it.
+            let req = ruro_proto::ParamRequest { node, name, value };
+            println!(
+                "{}",
+                client()?.request(Ctl::Param, &serde_json::to_string(&req)?)?
+            );
             Ok(())
         }
         Cmd::Kill { group } => {

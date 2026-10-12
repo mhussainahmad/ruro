@@ -135,6 +135,10 @@ pub enum Ctl {
     /// refuse to deploy it (empty if none), checked against the hosts each
     /// group would run on, here and on peers.
     Validate,
+    /// Payload: JSON [`ParamRequest`]. Checks the value against the node's
+    /// descriptor, has the node's host apply it and replies once the node
+    /// has accepted it. Forwarded to the machine that runs the node.
+    Param,
 }
 
 impl Ctl {
@@ -152,6 +156,7 @@ impl Ctl {
             Ctl::DeployGroups => "deploy-groups",
             Ctl::Upload => "upload",
             Ctl::Validate => "validate",
+            Ctl::Param => "param",
         }
     }
 }
@@ -293,6 +298,13 @@ pub enum HostCommand {
     /// Nodes whose outputs are being replayed: they stop stepping and their
     /// outputs carry injected messages instead. Empty resumes every node.
     Mute { nodes: Vec<String> },
+    /// Sets a parameter of a node and replies once the node has applied it
+    /// (or refused it). `value` is JSON.
+    SetParam {
+        node: String,
+        name: String,
+        value: String,
+    },
 }
 
 /// One chunk of an uploaded host binary.
@@ -378,6 +390,15 @@ pub enum NodeState {
 pub struct SetParam {
     pub name: String,
     /// JSON-encoded value.
+    pub value: String,
+}
+
+/// A parameter change requested with [`Ctl::Param`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParamRequest {
+    pub node: String,
+    pub name: String,
+    /// The value as typed: JSON (`1.5`, `true`, `"text"`), or a bare string.
     pub value: String,
 }
 

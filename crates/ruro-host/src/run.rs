@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender};
 use ruro_graph::Realtime;
 use ruro_node::{Ctx, DynNode, GraphClock, Waker};
 use ruro_proto::NodeState;
@@ -22,13 +22,21 @@ pub const IDLE_WAIT: Duration = Duration::from_millis(100);
 /// Most missed timer ticks a node catches up on after simulated time jumps.
 const MAX_CATCH_UP: u32 = 100;
 
+/// A parameter change queued for a node, applied between its steps.
+pub struct ParamChange {
+    pub name: String,
+    pub value: Value,
+    /// Told whether the node accepted the value.
+    pub reply: Option<Sender<Result<(), String>>>,
+}
+
 /// One node and everything needed to step it.
 pub struct Runner {
     pub id: String,
     ctx: Ctx,
     node: Box<dyn DynNode>,
     pub waker: Arc<Waker>,
-    params: Receiver<(String, Value)>,
+    params: Receiver<ParamChange>,
     pub stats: Arc<NodeStats>,
     /// Timer period; `None` for input-triggered nodes.
     pub period: Option<Duration>,
@@ -50,7 +58,7 @@ pub struct RunnerParts {
     pub id: String,
     pub node: Box<dyn DynNode>,
     pub waker: Arc<Waker>,
-    pub params: Receiver<(String, Value)>,
+    pub params: Receiver<ParamChange>,
     pub stats: Arc<NodeStats>,
     pub period: Option<Duration>,
     pub deadline: Option<Duration>,
@@ -107,10 +115,15 @@ impl Runner {
 
     /// Applies pending parameter changes and reacts to the e-stop.
     pub fn poll_control(&mut self) {
-        while let Ok((name, value)) = self.params.try_recv() {
-            match self.node.set_param(&name, &value) {
+        while let Ok(change) = self.params.try_recv() {
+            let (name, value) = (&change.name, &change.value);
+            let result = self.node.set_param(name, value);
+            match &result {
                 Ok(()) => tracing::info!("{}.{name} = {value}", self.id),
                 Err(e) => tracing::warn!("cannot set {}.{name}: {e:#}", self.id),
+            }
+            if let Some(reply) = change.reply {
+                let _ = reply.send(result.map_err(|e| format!("{e:#}")));
             }
         }
         let estopped = self.estop.load(Ordering::Relaxed);

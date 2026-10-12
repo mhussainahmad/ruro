@@ -13,6 +13,10 @@ use zenoh::Wait;
 
 use crate::Executor;
 
+/// How long a parameter change may wait for its node to apply it. Shorter
+/// than the daemon's request timeout, so the reply makes it back.
+const PARAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Keeps publishers and subscribers alive for as long as the host runs.
 pub struct Control {
     _taps: Arc<Vec<zenoh::pubsub::Publisher<'static>>>,
@@ -62,11 +66,12 @@ pub fn attach(session: &zenoh::Session, keys: &Keys, exec: &Arc<Executor>) -> Re
             }
         })?;
 
-    // Parameters: one subscriber per node.
+    // Parameters: one subscriber per node, for clients that send changes
+    // without waiting for a reply (`HostCommand::SetParam` replies).
     let mut subscribers = Vec::new();
     for node in exec.node_ids() {
         let node_id = node.to_owned();
-        let sender = exec.param_sender(node).expect("node exists");
+        let e = exec.clone();
         let sub = session
             .declare_subscriber(keys.param(node))
             .callback(move |sample| {
@@ -74,9 +79,11 @@ pub fn attach(session: &zenoh::Session, keys: &Keys, exec: &Arc<Executor>) -> Re
                     Ok(s) => s,
                     Err(e) => return tracing::warn!("{node_id}: bad parameter message: {e:#}"),
                 };
-                match serde_json::from_str(&set.value) {
-                    Ok(value) => sender(set.name, value),
-                    Err(e) => tracing::warn!("{node_id}.{}: invalid value: {e}", set.name),
+                let applied = serde_json::from_str(&set.value)
+                    .map_err(|e| anyhow!("{node_id}.{}: invalid value: {e}", set.name))
+                    .and_then(|value| e.set_param(&node_id, &set.name, value));
+                if let Err(e) = applied {
+                    tracing::warn!("{e:#}");
                 }
             })
             .wait()
@@ -103,20 +110,31 @@ pub fn attach(session: &zenoh::Session, keys: &Keys, exec: &Arc<Executor>) -> Re
     let queryable = session
         .declare_queryable(keys.host_ctl(exec.group()))
         .callback(move |query| {
-            let payload = query
-                .payload()
-                .map(|p| p.to_bytes().into_owned())
-                .unwrap_or_default();
-            let reply: CtlReply = serde_json::from_slice::<HostCommand>(&payload)
-                .map_err(|e| anyhow!("bad host command: {e}"))
-                .and_then(|cmd| command(&e, cmd))
-                .map_err(|e| format!("{e:#}"));
-            if let Err(msg) = &reply {
-                tracing::warn!("{msg}");
+            // Commands can wait (for a node to apply a parameter, for a
+            // recording to finish); Zenoh's own threads, which also carry
+            // the e-stop, must not.
+            let e = e.clone();
+            let spawned = std::thread::Builder::new()
+                .name("ruro-command".into())
+                .spawn(move || {
+                    let payload = query
+                        .payload()
+                        .map(|p| p.to_bytes().into_owned())
+                        .unwrap_or_default();
+                    let reply: CtlReply = serde_json::from_slice::<HostCommand>(&payload)
+                        .map_err(|e| anyhow!("bad host command: {e}"))
+                        .and_then(|cmd| command(&e, cmd))
+                        .map_err(|e| format!("{e:#}"));
+                    if let Err(msg) = &reply {
+                        tracing::warn!("{msg}");
+                    }
+                    let _ = query
+                        .reply(query.key_expr().clone(), ruro_proto::reply_bytes(&reply))
+                        .wait();
+                });
+            if let Err(err) = spawned {
+                tracing::warn!("cannot handle a daemon command: {err}");
             }
-            let _ = query
-                .reply(query.key_expr().clone(), ruro_proto::reply_bytes(&reply))
-                .wait();
         })
         .wait()
         .map_err(err)?;
@@ -141,6 +159,12 @@ fn command(exec: &Executor, cmd: HostCommand) -> Result<String> {
         HostCommand::Mute { nodes } => {
             exec.set_muted(&nodes);
             Ok(format!("{} node(s) replayed", nodes.len()))
+        }
+        HostCommand::SetParam { node, name, value } => {
+            let value: serde_json::Value =
+                serde_json::from_str(&value).map_err(|e| anyhow!("invalid value: {e}"))?;
+            exec.apply_param(&node, &name, value.clone(), PARAM_TIMEOUT)?;
+            Ok(format!("{node}.{name} = {value}"))
         }
     }
 }

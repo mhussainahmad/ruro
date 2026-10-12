@@ -356,9 +356,71 @@ wires: [cam.image -> stats.image, src.value -> gain.input]
     assert_eq!(names(&left), ["control", "vision"]);
     assert_eq!(names(&right), ["cams", "math"]);
 
+    // Parameters of nodes on the peer are set through the deploying daemon.
+    let reply = request(&s, &d1.keys, Ctl::Param, &param("gain", "k", "-2")).unwrap();
+    assert!(reply.contains("gain.k = -2"), "{reply}");
+
     // Stopping on the deploying daemon stops the peer's groups too.
     request(&s, &d1.keys, Ctl::Stop, "").unwrap();
     wait_status(&s, &d2.keys, TIMEOUT, |st| st.graph.is_none());
+}
+
+fn param(node: &str, name: &str, value: &str) -> String {
+    serde_json::to_string(&ruro_proto::ParamRequest {
+        node: node.into(),
+        name: name.into(),
+        value: value.into(),
+    })
+    .unwrap()
+}
+
+#[test]
+fn parameters_are_checked_and_confirmed() {
+    let d = TestDaemon::start("params", |_| {});
+    let s = d.client();
+    let graph = "name: params\nnodes:\n  src: { type: std/sine, rate: 50 }\n  gain: { type: std/gain, group: b }\nwires: [src.value -> gain.input]\n";
+    request(&s, &d.keys, Ctl::Deploy, graph).unwrap();
+    wait_metrics(&s, &d.keys, "b", |m| node_hz(m, "gain") > 20.0);
+
+    let set = |node: &str, name: &str, value: &str| {
+        request(&s, &d.keys, Ctl::Param, &param(node, name, value)).map_err(|e| format!("{e:#}"))
+    };
+    let reply = set("gain", "k", "-2.5").unwrap();
+    assert_eq!(reply, "gain.k = -2.5");
+    let err = set("gain", "kk", "1").unwrap_err();
+    assert!(err.contains("did you mean `k`?"), "{err}");
+    let err = set("gain", "k", "fast").unwrap_err();
+    assert!(err.contains("expects a number"), "{err}");
+    let err = set("gain", "k", "5000").unwrap_err();
+    assert!(err.contains("outside [-1000, 1000]"), "{err}");
+    let err = set("nobody", "k", "1").unwrap_err();
+    assert!(err.contains("no node `nobody`"), "{err}");
+
+    // The host checks values sent without the daemon too: an invalid one is
+    // logged and dropped, a valid one applied.
+    let logs = s.declare_subscriber(d.keys.all_logs()).wait().unwrap();
+    let put = |value: &str| {
+        let msg = ruro_proto::SetParam {
+            name: "k".into(),
+            value: value.into(),
+        };
+        s.put(d.keys.param("gain"), ruro_proto::encode(&msg))
+            .wait()
+            .unwrap();
+    };
+    put("\"high\"");
+    put("3");
+    let (mut refused, mut applied) = (false, false);
+    let start = Instant::now();
+    while start.elapsed() < TIMEOUT && !(refused && applied) {
+        if let Ok(Some(sample)) = logs.recv_timeout(Duration::from_millis(200)) {
+            let line: LogLine = ruro_proto::decode(&sample.payload().to_bytes()).unwrap();
+            refused |= line.message.contains("expects a number");
+            applied |= line.message.contains("gain.k = 3");
+        }
+    }
+    assert!(refused && applied, "refused {refused}, applied {applied}");
+    request(&s, &d.keys, Ctl::Stop, "").unwrap();
 }
 
 /// A CA and a certificate for `localhost` signed by it, as PEM files.

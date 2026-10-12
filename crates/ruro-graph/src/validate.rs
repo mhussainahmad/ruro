@@ -144,27 +144,12 @@ pub fn validate_in(graph: &Graph, registry: &Registry, base: &Path) -> Vec<Issue
             push(Some(id), "source node needs a `rate`".into());
         }
         for (name, value) in &inst.params {
-            let Some(p) = desc.param(name) else {
-                push(Some(id), format!("unknown parameter `{name}`"));
-                continue;
-            };
-            if !p.kind.accepts(value) {
-                push(
-                    Some(id),
-                    format!("parameter `{name}` expects {:?}, got {value}", p.kind),
-                );
-                continue;
-            }
-            if let Some(v) = value.as_f64()
-                && (p.min.is_some_and(|min| v < min) || p.max.is_some_and(|max| v > max))
-            {
-                push(
-                    Some(id),
-                    format!(
-                        "parameter `{name}` = {v} is outside [{:?}, {:?}]",
-                        p.min, p.max
-                    ),
-                );
+            let checked = desc
+                .param(name)
+                .ok_or_else(|| format!("unknown parameter `{name}`"))
+                .and_then(|p| p.check(value));
+            if let Err(message) = checked {
+                push(Some(id), message);
             }
         }
     }

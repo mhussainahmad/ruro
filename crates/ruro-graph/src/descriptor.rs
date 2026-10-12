@@ -38,6 +38,44 @@ impl NodeDescriptor {
         self.params.iter().find(|p| p.name == name)
     }
 
+    /// The parameter `name`, or an error that suggests the closest names
+    /// (or lists every parameter when none is close).
+    pub fn param_or_suggest(&self, name: &str) -> Result<&ParamDesc, String> {
+        if let Some(p) = self.param(name) {
+            return Ok(p);
+        }
+        if self.params.is_empty() {
+            return Err(format!("`{}` has no parameters", self.kind));
+        }
+        let quoted = |names: Vec<&str>| {
+            names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let mut close: Vec<(usize, &str)> = self
+            .params
+            .iter()
+            .map(|p| (edit_distance(name, &p.name), p.name.as_str()))
+            .filter(|(d, n)| *d <= (n.len().max(name.len()) / 3).max(2))
+            .collect();
+        close.sort();
+        Err(if close.is_empty() {
+            format!(
+                "unknown parameter `{name}` of `{}`; it has {}",
+                self.kind,
+                quoted(self.params.iter().map(|p| p.name.as_str()).collect())
+            )
+        } else {
+            format!(
+                "unknown parameter `{name}` of `{}`; did you mean {}?",
+                self.kind,
+                quoted(close.into_iter().map(|(_, n)| n).collect())
+            )
+        })
+    }
+
     /// The category shown in tooling: the part of the kind before the last `/`.
     pub fn category(&self) -> &str {
         self.kind.rsplit_once('/').map_or("", |(c, _)| c)
@@ -82,6 +120,24 @@ impl ParamKind {
 }
 
 /// A tunable parameter.
+/// Levenshtein distance between two names.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diag = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let next = (diag + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(row[j + 1] + 1);
+            diag = row[j + 1];
+            row[j + 1] = next;
+        }
+    }
+    row[b.len()]
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParamDesc {
     pub name: String,
@@ -96,6 +152,51 @@ pub struct ParamDesc {
 }
 
 /// All node types known to a host, keyed by kind.
+impl ParamDesc {
+    /// Checks a value's type and range.
+    pub fn check(&self, value: &serde_json::Value) -> Result<(), String> {
+        let name = &self.name;
+        if !self.kind.accepts(value) {
+            let expected = match self.kind {
+                ParamKind::Int => "an integer",
+                ParamKind::Float => "a number",
+                ParamKind::Bool => "true or false",
+                ParamKind::String => "a string",
+            };
+            return Err(format!(
+                "parameter `{name}` expects {expected}, got {value}"
+            ));
+        }
+        if let Some(v) = value.as_f64()
+            && (self.min.is_some_and(|min| v < min) || self.max.is_some_and(|max| v > max))
+        {
+            let bound = |b: Option<f64>| b.map_or("..".to_owned(), |b| b.to_string());
+            return Err(format!(
+                "parameter `{name}` = {v} is outside [{}, {}]",
+                bound(self.min),
+                bound(self.max)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Reads a value as typed on a command line: JSON (`1.5`, `true`,
+    /// `"text"`), or else the text itself as a string. A string parameter
+    /// takes the text as is, so `5` or `true` can be strings too. The
+    /// result is checked with [`ParamDesc::check`].
+    pub fn parse(&self, text: &str) -> Result<serde_json::Value, String> {
+        use serde_json::Value;
+        let value = match serde_json::from_str::<Value>(text) {
+            Ok(Value::String(s)) => Value::String(s),
+            Ok(_) | Err(_) if self.kind == ParamKind::String => Value::String(text.to_owned()),
+            Ok(v) => v,
+            Err(_) => Value::String(text.to_owned()),
+        };
+        self.check(&value)?;
+        Ok(value)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Registry {
     pub nodes: BTreeMap<String, NodeDescriptor>,
@@ -144,5 +245,82 @@ impl Registry {
 
     pub fn iter(&self) -> impl Iterator<Item = &NodeDescriptor> {
         self.nodes.values()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn pid() -> NodeDescriptor {
+        let p = |name: &str, kind, min, max| ParamDesc {
+            name: name.into(),
+            kind,
+            default: json!(0),
+            min,
+            max,
+            doc: String::new(),
+        };
+        NodeDescriptor {
+            kind: "std/pid".into(),
+            params: vec![
+                p("kp", ParamKind::Float, Some(-10.0), Some(10.0)),
+                p("ki", ParamKind::Float, None, None),
+                p("window", ParamKind::Int, Some(1.0), None),
+                p("label", ParamKind::String, None, None),
+                p("enabled", ParamKind::Bool, None, None),
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn unknown_parameters_get_suggestions() {
+        let d = pid();
+        let err = d.param_or_suggest("kq").unwrap_err();
+        assert!(err.contains("did you mean `ki`, `kp`?"), "{err}");
+        let err = d.param_or_suggest("windwo").unwrap_err();
+        assert!(err.contains("`window`") && !err.contains("`kp`"), "{err}");
+        let err = d.param_or_suggest("frequency").unwrap_err();
+        assert!(err.contains("it has `kp`, `ki`, `window`"), "{err}");
+        assert_eq!(d.param_or_suggest("kp").unwrap().name, "kp");
+        assert_eq!(edit_distance("kitten", "sitting"), 3);
+    }
+
+    #[test]
+    fn typed_values_are_checked() {
+        let d = pid();
+        let param = |n: &str| d.param(n).unwrap();
+        assert_eq!(param("kp").parse("-1.5").unwrap(), json!(-1.5));
+        assert!(
+            param("kp")
+                .parse("-11")
+                .unwrap_err()
+                .contains("outside [-10, 10]")
+        );
+        assert!(
+            param("kp")
+                .parse("fast")
+                .unwrap_err()
+                .contains("expects a number")
+        );
+        assert!(
+            param("window")
+                .parse("2.5")
+                .unwrap_err()
+                .contains("integer")
+        );
+        assert!(
+            param("window")
+                .parse("0")
+                .unwrap_err()
+                .contains("outside [1, ..]")
+        );
+        assert_eq!(param("window").parse("3").unwrap(), json!(3));
+        assert_eq!(param("label").parse("5").unwrap(), json!("5"));
+        assert_eq!(param("label").parse("\"a b\"").unwrap(), json!("a b"));
+        assert_eq!(param("enabled").parse("true").unwrap(), json!(true));
+        assert!(param("enabled").parse("yes").is_err());
     }
 }

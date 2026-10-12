@@ -476,6 +476,11 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             }
             Ok(serde_json::to_string(&*st.registry.lock())?)
         }
+        "param" => {
+            let req: ruro_proto::ParamRequest =
+                serde_json::from_slice(payload).context("bad parameter request")?;
+            set_param(st, &req)
+        }
         "validate" => {
             let graph = pinned(st, &text())?;
             Ok(serde_json::to_string(&check(st, &graph)?)?)
@@ -554,6 +559,43 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
             machines.into_iter().collect::<Vec<_>>().join(", ")
         )
     })
+}
+
+/// Checks a parameter change against the descriptor of the node's type, as
+/// linked into the host of the node's group, and has that host apply it.
+/// Nodes on other machines are left to their daemon.
+fn set_param(st: &State, req: &ruro_proto::ParamRequest) -> Result<String> {
+    let (kind, group, config) = {
+        let sup = st.sup.lock();
+        let graph = sup.graph().context("no graph is running")?;
+        let node = graph
+            .nodes
+            .get(&req.node)
+            .with_context(|| format!("no node `{}` in graph `{}`", req.node, graph.name))?;
+        let group = node.group().to_owned();
+        (node.kind.clone(), group.clone(), graph.group_config(&group))
+    };
+    if let Some(machine) = config.machine.filter(|m| *m != st.name) {
+        return st.peer_request(&machine, Ctl::Param, &serde_json::to_string(req)?);
+    }
+    let registry = match &config.host {
+        None => st.registry.lock().clone(),
+        Some(h) => load_registry(&st.sup.lock().resolve_host(Some(h))?)?,
+    };
+    let desc = registry
+        .get(&kind)
+        .with_context(|| format!("the host of group `{group}` has no node type `{kind}`"))?;
+    let node = &req.node;
+    let value = desc
+        .param_or_suggest(&req.name)
+        .and_then(|p| p.parse(&req.value))
+        .map_err(|e| anyhow!("{node}: {e}"))?;
+    let cmd = ruro_proto::HostCommand::SetParam {
+        node: node.clone(),
+        name: req.name.clone(),
+        value: value.to_string(),
+    };
+    st.host_request(&group, &cmd)
 }
 
 /// Parses and flattens a graph and pins every group to a machine (this

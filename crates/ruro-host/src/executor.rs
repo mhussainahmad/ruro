@@ -23,7 +23,9 @@ use zenoh::Wait;
 
 use crate::record::Recorder;
 use crate::rt;
-use crate::run::{Cycle, Runner, RunnerParts, run_deterministic, run_threaded, step_order};
+use crate::run::{
+    Cycle, ParamChange, Runner, RunnerParts, run_deterministic, run_threaded, step_order,
+};
 use crate::stats::{MetricsWindow, NodeStats};
 
 /// How cross-process wires are carried.
@@ -63,8 +65,9 @@ impl Options {
 
 struct NodeHandle {
     id: String,
+    kind: String,
     waker: Arc<Waker>,
-    params: Sender<(String, Value)>,
+    params: Sender<ParamChange>,
     stats: Arc<NodeStats>,
     inputs: Vec<Arc<dyn ErasedInput>>,
     window: Mutex<MetricsWindow>,
@@ -497,6 +500,7 @@ impl Executor {
                 clock: node_clock,
             }));
             nodes.push(NodeHandle {
+                kind: inst.kind.clone(),
                 id,
                 waker,
                 params: params_tx,
@@ -616,27 +620,61 @@ impl Executor {
         &self.clock
     }
 
-    /// Queues a parameter change; it is applied between steps.
+    /// Checks a parameter change against the node's descriptor and queues
+    /// it; it is applied between steps.
     pub fn set_param(&self, node: &str, name: &str, value: Value) -> Result<()> {
-        let send = self
-            .param_sender(node)
-            .ok_or_else(|| anyhow!("no node `{node}` in this group"))?;
-        send(name.to_owned(), value);
-        Ok(())
+        self.queue_param(node, name, value, None)
     }
 
-    /// A handle that queues parameter changes for `node` from any thread.
-    pub fn param_sender(
+    /// Like [`Executor::set_param`], and waits up to `timeout` for the node
+    /// to apply the value, returning its verdict.
+    pub fn apply_param(
         &self,
         node: &str,
-    ) -> Option<impl Fn(String, Value) + Send + Sync + 'static> {
-        let n = self.nodes.iter().find(|n| n.id == node)?;
-        let (tx, waker) = (n.params.clone(), n.waker.clone());
-        Some(move |name, value| {
-            if tx.send((name, value)).is_ok() {
-                waker.notify_control();
-            }
-        })
+        name: &str,
+        value: Value,
+        timeout: Duration,
+    ) -> Result<()> {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        self.queue_param(node, name, value, Some(tx))?;
+        match rx.recv_timeout(timeout) {
+            Ok(result) => result.map_err(|e| anyhow!("{node}: {e}")),
+            Err(_) => bail!(
+                "{node} did not apply `{name}` within {:.1} s; it will when it next steps",
+                timeout.as_secs_f64()
+            ),
+        }
+    }
+
+    fn queue_param(
+        &self,
+        node: &str,
+        name: &str,
+        value: Value,
+        reply: Option<Sender<std::result::Result<(), String>>>,
+    ) -> Result<()> {
+        let n = self
+            .nodes
+            .iter()
+            .find(|n| n.id == node)
+            .ok_or_else(|| anyhow!("no node `{node}` in this group"))?;
+        if let Some(desc) = ruro_node::descriptor(&n.kind) {
+            desc.param_or_suggest(name)
+                .and_then(|p| p.check(&value))
+                .map_err(|e| anyhow!("{node}: {e}"))?;
+        }
+        if n.stats.state() == ruro_proto::NodeState::Failed {
+            bail!("{node} has failed and no longer takes parameters");
+        }
+        let change = ParamChange {
+            name: name.to_owned(),
+            value,
+            reply,
+        };
+        if n.params.send(change).is_ok() {
+            n.waker.notify_control();
+        }
+        Ok(())
     }
 
     /// Engages or releases the emergency stop for every node of the group.

@@ -1049,11 +1049,24 @@ fn estop_button_shortcut_banner_and_release() {
     let sent = h.state().link.take_sent();
     assert!(matches!(&sent[..], [Command::Estop(true)]), "{sent:?}");
 
-    // F12 works even while typing in a text field.
+    // F12, also while typing in a text field (the palette's query).
     h.key_press(egui::Key::F12);
     h.run_steps(2);
     let sent = h.state().link.take_sent();
     assert!(matches!(&sent[..], [Command::Estop(true)]), "{sent:?}");
+    key(&mut h, CTRL, egui::Key::K);
+    h.event(egui::Event::Text("blur".into()));
+    h.run_steps(2);
+    assert!(
+        h.ctx.egui_wants_keyboard_input(),
+        "the query field has focus"
+    );
+    h.key_press(egui::Key::F12);
+    h.run_steps(2);
+    let sent = h.state().link.take_sent();
+    assert!(matches!(&sent[..], [Command::Estop(true)]), "{sent:?}");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
 
     // Nothing to release yet.
     assert!(h.query_by_label("Release e-stop").is_none());

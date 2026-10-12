@@ -1,7 +1,7 @@
 //! Executor features: control wakeups, simulated time, deterministic groups,
 //! timing metrics, e-stop, and record/replay.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,14 @@ fn tmp(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ruro-host-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join(name)
+}
+
+/// Removes files and directories made with `tmp`. (The directory holding
+/// them stays: tests running in parallel share it.)
+fn cleanup(paths: &[&Path]) {
+    for p in paths {
+        let _ = std::fs::remove_file(p).or_else(|_| std::fs::remove_dir_all(p));
+    }
 }
 
 /// Counts its steps; input-triggered.
@@ -368,6 +376,10 @@ wires:
     let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     exec.start_recording(&first).unwrap();
     std::thread::sleep(Duration::from_millis(400));
+    // Quiesce before stopping: no new source values, and time for the gain
+    // to consume the ones queued, so every recorded input has its output.
+    exec.set_muted(&["src".into()]);
+    std::thread::sleep(Duration::from_millis(200));
     let (written, dropped) = exec.stop_recording().unwrap().unwrap();
     exec.stop();
     assert_eq!(dropped, 0);
@@ -408,10 +420,8 @@ wires:
     let gain_first = recorded(&first, "gain.output");
     let src_second = recorded(&second, "src.value");
     let gain_second = recorded(&second, "gain.output");
-    // The live run may have recorded a few last src values whose gain output
-    // was still in flight when recording stopped.
     let n = gain_first.len();
-    assert!(src_first.len() >= n && src_first.len() <= n + 3);
+    assert_eq!(src_first.len(), n);
     assert_eq!(
         gain_second.len(),
         src_second.len(),
@@ -427,4 +437,5 @@ wires:
         "downstream re-ran identically"
     );
     assert!(gain_first.iter().any(|v| *v != gain_first[0]));
+    cleanup(&[&first, &second]);
 }

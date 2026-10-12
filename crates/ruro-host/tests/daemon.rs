@@ -37,6 +37,14 @@ fn tmp(name: &str) -> PathBuf {
     dir.join(name)
 }
 
+/// Removes files and directories made with `tmp`. (The directory holding
+/// them stays: tests running in parallel share it.)
+fn cleanup(paths: &[&Path]) {
+    for p in paths {
+        let _ = std::fs::remove_file(p).or_else(|_| std::fs::remove_dir_all(p));
+    }
+}
+
 struct TestDaemon {
     daemon: Option<Daemon>,
     endpoint: String,
@@ -78,6 +86,8 @@ impl Drop for TestDaemon {
         if let Some(d) = self.daemon.take() {
             d.shutdown();
         }
+        // The runtime directory holds sockets, graphs and uploaded binaries.
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(self.name()));
     }
 }
 
@@ -253,6 +263,7 @@ wires:
     // After the replay the source runs again.
     wait_metrics(&s, &d.keys, "a", |m| node_hz(m, "src") > 50.0);
     request(&s, &d.keys, Ctl::Stop, "").unwrap();
+    cleanup(&[&first, &replay, &second]);
 }
 
 #[test]
@@ -441,6 +452,7 @@ fn tls_and_token_protect_the_daemon() {
         "that does not trust the daemon's certificate",
     );
     request(&s, &d.keys, Ctl::Stop, "").unwrap();
+    cleanup(&[&tmp("tls")]);
 }
 
 #[test]
@@ -475,6 +487,7 @@ fn mutual_tls_requires_client_certificates() {
         .and_then(|s| request(&s, &d.keys, Ctl::Ping, ""))
         .is_ok();
     assert!(!ok, "a client without a certificate was let in");
+    cleanup(&[&tmp("mtls")]);
 }
 
 #[test]

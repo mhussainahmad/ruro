@@ -70,6 +70,7 @@ struct NodeHandle {
     params: Sender<ParamChange>,
     stats: Arc<NodeStats>,
     inputs: Vec<Arc<dyn ErasedInput>>,
+    outputs: Vec<Arc<dyn ErasedOutput>>,
     window: Mutex<MetricsWindow>,
     muted: Arc<AtomicBool>,
 }
@@ -485,6 +486,7 @@ impl Executor {
                 node,
                 waker,
                 inputs,
+                outputs: node_outputs,
                 ..
             } = b;
             runners.push(Runner::new(RunnerParts {
@@ -506,6 +508,7 @@ impl Executor {
                 params: params_tx,
                 stats,
                 inputs: inputs.into_iter().map(|(_, p)| p).collect(),
+                outputs: node_outputs.into_iter().map(|(_, p)| p).collect(),
                 window: Mutex::new(MetricsWindow::new()),
                 muted,
             });
@@ -738,9 +741,10 @@ impl Executor {
                     count += s.age_count.load(Ordering::Relaxed);
                     dropped += s.dropped.load(Ordering::Relaxed);
                 }
+                let delivered: Vec<u64> = n.outputs.iter().map(|o| o.delivered()).collect();
                 n.window
                     .lock()
-                    .sample(&n.id, &n.stats, (sum, count), dropped)
+                    .sample(&n.id, &n.stats, (sum, count), dropped, &delivered)
             })
             .collect();
         GroupMetrics {

@@ -232,6 +232,8 @@ const LOAN_POOL: usize = 6;
 /// Shared state behind an [`Output`].
 pub(crate) struct OutputPort<T> {
     seq: AtomicU64,
+    /// Messages handed to destinations: sent by the node or injected.
+    delivered: AtomicU64,
     local: RwLock<Vec<Arc<InputPort<T>>>>,
     remote: RwLock<Vec<Box<dyn RawSink>>>,
     tap: Tap,
@@ -244,6 +246,7 @@ impl<T: Message> OutputPort<T> {
     pub(crate) fn new() -> Self {
         Self {
             seq: AtomicU64::new(0),
+            delivered: AtomicU64::new(0),
             local: RwLock::new(Vec::new()),
             remote: RwLock::new(Vec::new()),
             tap: Tap::default(),
@@ -257,6 +260,7 @@ impl<T: Message> OutputPort<T> {
     /// recorder get `raw` if given (an encoding received from elsewhere),
     /// otherwise the message is encoded for them, and only if there are any.
     fn distribute(&self, sample: Arc<Sample<T>>, raw: Option<&[u8]>) -> Result {
+        self.delivered.fetch_add(1, Ordering::Relaxed);
         let (seq, stamp_ns) = (sample.seq, sample.stamp_ns);
         let mut result = Ok(());
         let remote = self.remote.read();
@@ -460,6 +464,10 @@ impl<T: Message> ErasedInput for InputPort<T> {
 pub trait ErasedOutput: Send + Sync {
     fn ty(&self) -> &'static str;
     fn sent(&self) -> u64;
+    /// Messages published so far, sent by the node or injected (replayed).
+    fn delivered(&self) -> u64 {
+        self.sent()
+    }
     fn tap(&self) -> &Tap;
     /// Connects to an input in the same process. Fails if the types differ.
     fn connect_local(&self, input: Arc<dyn ErasedInput>) -> Result;
@@ -483,6 +491,10 @@ impl<T: Message> ErasedOutput for OutputPort<T> {
 
     fn sent(&self) -> u64 {
         self.seq.load(Ordering::Relaxed)
+    }
+
+    fn delivered(&self) -> u64 {
+        self.delivered.load(Ordering::Relaxed)
     }
 
     fn tap(&self) -> &Tap {
@@ -701,5 +713,10 @@ mod tests {
         assert_eq!((got.seq, got.stamp_ns, got.0), (17, 5, 4.0));
         assert_eq!(remote.0.lock()[0], (17, bytes.clone()));
         assert!(out.port.inject_encoded(18, 5, &[1, 2, 3]).is_err());
+        assert_eq!(out.sent(), 0, "injected messages are not the node's");
+        assert_eq!(ErasedOutput::delivered(&*out.port), 1);
+        out.send(Scalar(1.0)).unwrap();
+        out.clone().loan().send().unwrap();
+        assert_eq!(ErasedOutput::delivered(&*out.port), 3);
     }
 }

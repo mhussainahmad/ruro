@@ -154,6 +154,8 @@ impl NodeStats {
 pub struct MetricsWindow {
     at: Instant,
     steps: u64,
+    /// Messages published per output, as of the last sample.
+    delivered: Vec<u64>,
     cpu_ticks: u64,
     age_sum: u64,
     age_count: u64,
@@ -164,23 +166,36 @@ impl MetricsWindow {
         Self {
             at: Instant::now(),
             steps: 0,
+            delivered: Vec::new(),
             cpu_ticks: 0,
             age_sum: 0,
             age_count: 0,
         }
     }
 
-    /// Produces metrics for the window since the last call.
+    /// Produces metrics for the window since the last call. `delivered` is
+    /// the number of messages published so far on each of the node's
+    /// outputs (sent or replayed).
     pub fn sample(
         &mut self,
         id: &str,
         stats: &NodeStats,
         (age_sum, age_count): (u64, u64),
         dropped: u64,
+        delivered: &[u64],
     ) -> NodeMetrics {
         let now = Instant::now();
         let dt = (now - self.at).as_secs_f64().max(1e-3);
         let steps = stats.steps();
+        // Nodes that publish from callbacks (bridges) or whose outputs are
+        // replayed step rarely or not at all: their busiest output shows
+        // how active they are.
+        let busiest = delivered
+            .iter()
+            .enumerate()
+            .map(|(i, n)| n.saturating_sub(self.delivered.get(i).copied().unwrap_or(0)))
+            .max()
+            .unwrap_or(0);
         let tid = stats.tid.load(Ordering::Relaxed);
         let cpu_ticks = if tid > 0 {
             thread_cpu_ticks(tid).unwrap_or(self.cpu_ticks)
@@ -207,7 +222,7 @@ impl MetricsWindow {
         let metrics = NodeMetrics {
             id: id.to_owned(),
             state: stats.state(),
-            hz: steps.saturating_sub(self.steps) as f64 / dt,
+            hz: steps.saturating_sub(self.steps).max(busiest) as f64 / dt,
             step_p50_us: p50,
             step_p99_us: p99,
             input_age_ms: (ages > 0)
@@ -222,6 +237,7 @@ impl MetricsWindow {
         *self = Self {
             at: now,
             steps,
+            delivered: delivered.to_vec(),
             cpu_ticks,
             age_sum,
             age_count,
@@ -279,13 +295,13 @@ mod tests {
             stats.record_step(us);
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let m = w.sample("n", &stats, (2_000_000, 2), 0);
+        let m = w.sample("n", &stats, (2_000_000, 2), 0, &[]);
         assert_eq!(m.step_p50_us, 51.0);
         assert_eq!(m.step_p99_us, 99.0);
         assert!(m.hz > 0.0);
         assert_eq!(m.input_age_ms, Some(1.0));
         assert_eq!(m.timing, None, "untimed nodes report no timing");
-        let m2 = w.sample("n", &stats, (2_000_000, 2), 0);
+        let m2 = w.sample("n", &stats, (2_000_000, 2), 0, &[]);
         assert_eq!(m2.input_age_ms, None);
         assert_eq!(m2.step_p99_us, 0.0);
     }
@@ -301,11 +317,26 @@ mod tests {
         stats.record_deadline_miss();
         overruns.fetch_add(3, Ordering::Relaxed);
         let mut w = MetricsWindow::new();
-        let t = w.sample("n", &stats, (0, 0), 0).timing.unwrap();
+        let t = w.sample("n", &stats, (0, 0), 0, &[]).timing.unwrap();
         assert_eq!(t.jitter_max_us, 400.0);
         assert_eq!(t.jitter_p50_us, 10.0);
         assert_eq!((t.deadline_misses, t.overruns), (1, 3));
-        let t = w.sample("n", &stats, (0, 0), 0).timing.unwrap();
+        let t = w.sample("n", &stats, (0, 0), 0, &[]).timing.unwrap();
         assert_eq!((t.jitter_max_us, t.deadline_misses), (0.0, 1));
+    }
+
+    #[test]
+    fn nodes_that_publish_more_than_they_step_report_the_message_rate() {
+        let stats = NodeStats::default();
+        let mut w = MetricsWindow::new();
+        w.sample("n", &stats, (0, 0), 0, &[0, 0]);
+        // One step, but 40 messages on the busier output, in ~0.1 s.
+        stats.record_step(5);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let m = w.sample("n", &stats, (0, 0), 0, &[3, 40]);
+        assert!(m.hz > 200.0 && m.hz < 410.0, "{} Hz", m.hz);
+        // Rates are per window: nothing new, nothing reported.
+        let m = w.sample("n", &stats, (0, 0), 0, &[3, 40]);
+        assert_eq!(m.hz, 0.0);
     }
 }

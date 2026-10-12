@@ -28,8 +28,8 @@
 //! `/tf_static` only sees static transforms published after it starts, and a
 //! `ros2/pub-tf` on `/tf_static` is not latched for late ROS subscribers.
 //! Subscriber nodes send from the Zenoh callback; their own step runs at
-//! 1 Hz only to apply parameter changes, so `ruro status` shows that rate
-//! rather than the message rate.
+//! 1 Hz only to apply parameter changes. `ruro status` shows the rate of
+//! the messages they send.
 
 pub mod convert;
 

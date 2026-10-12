@@ -257,7 +257,10 @@ pub struct GroupMetrics {
 pub struct NodeMetrics {
     pub id: String,
     pub state: NodeState,
-    /// Steps per second over the last window.
+    /// Activity over the last window: steps per second, or messages per
+    /// second on the node's busiest output when that is higher (nodes that
+    /// publish from callbacks, such as ROS 2 subscriber bridges, and nodes
+    /// whose outputs are being replayed).
     pub hz: f64,
     pub step_p50_us: f64,
     pub step_p99_us: f64,

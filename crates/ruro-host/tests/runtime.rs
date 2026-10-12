@@ -439,3 +439,58 @@ wires:
     assert!(gain_first.iter().any(|v| *v != gain_first[0]));
     cleanup(&[&first, &second]);
 }
+
+/// Steps once a second, but sends from a thread of its own, the way bridge
+/// nodes send from a library's callback.
+#[derive(Node)]
+#[node(kind = "test/callback-source", rate = 1)]
+struct CallbackSource {
+    #[output]
+    out: Output<Scalar>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Node for CallbackSource {
+    fn start(&mut self, _ctx: &mut Ctx) -> Result {
+        let (out, stop) = (self.out.clone(), self.stop.clone());
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let _ = out.send(Scalar(1.0));
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        Ok(())
+    }
+
+    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+        Ok(())
+    }
+
+    fn stop(&mut self, _ctx: &mut Ctx) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+#[test]
+fn rates_count_messages_sent_from_callbacks_and_replayed() {
+    let graph = Graph::from_yaml(
+        "name: rt-rates\nnodes:\n  cb: { type: test/callback-source }\n  src: { type: std/sine, rate: 100 }\n",
+    )
+    .unwrap();
+    let mut opts = Options::new(Remote::Disabled);
+    opts.muted = vec!["src".into()];
+    let exec = Executor::start_with(&graph, "main", opts).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    exec.metrics();
+    let src = PortRef::new("src", "value");
+    for i in 0..60u64 {
+        let bytes = Scalar(i as f64).to_bytes();
+        exec.inject(&src, i, ruro_msg::now_ns(), &bytes).unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let m = exec.metrics();
+    exec.stop();
+    let hz = |id: &str| m.nodes.iter().find(|n| n.id == id).unwrap().hz;
+    assert!(hz("cb") > 50.0, "callback node at {} Hz", hz("cb"));
+    assert!(hz("src") > 50.0, "replayed node at {} Hz", hz("src"));
+}

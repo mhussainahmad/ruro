@@ -334,9 +334,14 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Echo { port } => {
             let c = client()?;
             let port: PortRef = port.parse()?;
+            // Watching may start before the graph does: then wait on this daemon.
+            let keys = daemon_of(&c, &port.node).unwrap_or_else(|e| {
+                eprintln!("{e:#}; waiting for it on `{}`", c.keys.daemon());
+                c.keys.clone()
+            });
             let _sub = c
                 .session
-                .declare_subscriber(c.keys.tap(&port.node, &port.port))
+                .declare_subscriber(keys.tap(&port.node, &port.port))
                 .callback(|sample| {
                     if let Ok(frame) = ruro_proto::decode::<TapFrame>(&sample.payload().to_bytes())
                     {
@@ -350,6 +355,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Param { node, name, value } => {
             let c = client()?;
+            let keys = daemon_of(&c, &node)?;
             // Accept bare words as strings: `ruro param cam mode fast`.
             let json = serde_json::from_str::<serde_json::Value>(&value)
                 .unwrap_or(serde_json::Value::String(value))
@@ -359,7 +365,7 @@ fn run(cli: Cli) -> Result<()> {
                 value: json.clone(),
             };
             c.session
-                .put(c.keys.param(&node), ruro_proto::encode(&msg))
+                .put(keys.param(&node), ruro_proto::encode(&msg))
                 .wait()
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             // Give the publication a moment to leave before the session closes.
@@ -486,6 +492,41 @@ fn stream_logs(session: &zenoh::Session, keys: &Keys) -> Result<()> {
 }
 
 /// Latest metrics of every running group of the daemon.
+/// Keys of the daemon that runs `node`: the connected one or, for a graph
+/// that spans machines, the peer running the node's group.
+fn daemon_of(c: &Client, node: &str) -> Result<Keys> {
+    let status = c.status()?;
+    let Some(graph) = &status.graph else {
+        bail!("no graph is running on `{}`", status.name);
+    };
+    if runs_node(&status, node) {
+        return Ok(c.keys.clone());
+    }
+    let sub = c
+        .session
+        .declare_subscriber(Keys::all_status())
+        .wait()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let deadline = std::time::Instant::now() + DISCOVERY;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(s)) = sub.recv_timeout(Duration::from_millis(100))
+            && let Ok(peer) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes())
+            && peer.graph.as_ref() == Some(graph)
+            && runs_node(&peer, node)
+        {
+            return Ok(Keys::new(&peer.name));
+        }
+    }
+    bail!("no node `{node}` in graph `{graph}`")
+}
+
+fn runs_node(status: &DaemonStatus, node: &str) -> bool {
+    status
+        .groups
+        .iter()
+        .any(|g| g.nodes.iter().any(|n| n == node))
+}
+
 pub fn group_metrics(c: &Client, status: &DaemonStatus) -> Result<Vec<GroupMetrics>> {
     let metrics_sub = c
         .session
@@ -552,6 +593,31 @@ fn exec(exe: &PathBuf, args: &[String]) -> std::io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_nodes_in_the_groups_a_daemon_runs() {
+        let status = DaemonStatus {
+            name: "robot".into(),
+            version: String::new(),
+            pid: 1,
+            uptime_s: 0.0,
+            graph: Some("g".into()),
+            groups: vec![ruro_proto::GroupStatus {
+                name: "drivers".into(),
+                nodes: vec!["camera".into(), "imu".into()],
+                state: ruro_proto::GroupState::Running,
+                pid: Some(2),
+                restarts: 0,
+                last_exit: None,
+            }],
+            recording: None,
+            playback: None,
+            estopped: false,
+        };
+        assert!(runs_node(&status, "imu"));
+        assert!(!runs_node(&status, "drivers"));
+        assert!(!runs_node(&status, "stats"));
+    }
 
     #[test]
     fn parameters_can_be_set_to_negative_values() {

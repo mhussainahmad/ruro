@@ -255,6 +255,7 @@ fn menus(s: &mut Studio, ui: &mut Ui) {
             (Activity::Processes, "Processes"),
             (Activity::Fleet, "Fleet"),
             (Activity::Changes, "Changes"),
+            (Activity::Ros2, "ROS 2 Topics"),
         ] {
             if item(ui, true, label, "") {
                 s.push(Cmd::Activity(a));
@@ -501,6 +502,7 @@ pub fn activity_bar(s: &mut Studio, ui: &mut Ui) {
                         Some(s.fleet.len()).filter(|n| *n > 1),
                     ),
                     (Activity::Changes, icons::COMPARE, "Changes", changes),
+                    (Activity::Ros2, icons::RADIO_TOWER, "ROS 2 Topics", None),
                 ] {
                     let active = s.sidebar_open && s.activity == activity;
                     let (rect, resp) = ui.allocate_exact_size(vec2(48.0, 44.0), Sense::click());

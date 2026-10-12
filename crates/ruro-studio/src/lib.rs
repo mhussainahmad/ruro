@@ -16,6 +16,7 @@ mod model;
 mod palette;
 mod panel;
 pub mod plugin;
+mod ros;
 mod settings;
 mod shell;
 mod sidebar;

@@ -75,6 +75,7 @@ pub enum Activity {
     Processes,
     Fleet,
     Changes,
+    Ros2,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -133,6 +134,12 @@ pub enum Cmd {
     DeleteNode(String),
     Align(AlignOp),
     AddNode(String),
+    /// Adds a node of `kind` with parameter values already set.
+    AddConfiguredNode {
+        kind: String,
+        params: Vec<(String, serde_json::Value)>,
+    },
+    RosDiscover,
     Focus(Option<String>),
     GroupSelection,
     Ungroup(String),
@@ -199,6 +206,7 @@ pub struct Studio {
     pub(crate) status: Option<DaemonStatus>,
     pub(crate) metrics: HashMap<String, NodeMetrics>,
     pub(crate) fleet: BTreeMap<String, FleetEntry>,
+    pub(crate) ros: crate::ros::RosBrowser,
     /// When the current recording started, as seen by this window.
     pub(crate) recording_since: Option<Instant>,
     pub(crate) record_draft: Option<RecordDraft>,
@@ -306,6 +314,7 @@ impl Studio {
             status: None,
             metrics: HashMap::new(),
             fleet: BTreeMap::new(),
+            ros: crate::ros::RosBrowser::default(),
             recording_since: None,
             record_draft: None,
             record_anchor: egui::Rect::NOTHING,
@@ -532,6 +541,19 @@ impl Studio {
                     let id = self.doc.add_node(&d, pos);
                     self.focused = Some(id);
                 }
+            }
+            Cmd::AddConfiguredNode { kind, params } => {
+                self.apply(ctx, Cmd::AddNode(kind));
+                if let Some(id) = self.focused {
+                    let node = &mut self.doc.snarl[id];
+                    node.params.extend(params);
+                    self.doc.dirty = true;
+                }
+            }
+            Cmd::RosDiscover => {
+                self.activity = Activity::Ros2;
+                self.sidebar_open = true;
+                self.ros.refresh(ctx);
             }
             Cmd::Focus(id) => {
                 self.focused = id.and_then(|id| self.doc.find(&id));

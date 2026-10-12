@@ -24,7 +24,7 @@ pub mod msgs;
 pub mod rmw;
 pub mod time;
 
-pub use discovery::{TopicInfo, list_topics};
+pub use discovery::{TopicInfo, bridge_kinds, list_topics};
 pub use rmw::{Endpoint, Publisher, Qos, Reliability, Subscriber};
 
 mod bundled {

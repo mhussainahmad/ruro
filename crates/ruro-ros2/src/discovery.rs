@@ -166,6 +166,29 @@ pub fn entities(session: &zenoh::Session, domain: u32, timeout: Duration) -> Res
 }
 
 /// The topics of a ROS 2 system reachable through `session`.
+/// Bridge node kinds `(subscriber, publisher)` for a ROS 2 type name such as
+/// `geometry_msgs/msg/Twist`, if ruro can bridge it.
+pub fn bridge_kinds(ros_type: &str) -> Option<(&'static str, &'static str)> {
+    let short = ros_type.replace("/msg/", "/");
+    Some(match short.as_str() {
+        "geometry_msgs/Twist" => ("ros2/sub-twist", "ros2/pub-twist"),
+        "geometry_msgs/PoseStamped" => ("ros2/sub-pose-stamped", "ros2/pub-pose-stamped"),
+        "sensor_msgs/Image" => ("ros2/sub-image", "ros2/pub-image"),
+        "sensor_msgs/CameraInfo" => ("ros2/sub-camera-info", "ros2/pub-camera-info"),
+        "sensor_msgs/LaserScan" => ("ros2/sub-laser-scan", "ros2/pub-laser-scan"),
+        "sensor_msgs/Imu" => ("ros2/sub-imu", "ros2/pub-imu"),
+        "sensor_msgs/JointState" => ("ros2/sub-joint-state", "ros2/pub-joint-state"),
+        "sensor_msgs/Joy" => ("ros2/sub-joy", "ros2/pub-joy"),
+        "sensor_msgs/PointCloud2" => ("ros2/sub-point-cloud2", "ros2/pub-point-cloud2"),
+        "nav_msgs/Odometry" => ("ros2/sub-odometry", "ros2/pub-odometry"),
+        "tf2_msgs/TFMessage" => ("ros2/sub-tf", "ros2/pub-tf"),
+        "std_msgs/Float64" => ("ros2/sub-float64", "ros2/pub-float64"),
+        "std_msgs/String" => ("ros2/sub-string", "ros2/pub-string"),
+        "std_msgs/Bool" => ("ros2/sub-bool", "ros2/pub-bool"),
+        _ => return None,
+    })
+}
+
 pub fn list_topics(
     session: &zenoh::Session,
     domain: u32,

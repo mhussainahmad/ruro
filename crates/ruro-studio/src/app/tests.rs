@@ -47,6 +47,60 @@ fn build(size: egui::Vec2, opts: Options, file: Option<PathBuf>) -> Harness<'sta
     h
 }
 
+/// Pretends discovery found these ROS 2 topics.
+fn with_ros_topics(h: &mut Harness<'static, Studio>) {
+    ruro_nodes_ros2::link();
+    let st = h.state_mut();
+    st.registry = ruro_node::registry();
+    let topic =
+        |name: &str, ty: &str, publishers: usize, subscribers: usize| ruro_ros2::TopicInfo {
+            name: name.into(),
+            ros_type: ty.into(),
+            type_hash: String::new(),
+            publishers,
+            subscribers,
+            nodes: vec!["/turtlebot".into()],
+            best_effort: false,
+        };
+    st.ros.topics = vec![
+        topic("/cmd_vel", "geometry_msgs/msg/Twist", 0, 1),
+        topic("/odom", "nav_msgs/msg/Odometry", 1, 0),
+        topic("/scan", "sensor_msgs/msg/LaserScan", 1, 2),
+        topic("/rosout", "rcl_interfaces/msg/Log", 3, 1),
+    ];
+    st.ros.state = crate::ros::State::Loaded(std::time::Instant::now());
+    st.activity = Activity::Ros2;
+    st.sidebar_open = true;
+    h.run_steps(3);
+}
+
+#[test]
+fn ros_topic_browser_adds_configured_bridge_nodes() {
+    let mut h = harness(None);
+    with_ros_topics(&mut h);
+    let add = h
+        .query_all_by_label("Add a subscriber node for this topic")
+        .next()
+        .expect("bridgeable topic");
+    add.click();
+    h.run_steps(4);
+    let st = h.state();
+    let nodes: Vec<_> = st.doc.snarl.nodes().collect();
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes[0].kind, "ros2/sub-twist");
+    assert_eq!(nodes[0].params["topic"], serde_json::json!("/cmd_vel"));
+    assert_eq!(
+        nodes[0].params["router"],
+        serde_json::json!(ruro_proto::DEFAULT_ENDPOINT)
+    );
+    // Types without a bridge offer no add buttons.
+    assert_eq!(
+        h.query_all_by_label("Add a subscriber node for this topic")
+            .count(),
+        3
+    );
+}
+
 fn harness(file: Option<PathBuf>) -> Harness<'static, Studio> {
     build(egui::vec2(1600.0, 1000.0), Options::offline(), file)
 }
@@ -1332,4 +1386,9 @@ fn screenshots() {
     let uid = h.state().doc.uid;
     h.state_mut().push(Cmd::CloseTab(uid));
     save(&mut h, "studio-close-prompt");
+
+    // ROS 2 topic browser.
+    let mut h = shot(None);
+    with_ros_topics(&mut h);
+    save(&mut h, "studio-ros2");
 }

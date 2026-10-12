@@ -255,6 +255,13 @@ fn commands(s: &Studio) -> Vec<Item> {
             Cmd::Activity(Activity::Fleet),
         ),
         item(
+            icons::RADIO_TOWER,
+            "ROS 2: Discover Topics",
+            "topics of ROS 2 nodes using rmw_zenoh",
+            "",
+            Cmd::RosDiscover,
+        ),
+        item(
             icons::COMPARE,
             "View: Changes",
             "",

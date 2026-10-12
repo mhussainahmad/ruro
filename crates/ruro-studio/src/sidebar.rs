@@ -25,6 +25,7 @@ pub fn show(s: &mut Studio, ui: &mut Ui) -> f32 {
                 Activity::Processes => "Processes",
                 Activity::Fleet => "Fleet",
                 Activity::Changes => "Changes",
+                Activity::Ros2 => "ROS 2 Topics",
             };
             Frame::new()
                 .inner_margin(Margin {
@@ -49,6 +50,7 @@ pub fn show(s: &mut Studio, ui: &mut Ui) -> f32 {
                 Activity::Processes => processes(s, ui),
                 Activity::Fleet => fleet(s, ui),
                 Activity::Changes => changes(s, ui),
+                Activity::Ros2 => crate::ros::show(s, ui),
             }
         })
         .response

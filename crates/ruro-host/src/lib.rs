@@ -116,7 +116,7 @@ fn run(graph_path: &PathBuf, group: &str, daemon: &str, endpoint: &str) -> Resul
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(50));
         tick += 1;
-        if tick % 10 == 0 {
+        if tick.is_multiple_of(10) {
             let m = exec.metrics();
             let _ = zenoh::Wait::wait(session.put(&metrics_key, ruro_proto::encode(&m)));
         }

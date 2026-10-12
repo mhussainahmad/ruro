@@ -16,6 +16,37 @@ pub enum Preview {
     Values(Vec<(String, f64)>),
     /// Free-form text.
     Text(String),
+    /// 3D points in the message's frame, downsampled for display.
+    Points {
+        frame: String,
+        points: Vec<[f32; 3]>,
+    },
+    /// Coordinate frames: poses, odometry and transform trees.
+    Frames(Vec<FramePreview>),
+}
+
+/// One coordinate frame in a [`Preview::Frames`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FramePreview {
+    pub name: String,
+    /// Parent frame; empty for a root.
+    pub parent: String,
+    pub translation: [f32; 3],
+    /// Quaternion `[x, y, z, w]`.
+    pub rotation: [f32; 4],
+}
+
+/// Most points a [`Preview::Points`] carries.
+pub const PREVIEW_MAX_POINTS: usize = 20_000;
+
+/// Evenly subsamples `points` to at most [`PREVIEW_MAX_POINTS`].
+pub fn subsample_points(points: impl ExactSizeIterator<Item = [f32; 3]>) -> Vec<[f32; 3]> {
+    let n = points.len();
+    let step = n.div_ceil(PREVIEW_MAX_POINTS).max(1);
+    points
+        .step_by(step)
+        .filter(|p| p.iter().all(|c| c.is_finite()))
+        .collect()
 }
 
 impl Preview {

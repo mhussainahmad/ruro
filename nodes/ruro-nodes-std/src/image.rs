@@ -130,7 +130,7 @@ fn blur_rows<const CH: usize>(src: &[u8], dst: &mut [u8], w: usize, r: usize) {
                 acc[c] += p[c];
             }
         }
-        for (x, out) in drow.chunks_exact_mut(CH).enumerate() {
+        for (x, out) in drow.as_chunks_mut::<CH>().0.iter_mut().enumerate() {
             for c in 0..CH {
                 out[c] = ((acc[c] * inv) >> 16) as u8;
             }

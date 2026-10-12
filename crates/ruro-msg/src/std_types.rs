@@ -52,7 +52,20 @@ pub struct Pose {
     pub position: Vec3,
     pub orientation: Quat,
 }
-impl_postcard_message!(Pose, "std/Pose");
+impl_postcard_message!(Pose, "std/Pose", preview: |p: &Pose| Preview::Frames(vec![p.frame_preview("pose", "")]));
+
+impl Pose {
+    /// This pose as a named frame for 3D previews.
+    pub fn frame_preview(&self, name: &str, parent: &str) -> crate::FramePreview {
+        let (t, r) = (self.position, self.orientation);
+        crate::FramePreview {
+            name: name.to_owned(),
+            parent: parent.to_owned(),
+            translation: [t.x as f32, t.y as f32, t.z as f32],
+            rotation: [r.x as f32, r.y as f32, r.z as f32, r.w as f32],
+        }
+    }
+}
 
 /// Linear and angular velocity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -215,7 +228,7 @@ impl Message for PointCloud {
     }
 
     fn encode_into(&self, buf: &mut [u8]) {
-        for (chunk, p) in buf.chunks_exact_mut(12).zip(&self.points) {
+        for (chunk, p) in buf.as_chunks_mut::<12>().0.iter_mut().zip(&self.points) {
             chunk[0..4].copy_from_slice(&p[0].to_le_bytes());
             chunk[4..8].copy_from_slice(&p[1].to_le_bytes());
             chunk[8..12].copy_from_slice(&p[2].to_le_bytes());
@@ -223,21 +236,26 @@ impl Message for PointCloud {
     }
 
     fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
-        if buf.len() % 12 != 0 {
+        if !buf.len().is_multiple_of(12) {
             return Err(DecodeError::Invalid(
                 "point cloud length is not a multiple of 12".into(),
             ));
         }
         let f = |b: &[u8]| f32::from_le_bytes(b.try_into().unwrap());
         let points = buf
-            .chunks_exact(12)
+            .as_chunks::<12>()
+            .0
+            .iter()
             .map(|c| [f(&c[0..4]), f(&c[4..8]), f(&c[8..12])])
             .collect();
         Ok(Self { points })
     }
 
     fn preview(&self) -> Preview {
-        Preview::Values(vec![("points".into(), self.points.len() as f64)])
+        Preview::Points {
+            frame: String::new(),
+            points: crate::subsample_points(self.points.iter().copied()),
+        }
     }
 }
 

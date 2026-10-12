@@ -9,7 +9,7 @@ mod preview;
 mod sensor_types;
 mod std_types;
 
-pub use preview::{Preview, flatten_json};
+pub use preview::{FramePreview, PREVIEW_MAX_POINTS, Preview, flatten_json, subsample_points};
 pub use sensor_types::*;
 pub use std_types::*;
 
@@ -55,6 +55,9 @@ pub trait Message: Send + Sync + Sized + 'static {
 #[macro_export]
 macro_rules! impl_postcard_message {
     ($ty:ty, $name:expr) => {
+        $crate::impl_postcard_message!($ty, $name, preview: |m: &$ty| $crate::Preview::from_serialize(m));
+    };
+    ($ty:ty, $name:expr, preview: $preview:expr) => {
         impl $crate::Message for $ty {
             const TYPE: &'static str = $name;
 
@@ -73,7 +76,8 @@ macro_rules! impl_postcard_message {
             }
 
             fn preview(&self) -> $crate::Preview {
-                $crate::Preview::from_serialize(self)
+                let f: fn(&$ty) -> $crate::Preview = $preview;
+                f(self)
             }
         }
     };

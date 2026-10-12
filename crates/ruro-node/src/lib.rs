@@ -21,7 +21,9 @@ pub use param::ParamValue;
 pub use port::{
     ErasedInput, ErasedOutput, Input, InputStats, Output, PortType, RawSink, Sample, Tap, TapSink,
 };
-pub use registry::{DynNode, Registration, find, registry};
+pub use registry::{
+    DynFactory, DynNode, Registration, build, descriptor, find, register_dynamic, registry,
+};
 pub use waker::Waker;
 
 pub use ruro_graph::NodeDescriptor;

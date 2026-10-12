@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 use ruro_graph::{NodeDescriptor, Registry};
 
 use crate::{Builder, Ctx, Node, NodeSpec, Result};
@@ -36,13 +39,27 @@ pub struct Registration {
 
 inventory::collect!(Registration);
 
-/// Descriptors of every node type linked into this binary.
+/// Constructs a node registered at run time.
+pub type DynFactory = Arc<dyn Fn(&mut Builder) -> Result<Box<dyn DynNode>> + Send + Sync>;
+
+/// Node types registered at run time, e.g. by a language binding that
+/// discovers nodes when the host starts.
+static DYNAMIC: RwLock<Vec<(NodeDescriptor, DynFactory)>> = RwLock::new(Vec::new());
+
+/// Registers a node type at run time. A later registration of the same kind replaces it.
+pub fn register_dynamic(descriptor: NodeDescriptor, factory: DynFactory) {
+    let mut d = DYNAMIC.write();
+    d.retain(|(existing, _)| existing.kind != descriptor.kind);
+    d.push((descriptor, factory));
+}
+
+/// Descriptors of every node type linked into this binary or registered at run time.
 pub fn registry() -> Registry {
-    Registry::new(
-        inventory::iter::<Registration>
-            .into_iter()
-            .map(|r| (r.descriptor)()),
-    )
+    let linked = inventory::iter::<Registration>
+        .into_iter()
+        .map(|r| (r.descriptor)());
+    let dynamic: Vec<NodeDescriptor> = DYNAMIC.read().iter().map(|(d, _)| d.clone()).collect();
+    Registry::new(linked.chain(dynamic))
 }
 
 /// Finds the registration for a node kind.
@@ -50,4 +67,28 @@ pub fn find(kind: &str) -> Option<&'static Registration> {
     inventory::iter::<Registration>
         .into_iter()
         .find(|r| (r.descriptor)().kind == kind)
+}
+
+/// Builds a node of any registered kind, linked or dynamic.
+pub fn build(kind: &str, b: &mut Builder) -> Option<Result<Box<dyn DynNode>>> {
+    if let Some(r) = find(kind) {
+        return Some((r.factory)(b));
+    }
+    let factory = DYNAMIC
+        .read()
+        .iter()
+        .find(|(d, _)| d.kind == kind)
+        .map(|(_, f)| f.clone())?;
+    Some(factory(b))
+}
+
+/// Descriptor of any registered kind, linked or dynamic.
+pub fn descriptor(kind: &str) -> Option<NodeDescriptor> {
+    find(kind).map(|r| (r.descriptor)()).or_else(|| {
+        DYNAMIC
+            .read()
+            .iter()
+            .find(|(d, _)| d.kind == kind)
+            .map(|(d, _)| d.clone())
+    })
 }

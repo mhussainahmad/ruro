@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Pose, Quat, Twist, Vec3, impl_postcard_message};
+use crate::{FramePreview, Pose, Preview, Quat, Twist, Vec3, impl_postcard_message};
 
 /// When and in which coordinate frame a measurement was taken.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -30,12 +30,27 @@ pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,
 }
-impl_postcard_message!(Transform, "std/Transform");
+impl_postcard_message!(Transform, "std/Transform", preview: |t: &Transform| Preview::Frames(vec![t.frame_preview()]));
+
+impl Transform {
+    /// This transform as a frame for 3D previews.
+    pub fn frame_preview(&self) -> FramePreview {
+        let (t, r) = (self.translation, self.rotation);
+        FramePreview {
+            name: self.child_frame_id.clone(),
+            parent: self.header.frame_id.clone(),
+            translation: [t.x as f32, t.y as f32, t.z as f32],
+            rotation: [r.x as f32, r.y as f32, r.z as f32, r.w as f32],
+        }
+    }
+}
 
 /// A batch of transforms, as published on a transform tree.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transforms(pub Vec<Transform>);
-impl_postcard_message!(Transforms, "std/Transforms");
+impl_postcard_message!(Transforms, "std/Transforms", preview: |t: &Transforms| {
+    Preview::Frames(t.0.iter().map(Transform::frame_preview).collect())
+});
 
 /// Inertial measurement. Unknown fields are left at zero with a negative first
 /// covariance entry, following the common convention.
@@ -70,7 +85,25 @@ pub struct LaserScan {
     pub ranges: Vec<f32>,
     pub intensities: Vec<f32>,
 }
-impl_postcard_message!(LaserScan, "std/LaserScan");
+impl_postcard_message!(LaserScan, "std/LaserScan", preview: |s: &LaserScan| Preview::Points {
+    frame: s.header.frame_id.clone(),
+    points: crate::subsample_points(s.points()),
+});
+
+impl LaserScan {
+    /// Valid returns as points in the scan plane (z = 0).
+    pub fn points(&self) -> impl ExactSizeIterator<Item = [f32; 3]> + '_ {
+        let (min, max) = (self.range_min, self.range_max);
+        self.ranges.iter().enumerate().map(move |(i, &r)| {
+            if r.is_finite() && r >= min && r <= max {
+                let a = self.angle_min + i as f32 * self.angle_increment;
+                [r * a.cos(), r * a.sin(), 0.0]
+            } else {
+                [f32::NAN; 3]
+            }
+        })
+    }
+}
 
 /// Estimated pose and velocity of a mobile base.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -80,7 +113,9 @@ pub struct Odometry {
     pub pose: Pose,
     pub twist: Twist,
 }
-impl_postcard_message!(Odometry, "std/Odometry");
+impl_postcard_message!(Odometry, "std/Odometry", preview: |o: &Odometry| {
+    Preview::Frames(vec![o.pose.frame_preview(&o.child_frame_id, &o.header.frame_id)])
+});
 
 /// Pinhole camera calibration.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

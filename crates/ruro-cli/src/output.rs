@@ -51,6 +51,15 @@ pub fn preview_line(p: &Preview) -> String {
             .collect::<Vec<_>>()
             .join("  "),
         Preview::Text(t) => t.clone(),
+        Preview::Points { frame, points } => format!("{} points in `{frame}`", points.len()),
+        Preview::Frames(frames) => frames
+            .iter()
+            .map(|f| {
+                let [x, y, z] = f.translation;
+                format!("{} ({x:.3}, {y:.3}, {z:.3})", f.name)
+            })
+            .collect::<Vec<_>>()
+            .join("  "),
     }
 }
 

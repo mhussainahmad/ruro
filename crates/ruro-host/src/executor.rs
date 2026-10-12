@@ -73,8 +73,6 @@ impl Executor {
         let mut built: Vec<(String, BuiltNode)> = Vec::new();
         for id in &ids {
             let inst = &graph.nodes[id];
-            let reg = ruro_node::find(&inst.kind)
-                .with_context(|| format!("{id}: unknown node type `{}`", inst.kind))?;
             let depths: HashMap<String, usize> = graph
                 .wires
                 .iter()
@@ -82,8 +80,9 @@ impl Executor {
                 .map(|w| (w.to.port.clone(), w.depth()))
                 .collect();
             let mut b = Builder::new(id, &inst.params, depths);
-            let node =
-                (reg.factory)(&mut b).with_context(|| format!("{id}: failed to construct"))?;
+            let node = ruro_node::build(&inst.kind, &mut b)
+                .with_context(|| format!("{id}: unknown node type `{}`", inst.kind))?
+                .with_context(|| format!("{id}: failed to construct"))?;
             built.push((id.clone(), b.finish(node)));
         }
 
@@ -166,9 +165,7 @@ impl Executor {
         let mut nodes = Vec::new();
         for (id, b) in built {
             let inst = &graph.nodes[&id];
-            let desc = ruro_node::find(&inst.kind)
-                .map(|r| (r.descriptor)())
-                .unwrap();
+            let desc = ruro_node::descriptor(&inst.kind).expect("built above");
             let rate = inst.rate.or(desc.default_rate);
             if desc.inputs.is_empty() && rate.is_none() {
                 bail!("{id}: source node needs a rate");

@@ -24,10 +24,44 @@ pub enum GraphError {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Graph {
     pub name: String,
+    /// Settings for process groups, keyed by group name. Groups without an
+    /// entry use the defaults.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub groups: IndexMap<String, GroupConfig>,
     #[serde(default)]
     pub nodes: IndexMap<String, NodeInstance>,
     #[serde(default)]
     pub wires: Vec<Wire>,
+}
+
+/// How and where a process group runs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GroupConfig {
+    /// Daemon (machine) that runs the group. `None` means the deploying daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+    /// Host program that executes the group, e.g. a host with extra node
+    /// libraries linked in. `None` means the daemon's default host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Real-time scheduling for the group's threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realtime: Option<Realtime>,
+}
+
+/// Real-time execution settings for a process group.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Realtime {
+    /// SCHED_FIFO priority (1-99). `None` keeps the default scheduler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u8>,
+    /// CPUs the group's threads are pinned to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cpus: Vec<usize>,
+    /// Run all nodes of the group on one thread in a fixed order each cycle,
+    /// instead of one thread per node.
+    #[serde(default)]
+    pub deterministic: bool,
 }
 
 /// One instance of a node type inside a graph.
@@ -193,6 +227,17 @@ impl<'de> Deserialize<'de> for Wire {
 }
 
 impl Graph {
+    /// Expands composite nodes into plain nodes and wires. Graphs without
+    /// composites are returned unchanged. Deployment always runs the flattened graph.
+    pub fn flatten(&self) -> Result<Graph, GraphError> {
+        Ok(self.clone())
+    }
+
+    /// Settings of `group`, or the defaults.
+    pub fn group_config(&self, group: &str) -> GroupConfig {
+        self.groups.get(group).cloned().unwrap_or_default()
+    }
+
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -348,5 +393,27 @@ wires:
         let g = Graph::from_yaml(YAML).unwrap();
         assert_eq!(g.unique_id("blur"), "blur2");
         assert_eq!(g.unique_id("image stats"), "image_stats");
+    }
+}
+
+#[cfg(test)]
+mod group_config_tests {
+    use super::*;
+
+    #[test]
+    fn group_settings_parse_and_default() {
+        let g = Graph::from_yaml(
+            "name: rt\ngroups:\n  control:\n    machine: robot\n    realtime: { priority: 80, cpus: [2, 3], deterministic: true }\nnodes:\n  a: { type: t/x, group: control }\n",
+        )
+        .unwrap();
+        let c = g.group_config("control");
+        assert_eq!(c.machine.as_deref(), Some("robot"));
+        let rt = c.realtime.unwrap();
+        assert_eq!(
+            (rt.priority, rt.cpus, rt.deterministic),
+            (Some(80), vec![2, 3], true)
+        );
+        assert_eq!(g.group_config("other"), GroupConfig::default());
+        assert_eq!(Graph::from_yaml(&g.to_yaml().unwrap()).unwrap(), g);
     }
 }

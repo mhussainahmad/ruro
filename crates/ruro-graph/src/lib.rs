@@ -9,7 +9,10 @@ mod spec;
 mod validate;
 
 pub use descriptor::{NodeDescriptor, ParamDesc, ParamKind, PortDesc, Registry};
-pub use spec::{DEFAULT_GROUP, Graph, GraphError, NodeInstance, PortRef, RestartPolicy, Wire};
+pub use spec::{
+    DEFAULT_GROUP, Graph, GraphError, GroupConfig, NodeInstance, PortRef, Realtime, RestartPolicy,
+    Wire,
+};
 pub use validate::{Issue, validate};
 
 /// Returns true if `s` is usable as a node, port or group identifier.

@@ -94,6 +94,11 @@ pub enum Ctl {
     Kill,
     /// Reply: the daemon name. Used for discovery.
     Ping,
+    /// Payload: path of an MCAP file to record every wire of the running
+    /// graph into, or empty to stop recording. Reply: the path.
+    Record,
+    /// Payload: JSON [`PlaybackCommand`]. Controls replay of a recording.
+    Playback,
 }
 
 impl Ctl {
@@ -105,6 +110,8 @@ impl Ctl {
             Ctl::Graph => "graph",
             Ctl::Kill => "kill",
             Ctl::Ping => "ping",
+            Ctl::Record => "record",
+            Ctl::Playback => "playback",
         }
     }
 }
@@ -122,6 +129,43 @@ pub struct DaemonStatus {
     /// Name of the deployed graph, if any.
     pub graph: Option<String>,
     pub groups: Vec<GroupStatus>,
+    /// File being recorded to, if recording.
+    pub recording: Option<String>,
+    /// Replay in progress, if any.
+    pub playback: Option<PlaybackStatus>,
+}
+
+/// State of a replay.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaybackStatus {
+    pub file: String,
+    /// Current position and total length, in seconds from the start of the recording.
+    pub position_s: f64,
+    pub duration_s: f64,
+    pub paused: bool,
+    /// Playback speed; 1.0 is real time.
+    pub rate: f64,
+}
+
+/// A replay control request, sent as JSON with [`Ctl::Playback`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+pub enum PlaybackCommand {
+    /// Replay `file` into the running graph, replacing the outputs of the
+    /// nodes that recorded them.
+    Start {
+        file: String,
+        rate: f64,
+    },
+    Pause,
+    Resume,
+    Seek {
+        position_s: f64,
+    },
+    SetRate {
+        rate: f64,
+    },
+    Stop,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

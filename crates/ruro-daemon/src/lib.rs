@@ -165,6 +165,8 @@ impl Daemon {
                             uptime_s: started.elapsed().as_secs_f64(),
                             graph: s.graph().map(|g| g.name.clone()),
                             groups: s.status(),
+                            recording: None,
+                            playback: None,
                         };
                         drop(s);
                         let _ = session

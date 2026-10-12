@@ -75,16 +75,16 @@ pub fn validate(graph: &Graph, registry: &Registry) -> Vec<Issue> {
                 );
                 continue;
             }
-            if let Some(v) = value.as_f64() {
-                if p.min.is_some_and(|min| v < min) || p.max.is_some_and(|max| v > max) {
-                    push(
-                        Some(id),
-                        format!(
-                            "parameter `{name}` = {v} is outside [{:?}, {:?}]",
-                            p.min, p.max
-                        ),
-                    );
-                }
+            if let Some(v) = value.as_f64()
+                && (p.min.is_some_and(|min| v < min) || p.max.is_some_and(|max| v > max))
+            {
+                push(
+                    Some(id),
+                    format!(
+                        "parameter `{name}` = {v} is outside [{:?}, {:?}]",
+                        p.min, p.max
+                    ),
+                );
             }
         }
     }

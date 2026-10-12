@@ -123,6 +123,20 @@ impl Watch {
                 }
             }
             Preview::Text(t) => self.data = Data::Text(t),
+            // 3D previews get a dedicated view; until then, summarise them.
+            Preview::Points { frame, points } => {
+                self.data = Data::Text(format!("{} points in frame `{frame}`", points.len()))
+            }
+            Preview::Frames(frames) => {
+                let lines: Vec<String> = frames
+                    .iter()
+                    .map(|f| {
+                        let [x, y, z] = f.translation;
+                        format!("{:<16} x {x:>8.3}  y {y:>8.3}  z {z:>8.3}", f.name)
+                    })
+                    .collect();
+                self.data = Data::Text(lines.join("\n"))
+            }
         }
     }
 

@@ -15,9 +15,11 @@ mujoco = ["dep:libloading"]
 
 [dependencies]
 ruro = { workspace = true }
+serde = { workspace = true }
 ruro-urdf = { workspace = true }
 libloading = { workspace = true, optional = true }
 
 [dev-dependencies]
 ruro-graph = { workspace = true }
 ruro-host = { workspace = true }
+parking_lot = { workspace = true }

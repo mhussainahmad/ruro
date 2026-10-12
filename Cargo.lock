@@ -4852,10 +4852,12 @@ name = "ruro-nodes-sim"
 version = "0.1.0"
 dependencies = [
  "libloading",
+ "parking_lot",
  "ruro",
  "ruro-graph",
  "ruro-host",
  "ruro-urdf",
+ "serde",
 ]
 
 [[package]]

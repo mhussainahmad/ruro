@@ -332,6 +332,8 @@ wires: [cam.image -> stats.image, src.value -> gain.input]
     );
     let reply = request(&s, &d1.keys, Ctl::Deploy, &graph).unwrap();
     assert!(reply.contains(d2.name()), "{reply}");
+    // Clients get back the graph as they deployed it.
+    assert_eq!(request(&s, &d1.keys, Ctl::Graph, "").unwrap(), graph);
 
     let m = wait_metrics(&s, &d1.keys, "vision", |m| node_hz(m, "stats") > 10.0);
     let stats = m.nodes.iter().find(|n| n.id == "stats").unwrap();

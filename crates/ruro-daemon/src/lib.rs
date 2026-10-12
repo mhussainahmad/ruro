@@ -113,6 +113,9 @@ pub(crate) struct State {
     pub peers: Mutex<BTreeSet<String>>,
     /// Last metrics seen per group: `(pid, when)`.
     pub heartbeats: Mutex<HashMap<String, (u32, Instant)>>,
+    /// The graph as deployed by the client (before flattening and machine
+    /// assignment), returned by `Ctl::Graph`.
+    pub deployed: Mutex<Option<String>>,
 }
 
 impl State {
@@ -199,6 +202,7 @@ impl Daemon {
             playback: Mutex::new(None),
             peers: Mutex::new(BTreeSet::new()),
             heartbeats: Mutex::new(HashMap::new()),
+            deployed: Mutex::new(None),
         });
 
         let queryable = session
@@ -368,6 +372,7 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             st.sup.lock().stop_all();
             session::finish_recording(st, false)?;
             let n = st.sup.lock().deploy(graph)?;
+            *st.deployed.lock() = Some(text());
             Ok(format!("deployed {n} group(s) on `{}`", st.name))
         }
         "stop" => {
@@ -392,13 +397,10 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             }
             Ok(serde_json::to_string(&*st.registry.lock())?)
         }
-        "graph" => Ok(st
-            .sup
-            .lock()
-            .graph()
-            .map(|g| g.to_yaml())
-            .transpose()?
-            .unwrap_or_default()),
+        "graph" => Ok(match st.sup.lock().graph() {
+            Some(_) => st.deployed.lock().clone().unwrap_or_default(),
+            None => String::new(),
+        }),
         "ping" => Ok(st.name.clone()),
         "kill" => {
             let group = text();
@@ -508,6 +510,7 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
         st.peers.lock().insert(m.clone());
     }
     let n = st.sup.lock().deploy(graph)?;
+    *st.deployed.lock() = Some(yaml.to_owned());
     Ok(if machines.is_empty() {
         format!("deployed {n} group(s)")
     } else {

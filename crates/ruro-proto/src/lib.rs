@@ -595,6 +595,21 @@ pub fn connect_with(endpoint: &str, security: &Security) -> Result<zenoh::Sessio
         .map_err(|e| anyhow!("no ruro daemon reachable at {endpoint} ({e})"))
 }
 
+/// Reads an access token from a file: its first line, without surrounding
+/// whitespace. Unlike a token on the command line, it does not show up in
+/// `ps`.
+pub fn read_token_file(path: &std::path::Path) -> Result<String> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading the token file {}", path.display()))?;
+    let token = text.lines().next().unwrap_or_default().trim();
+    anyhow::ensure!(
+        !token.is_empty(),
+        "the token file {} is empty",
+        path.display()
+    );
+    Ok(token.to_owned())
+}
+
 /// Finds the daemon behind a session. With `name` set, only checks that it answers.
 pub fn discover(
     session: &zenoh::Session,
@@ -707,6 +722,17 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         assert_eq!(json, r#"{"cmd":"mute","nodes":["src"]}"#);
         assert_eq!(serde_json::from_str::<HostCommand>(&json).unwrap(), c);
+    }
+
+    #[test]
+    fn token_files_hold_the_first_line() {
+        let path = std::env::temp_dir().join(format!("ruro-token-{}", std::process::id()));
+        std::fs::write(&path, "  s3cret \nsecond line\n").unwrap();
+        assert_eq!(read_token_file(&path).unwrap(), "s3cret");
+        std::fs::write(&path, "\n").unwrap();
+        assert!(read_token_file(&path).is_err());
+        let _ = std::fs::remove_file(&path);
+        assert!(read_token_file(&path).is_err());
     }
 
     #[test]

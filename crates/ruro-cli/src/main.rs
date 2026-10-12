@@ -53,19 +53,29 @@ struct SecurityArgs {
     #[arg(long, global = true, env = "RURO_TLS_CA")]
     tls_ca: Option<PathBuf>,
     /// Shared access token. A daemon started with one only accepts clients
-    /// (and peer daemons) that present the same token.
+    /// (and peer daemons) that present the same token. A token given here is
+    /// visible to other users of the machine in `ps`; prefer RURO_TOKEN or
+    /// --token-file.
     #[arg(long, global = true, env = "RURO_TOKEN", hide_env_values = true)]
     token: Option<String>,
+    /// File holding the access token (its first line). Takes precedence over
+    /// --token and RURO_TOKEN.
+    #[arg(long, global = true, env = "RURO_TOKEN_FILE")]
+    token_file: Option<PathBuf>,
 }
 
 impl SecurityArgs {
-    fn security(&self) -> Security {
-        Security {
+    fn security(&self) -> Result<Security> {
+        let token = match &self.token_file {
+            Some(path) => Some(ruro_proto::read_token_file(path)?),
+            None => self.token.clone().filter(|t| !t.is_empty()),
+        };
+        Ok(Security {
             cert: self.tls_cert.clone(),
             key: self.tls_key.clone(),
             ca: self.tls_ca.clone(),
-            token: self.token.clone().filter(|t| !t.is_empty()),
-        }
+            token,
+        })
     }
 }
 
@@ -246,7 +256,7 @@ impl Client {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    let security = cli.security.security();
+    let security = cli.security.security()?;
     let connect = |name: Option<&str>| -> Result<Client> {
         let session = ruro_proto::connect_with(&cli.connect, &security)
             .context("start one with `ruro daemon`")?;
@@ -652,6 +662,30 @@ mod tests {
         assert!(runs_node(&status, "imu"));
         assert!(!runs_node(&status, "drivers"));
         assert!(!runs_node(&status, "stats"));
+    }
+
+    #[test]
+    fn tokens_come_from_files_before_flags() {
+        let path = std::env::temp_dir().join(format!("ruro-cli-token-{}", std::process::id()));
+        std::fs::write(&path, "from-file\n").unwrap();
+        let cli = Cli::try_parse_from([
+            "ruro",
+            "--token",
+            "from-flag",
+            "--token-file",
+            path.to_str().unwrap(),
+            "status",
+        ])
+        .unwrap();
+        let token = cli.security.security().unwrap().token;
+        assert_eq!(token.as_deref(), Some("from-file"));
+        let _ = std::fs::remove_file(&path);
+        let cli = Cli::try_parse_from(["ruro", "--token-file", path.to_str().unwrap(), "status"])
+            .unwrap();
+        assert!(
+            cli.security.security().is_err(),
+            "a missing file is an error"
+        );
     }
 
     #[test]

@@ -35,7 +35,8 @@ fn fake_arm_decelerates_to_rest_and_ignores_commands_while_stopped() {
     let (cmd, vel) = step(&mut h);
     assert_eq!(cmd, 0.0, "zero velocity is commanded while stopped");
     assert!(vel < moving, "the joint slows down with its lag: {vel}");
-    for _ in 0..30 {
+    // 100 steps of at least 2 ms is 20 lag time constants, even when sleeps are exact.
+    for _ in 0..100 {
         h.push("velocity", Scalar(3.0)).unwrap();
         assert_eq!(step(&mut h).0, 0.0);
     }

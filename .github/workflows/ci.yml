@@ -107,7 +107,7 @@ jobs:
       matrix:
         include:
           - target: aarch64-unknown-linux-gnu
-            gcc: gcc-aarch64-linux-gnu
+            gcc: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

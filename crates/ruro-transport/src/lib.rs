@@ -38,24 +38,78 @@ fn quiet() {
 /// creating or removing it.
 const OPEN_RETRY: Duration = Duration::from_secs(10);
 
+/// How often a retried open looks for resources left by dead processes.
+const CLEANUP_EVERY: Duration = Duration::from_millis(250);
+
+/// A service still being created after this long was left half-made by a
+/// process that died while creating it. (iceoryx2 itself gives creation a
+/// second before it reports the service as hanging.)
+const HUNG_CREATION: Duration = Duration::from_secs(2);
+
 /// Calls `open` until it succeeds, fails with a non-transient error, or
 /// [`OPEN_RETRY`] passes. Processes of one graph start together, so one often
-/// tries to open a service at the moment another is still creating it.
+/// tries to open a service at the moment another is still creating it. While
+/// retrying, resources of processes that died are removed now and then: a
+/// host that was killed while creating a service leaves it hanging in
+/// creation until then.
 fn retry_while_in_flux<T, E>(
     mut open: impl FnMut() -> std::result::Result<T, E>,
     transient: impl Fn(&E) -> bool,
+    mut cleanup: impl FnMut(),
 ) -> std::result::Result<T, E> {
-    let deadline = std::time::Instant::now() + OPEN_RETRY;
+    let start = std::time::Instant::now();
+    let mut cleaned = start;
     let mut pause = Duration::from_millis(1);
     loop {
         match open() {
-            Err(e) if transient(&e) && std::time::Instant::now() < deadline => {
+            Err(e) if transient(&e) && start.elapsed() < OPEN_RETRY => {
+                if cleaned.elapsed() >= CLEANUP_EVERY {
+                    cleanup();
+                    cleaned = std::time::Instant::now();
+                }
                 std::thread::sleep(pause);
                 pause = (pause * 2).min(Duration::from_millis(50));
             }
             result => return result,
         }
     }
+}
+
+/// Removes the records of services whose creation never finished: their
+/// creator died after starting it. iceoryx2 marks a record finished by
+/// making it read-only; one still writable long after it was written is
+/// hung. Returns how many were removed.
+fn remove_hung_services(older_than: Duration) -> usize {
+    use std::os::unix::fs::PermissionsExt;
+    let global = &Config::global_config().global;
+    let dir = std::path::PathBuf::from(global.service_dir().to_string());
+    let prefix = global.prefix.to_string();
+    let suffix = global.service.static_config_storage_suffix.to_string();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(&prefix) || !name.ends_with(&suffix) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let unfinished = meta.is_file() && meta.permissions().mode() & 0o777 == 0o600;
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age >= older_than);
+        if unfinished && old && std::fs::remove_file(entry.path()).is_ok() {
+            tracing::warn!(
+                "removed shared-memory service {name}, left half-created by a process that died"
+            );
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// A process-local handle to the shared-memory transport.
@@ -75,7 +129,8 @@ impl Shm {
         Ok(Self { node })
     }
 
-    /// Releases resources left behind by processes that crashed.
+    /// Releases resources left behind by processes that crashed: their
+    /// ports and nodes, and services they died while creating.
     pub fn cleanup_stale() {
         quiet();
         let _ = iceoryx2::node::Node::<Svc>::list(Config::global_config(), |state| {
@@ -84,6 +139,7 @@ impl Shm {
             }
             CallbackProgression::Continue
         });
+        remove_hung_services(HUNG_CREATION);
     }
 
     fn service_name(topic: &str) -> Result<ServiceName> {
@@ -134,6 +190,7 @@ impl Shm {
                         )
                 )
             },
+            Self::cleanup_stale,
         )
         .map_err(|e| anyhow!("failed to open topic `{topic}`: {e:?}"))
     }
@@ -165,6 +222,7 @@ impl Shm {
                         )
                 )
             },
+            Self::cleanup_stale,
         )
         .map_err(|e| anyhow!("failed to open event for `{topic}`: {e:?}"))
     }
@@ -295,6 +353,7 @@ mod tests {
                 if calls < 4 { Err("in flux") } else { Ok(7) }
             },
             |e| *e == "in flux",
+            || {},
         );
         assert_eq!((r, calls), (Ok(7), 4));
 
@@ -305,6 +364,7 @@ mod tests {
                 Err("incompatible")
             },
             |e| *e == "in flux",
+            || {},
         );
         assert_eq!((r, calls), (Err("incompatible"), 1));
     }
@@ -327,6 +387,71 @@ mod tests {
             .collect();
         for h in handles {
             h.join().unwrap().unwrap();
+        }
+    }
+
+    /// Run in a child process: starts creating many topics and is killed
+    /// meanwhile, so one is likely left half-created.
+    #[test]
+    fn creates_topics_until_killed() {
+        if let Ok(topic) = std::env::var("RURO_TEST_CREATOR") {
+            let shm = Shm::new("ruro-test-creator").unwrap();
+            for i in 0..10_000 {
+                let _p = shm.publisher(&format!("{topic}/{i}")).unwrap();
+            }
+        }
+    }
+
+    /// Service records of this machine's iceoryx2 that are still being
+    /// created.
+    fn unfinished_services() -> std::collections::BTreeSet<std::ffi::OsString> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = Config::global_config().global.service_dir().to_string();
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| {
+                e.metadata()
+                    .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o777 == 0o600)
+            })
+            .map(|e| e.file_name())
+            .collect()
+    }
+
+    #[test]
+    fn topics_a_killed_process_was_creating_open_quickly() {
+        let before = unfinished_services();
+        // Kill processes busy creating topics until one leaves a topic
+        // half-created (most do).
+        let mut hung = None;
+        for attempt in 0..40 {
+            let topic = format!("ruro-test/{}/killed{attempt}", std::process::id());
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::creates_topics_until_killed"])
+                .env("RURO_TEST_CREATOR", &topic)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(250 + 37 * (attempt % 12)));
+            child.kill().unwrap();
+            child.wait().unwrap();
+            if !unfinished_services().is_subset(&before) {
+                hung = Some(topic);
+                break;
+            }
+        }
+        let topic = hung.expect("no process died while creating a topic");
+        let shm = Shm::new("ruro-test-after").unwrap();
+        // The topics it created, the one it was creating and some after.
+        // Opening the half-created one waits for it to be recognised as
+        // hung, not for the whole retry period.
+        for i in 0..30 {
+            let start = std::time::Instant::now();
+            shm.subscriber(&format!("{topic}/{i}"), 1).unwrap();
+            let took = start.elapsed();
+            assert!(took < Duration::from_secs(6), "topic {i} took {took:?}");
         }
     }
 

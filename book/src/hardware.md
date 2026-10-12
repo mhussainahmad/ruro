@@ -1,18 +1,20 @@
 # Hardware drivers
 
-The `ruro-nodes-hw` crate (`nodes/ruro-nodes-hw`) holds the hardware nodes. They are
-plain Rust with no system libraries: serial ports through the `serialport` crate
+The `ruro-nodes-hw` crate (`nodes/ruro-nodes-hw`) holds the hardware nodes. They are linked
+into the standard `ruro-host`, so `ruro nodes` lists them and graphs can use them without a
+custom host. They are plain Rust with no system libraries: serial ports through the `serialport` crate
 (without libudev), everything else through Linux syscalls. Protocol code sits on a
 small `Transport` trait, so packet encoding and parsing are unit tested against byte
 fixtures, and the serial drivers also run end to end in an executor against simulated
 devices on a pseudo-terminal (`nodes/ruro-nodes-hw/tests/graph.rs`).
 
-"Tested here" below means tested without the device: fixtures, mocks, pseudo-terminals,
-local sockets. Nothing in this crate has been run against the physical hardware it
-drives yet. Treat first contact with real devices accordingly (low speeds, torque
-limits, an e-stop within reach).
+> **Status: implemented to the protocol specifications, not yet tested on hardware.**
+> "Tested" below means tested without the device: byte fixtures, mocks, pseudo-terminals and
+> local sockets. Nothing in this crate has been run against the physical hardware it drives
+> yet. Treat first contact with real devices accordingly (low speeds, torque limits, a
+> physical emergency stop within reach).
 
-| Node | Device | Messages | Tested here | Needs hardware for |
+| Node | Device | Messages | Tested without the device | Needs hardware for |
 |---|---|---|---|---|
 | `hw/v4l2-camera` | UVC/V4L2 cameras | → `std/Image` (RGB8) | YUYV→RGB against BT.601 colour bars, MJPEG decode (including UVC frames without Huffman tables), ioctl numbers and struct layouts against `<linux/videodev2.h>`, capability query on a real webcam (opt-in) | streaming (`REQBUFS`, `mmap`, `DQBUF`) |
 | `hw/mjpeg-http-camera` | IP cameras, ESP32-CAM, mjpg-streamer | → `std/Image` | multipart parsing against a local HTTP server, with and without `Content-Length` | real cameras |
@@ -31,6 +33,15 @@ limits, an e-stop within reach).
 
 Protocol references are in the module docs. The Dynamixel and Feetech fixtures come
 from the vendors' Python SDKs (`nodes/ruro-nodes-hw/tools/servo_fixtures.py`).
+
+## Device access
+
+When the daemon runs as a service, its user needs access to the devices: `dialout` for
+serial ports, `video` for cameras, `input` for gamepads, and whatever group owns
+`/dev/gpiochip*`, `/dev/i2c-*` on your system (often `gpio` and `i2c`). See
+[Deploying on robots](deployment.md#system-service). Hardware nodes are good candidates
+for their own process group: a crashing driver is then restarted without disturbing the
+rest of the graph.
 
 ## Opt-in device tests
 
@@ -54,6 +65,8 @@ RURO_TEST_VCAN=vcan0 cargo test -p ruro-nodes-hw vcan_loopback
 - **Safety.** `hw/so100-arm` holds its current pose when it enables torque and
   rejects commands that move a joint more than `max_step` radians at once. Servo nodes
   disable torque on stop (`manage_torque`), ODrive axes go idle (`manage_state`).
+  The drivers do not implement the [emergency stop](runtime.md#emergency-stop) hook
+  (`on_estop`) yet: `ruro estop` does not stop them. Keep a hardware e-stop.
 - **Half-duplex adapters.** The Feetech bus code discards the echo of its own
   packets, which some single-wire adapters return.
 - **RPLidar angles** are converted from the device's clockwise convention to the usual
@@ -66,11 +79,12 @@ RURO_TEST_VCAN=vcan0 cargo test -p ruro-nodes-hw vcan_loopback
 
 ## Not implemented
 
-- **RTSP / GStreamer cameras.** GStreamer is not available on the build machine and a
-  pure-Rust RTSP + H.264 stack is out of scope for now. Many IP cameras also offer an
-  MJPEG HTTP stream, which `hw/mjpeg-http-camera` handles.
-- **Intel RealSense.** librealsense is not installed here, so a binding could not be
-  compiled or tested. Planned approach: load `librealsense2.so` at run time (as the
-  MuJoCo node does) behind a cargo feature, publishing `std/Image` colour and depth.
+- **RTSP / GStreamer cameras.** There is no GStreamer binding, and a pure-Rust RTSP +
+  H.264 stack is out of scope for now. Many IP cameras also offer an MJPEG HTTP stream,
+  which `hw/mjpeg-http-camera` handles.
+- **Intel RealSense.** There is no RealSense node yet. The planned approach is to load
+  `librealsense2.so` at run time (as the MuJoCo node does) behind a cargo feature,
+  publishing `std/Image` colour and depth.
+- **Camera calibration.** The camera nodes publish `std/Image` only, no `std/CameraInfo`.
 - **RPLidar express/boost scan modes** and **Dynamixel bulk read/write** are not
   implemented; the standard scan and sync read/write cover the common setups.

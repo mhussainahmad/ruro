@@ -1,10 +1,5 @@
 # Composite nodes
 
-> **Status:** the format, flattening and validation are implemented (`ruro_graph`), and the
-> studio edits, validates and deploys composite graphs. Deploying them from the `ruro` CLI is
-> in development: the CLI must flatten graphs (resolving `graph:` paths relative to the file)
-> before sending them to the daemon. This note will be removed when it does.
-
 A composite node is a subgraph used as a single node. It lets you package a pipeline (say,
 "detect obstacles" made of five nodes) behind a few named ports and reuse it in several
 graphs.
@@ -46,7 +41,9 @@ wires:
 Alternatively, use `type: composite` and put the subgraph in the node's `graph` field:
 
 ```yaml
+name: robot
 nodes:
+  camera: { type: std/fake-camera, group: camera, rate: 30 }
   vision:
     type: composite
     params: { blur.radius: 6 }
@@ -91,6 +88,9 @@ inner node's parameter. In the examples above, `blur.radius: 6` sets the `radius
 
 Inner nodes that do not set their own `group` or `restart` inherit the composite node's. A
 subgraph can still split itself across several processes by giving its nodes explicit groups.
+A subgraph's `groups` settings are merged into the outer graph's (the outer graph wins when
+both configure a group). A `rate` set on the composite node itself is ignored; set rates on
+the inner nodes.
 
 ## Flattening
 
@@ -100,7 +100,16 @@ nodes and wires:
 - inner node ids are prefixed with the composite's id and two underscores: `vision__blur`,
   `vision__stats`;
 - wires to and from the composite's ports are rewired to the inner ports;
-- composites may be nested, up to 16 levels; a subgraph that includes itself is rejected.
+- composites may be nested, up to 16 levels; a subgraph that includes itself is rejected;
+- `graph:` paths are resolved relative to the file that contains them (for an inline
+  composite, the outer file).
+
+The CLI flattens a graph before sending it (`ruro run`, `deploy`, `play --graph` and
+`soak`), and so does the studio, so the daemon always receives a self-contained graph and
+subgraph files only need to exist where you deploy from.
+
+Flattening currently drops the outer graph's `clock` setting, so a `clock: sim` graph that
+contains composite nodes runs on wall time. A subgraph's own `clock` is always ignored.
 
 Logs, metrics and `ruro echo` / `ruro param` on the running graph use the flattened ids, for
 example:
@@ -111,4 +120,6 @@ ruro param vision__blur radius 8
 ```
 
 `ruro check` validates composite nodes: the subgraph must load, every exposed port must refer
-to an existing inner node, and the flattened ids must not collide with other nodes.
+to an existing inner node, parameter overrides must name an existing inner node, and the
+flattened ids must not collide with other nodes. The node and wire counts it prints are
+those of the file before flattening.

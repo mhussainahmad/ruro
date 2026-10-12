@@ -13,8 +13,27 @@ Both robot nodes speak the same messages: `std/JointCommand` in (joint position
 targets in radians, LeRobot joint order) and `std/JointState` out. Everything
 downstream (gamepad teleoperation, forward kinematics, LeRobot recording, or a policy
 in place of the gamepad) neither knows nor cares which one is running. The only other
-difference is the dataset directory, so simulated and real episodes are not mixed in
-one dataset by accident (`nodes/ruro-nodes-ml/tests/examples.rs` checks this).
+difference is the dataset directory (`datasets/so100-sim` and `datasets/so100-real`), so
+simulated and real episodes are not mixed in one dataset by accident.
+`nodes/ruro-nodes-ml/tests/examples.rs` checks that only the robot nodes and the dataset
+directory differ between the two files.
+
+Both graphs need node features that the standard `ruro-host` leaves out, so build a host
+with them and point the daemon at it:
+
+```sh
+# arm-sim.yaml: MuJoCo and LeRobot recording
+cargo build --release -p ruro-host --features ruro-nodes-sim/mujoco,ruro-nodes-ml/lerobot
+# arm-real.yaml: LeRobot recording
+cargo build --release -p ruro-host --features ruro-nodes-ml/lerobot
+
+ruro daemon --host target/release/ruro-host   # from the repository root
+ruro run examples/arm-sim.yaml
+```
+
+The model path in the graphs (`examples/models/so100.xml`) is relative to the daemon's
+working directory, so start the daemon from the repository root. `arm-sim.yaml` also
+needs `RURO_MUJOCO_LIB` (see [Simulation](simulation.md#mujoco-simmujoco)).
 
 To make switching work for your own graphs:
 

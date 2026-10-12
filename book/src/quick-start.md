@@ -1,8 +1,10 @@
 # Quick start
 
 This walk-through uses the example graphs in `examples/` and the standard nodes, so it needs
-no hardware. It assumes you built from source (`cargo build --release`); with a package
-installed, drop the `./target/release/` prefix.
+no hardware. It assumes you built from source
+(`cargo build --release -p ruro-cli -p ruro-host -p ruro-studio`) and run the commands from
+the repository root. With the Debian package installed, drop the `./target/release/` prefix
+and use the examples in `/usr/share/doc/ruro/examples/`.
 
 ## In the studio
 
@@ -78,3 +80,12 @@ ruro run my-first-graph.yaml
 
 `ruro nodes -v` lists every node type with its ports and parameters. The
 [graph file reference](reference/graph-yaml.md) documents every field.
+
+## Next steps
+
+- [Write your own nodes](writing-nodes.md) in Rust, or [in Python](python.md).
+- Drive real devices with the [hardware drivers](hardware.md), or simulate the robot with
+  [MuJoCo](simulation.md).
+- Connect to an existing ROS 2 system with the [ROS 2 bridge](ros2.md).
+- [Record and replay](record-replay.md) a run.
+- [Deploy on a robot](deployment.md).

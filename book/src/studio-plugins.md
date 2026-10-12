@@ -15,6 +15,7 @@ just as a [custom host](writing-nodes.md) links node crates:
 [dependencies]
 ruro-studio = { path = "../ruro/crates/ruro-studio" }
 my-visualizers = { path = "../my-visualizers" }
+eframe = { version = "0.36", default-features = false }
 egui = "0.36"
 ```
 
@@ -89,7 +90,8 @@ and light themes, and implement `theme_changed` if you cache colours.
 ## Panels
 
 A panel draws a bottom-panel tab. Through its `PanelContext` it sees the graph in the active
-tab, the node registry, the daemon status and the live metrics, and it can ask the studio to
+tab (`graph`), the node registry (`registry`), the daemon status (`status`), the live
+metrics by node id (`metrics`) and whether the graph is running (`live`), and it can ask the studio to
 select a node or start watching a port:
 
 ```rust

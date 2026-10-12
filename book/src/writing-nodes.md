@@ -1,7 +1,10 @@
 # Writing nodes in Rust
 
 Node authors depend on a single crate, `ruro`, which re-exports the derives, the node API and
-the standard message types. Until the crates are published, depend on it by path or git:
+the standard message types. The quickest start is `ruro new package` (see
+[Node packages and hosts](packages.md)), which creates a package with an example node, a
+test and a manifest for building a host. Until the crates are published, depend on `ruro`
+by path or git:
 
 ```toml
 [dependencies]
@@ -58,12 +61,14 @@ Generic structs are not supported.
 |---|---|---|
 | `#[input]` | `Input<T>` | Input port named after the field. |
 | `#[output]` | `Output<T>` | Output port named after the field. |
-| `#[param(default = .., min = .., max = .., doc = "..")]` | integer, float, `bool` or `String` | Parameter, editable while running. All keys are optional. |
+| `#[param(default = .., min = .., max = .., doc = "..")]` | `i8`-`i64`, `u8`-`u64`, `isize`, `usize`, `f32`, `f64`, `bool` or `String` | Parameter, editable while running. All keys are optional. |
 | *(none)* | anything implementing `Default` | Private state, initialised with `Default::default()`. |
 
-Parameters set in the graph file override the default. When a parameter is changed at run
-time (from the studio or `ruro param`), the new value is written to the field before the next
-step.
+Parameters set in the graph file override the default, and are checked against the type and
+range when the graph is validated. When a parameter is changed at run time (from the studio
+or `ruro param`), the new value is written to the field before the next step. Run-time
+changes are converted to the field's type but not checked against `min` and `max`, so
+clamp values your node cannot handle.
 
 ## The `Node` trait
 
@@ -78,16 +83,21 @@ pub trait Node: Send + 'static {
 
     /// Called once when the graph stops.
     fn stop(&mut self, ctx: &mut Ctx) {}
+
+    fn on_estop(&mut self, ctx: &mut Ctx) {}
 }
 ```
 
 Returning an error from `step` is counted in the node's error metric and logged (at most once
-per second); the node keeps running. A panic in `start` or `step` marks the node as failed and
-stops it, while the other nodes in its process keep running. If the whole process dies, for
+per second); the node keeps running. An error returned from `start`, or a panic in `start` or
+`step`, marks the node as failed and stops it, while the other nodes in its process keep
+running. `stop` is called on failed nodes too. `on_estop` runs when the emergency stop is
+engaged (see [Runtime features](runtime.md#emergency-stop)). If the whole process dies, for
 example on a segmentation fault, the daemon restarts it according to the `restart` policy.
 
 A timer-driven node that falls behind skips the ticks it missed instead of running them in a
-burst.
+burst (under a [simulated clock](runtime.md#graph-time-and-simulation) it catches up at most
+100 ticks).
 
 `Ctx` gives each step its timing:
 
@@ -97,6 +107,8 @@ burst.
 | `ctx.dt()` | time since the previous step (zero on the first) |
 | `ctx.time()` | time since the node started |
 | `ctx.steps()` | number of steps so far |
+| `ctx.now_ns()` | graph time in nanoseconds: wall time, or simulated time with `clock: sim` |
+| `ctx.estopped()` | whether the emergency stop is engaged |
 
 ## Receiving and sending
 
@@ -117,12 +129,19 @@ the newest message is kept).
 
 `Output<T>::send(msg)` publishes a message to every connected input. Inside a process the
 message is shared, not copied, so sending a large image is as cheap as sending a number.
+`Output<T>::loan()` borrows a pooled message to fill and send without allocating (see
+[Runtime features](runtime.md#publishing-without-allocating)), and `sent()` counts the
+messages sent so far. An `Output` can be cloned to send from another thread, for example a
+driver's callback.
 
 ## Messages
 
-The prelude includes the standard types: `Scalar`, `Text`, `Flag`, `Bytes`, `Vec3`, `Quat`,
-`Pose`, `Twist`, `Transform`, `Transforms`, `JointState`, `JointCommand`, `Image` (with
-`Encoding`), `CameraInfo`, `PointCloud`, `LaserScan`, `Imu`, `Odometry`, `Joy` and `Header`.
+The prelude includes the standard message types (named `std/<Type>` on wires): `Scalar`,
+`Text`, `Flag`, `Bytes`, `Vec3`, `Pose`, `Twist`, `Transform`, `Transforms`, `JointState`,
+`JointCommand`, `Image` (with `Encoding`), `CameraInfo`, `PointCloud`, `LaserScan`, `Imu`,
+`Odometry` and `Joy`, plus the field types `Quat` and `Header`. `std/Clock` is in
+`ruro::msg`. The prelude also brings `Serialize`/`Deserialize`, `anyhow!`, `bail!`,
+`ensure!`, `Context` and the `tracing` logging macros.
 
 Custom messages are plain structs:
 
@@ -139,7 +158,10 @@ pub struct Detection {
 ```
 
 The `name` identifies the type on wires: two ports can only be connected if their message
-names match. Messages are serialised with `serde` when they cross a process boundary.
+names match. Messages are serialised with `serde` and [postcard](https://docs.rs/postcard)
+when they cross a process boundary; `Clone` is not required. Generic message types are not
+supported. The derive also produces the type's schema, used by `ruro schema` to detect
+incompatible changes (see [Message schemas](packages.md#message-schemas)).
 
 ## Packaging nodes as a library
 
@@ -157,7 +179,9 @@ pub fn link() {}
 
 ## Building a host
 
-A host is the binary that executes a process group. Build one that links your node crates:
+A host is the binary that executes a process group. `ruro build` generates and builds one
+from a `ruro.toml` (see [Node packages and hosts](packages.md)). To write one by hand, build
+a binary that links your node crates:
 
 ```toml
 # my-host/Cargo.toml
@@ -174,7 +198,8 @@ fn main() {
 }
 ```
 
-The standard nodes are always included. Point the daemon at your host:
+The standard node libraries (`std/*`, `hw/*`, `sim/*`, `ml/*`, `ros2/*`) are always
+included. Point the daemon at your host:
 
 ```sh
 cargo build --release -p my-host
@@ -188,8 +213,9 @@ environment variable.
 ## Testing nodes
 
 Nodes are ordinary structs: keep the processing in plain functions and unit-test those, as the
-standard nodes in `nodes/ruro-nodes-std` do. To check a graph that uses your nodes against
-your host:
+standard nodes in `nodes/ruro-nodes-std` do. To test a node as a whole, through its ports,
+use `ruro::node::testing::Harness` (see [Testing nodes](packages.md#testing-nodes)). To check
+a graph that uses your nodes against your host:
 
 ```sh
 RURO_HOST=target/release/my-host ruro check my-graph.yaml
@@ -211,4 +237,6 @@ only needed without one.
 | `std/pid` | `setpoint: Scalar`, `measured: Scalar` | `command: Scalar` | `kp`, `ki`, `kd`, `limit` |
 | `std/fake-arm` (200 Hz) | `velocity: Scalar` | `position: Scalar`, `state: JointState` | `lag`, `max_speed` |
 
-Run `ruro nodes -v` for ranges, defaults and descriptions.
+Run `ruro nodes -v` for ranges, defaults and descriptions. The standard host also links the
+[hardware](hardware.md), [simulation](simulation.md), [machine learning](ml.md) and
+[ROS 2](ros2.md) node libraries.

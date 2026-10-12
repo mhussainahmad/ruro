@@ -22,8 +22,16 @@ ruro-studio [graph.yaml ...]
 
 `ruro studio [args...]` starts the studio from the CLI and passes the arguments through.
 
-When the endpoint is local and no daemon answers, the studio starts `ruro daemon` itself (from
-next to its own executable, or from `PATH`). That daemon stops when the studio exits.
+When the endpoint is local (`127.0.0.1`, `localhost` or `[::1]`) and no daemon answers, the
+studio starts `ruro daemon` itself (from next to its own executable, or from `PATH`). That
+daemon stops when the studio exits. If a graph is already running on the daemon and the
+canvas is empty, the studio attaches to it and shows it.
+
+The node library is filled from the connected daemon. Before it connects, the studio runs
+`ruro-host describe` (next to its executable, or from `PATH`) to list the standard node
+types. Python node types appear only when the daemon runs the Python host (see
+[Python nodes](python.md)). Graphs open from the command line; without files and without
+`--fresh`, the graphs open at the end of the last session are reopened.
 
 ## Layout
 
@@ -32,17 +40,25 @@ The window follows the layout of a code editor:
 - **Title bar**: the File, Edit, View and Run menus, the command center (click it or press
   <kbd>Ctrl</kbd>+<kbd>K</kbd>), and on the right the record, Stop and Run buttons.
 - **Activity bar** on the far left switches the sidebar between the **Node Library**,
-  **Outline**, **Processes**, **Fleet** and **Changes** views. The sun/moon button at its
-  bottom switches between the dark and light themes.
+  **Outline**, **Processes**, **Fleet**, **Changes** and **ROS 2 Topics** views. The
+  sun/moon button at its bottom switches between the dark and light themes.
 - **Editor tabs** above the canvas, one per open graph. A dot marks unsaved changes;
   middle-click or <kbd>Ctrl</kbd>+<kbd>W</kbd> closes a tab.
 - **Canvas** in the middle, with fit-to-view and add-node buttons in its corner.
 - **Inspector** on the right shows the selected node, the selection, or the graph.
-- **Panel** at the bottom: Problems, Watch, Output and Timing.
-- **Status bar**: connection, graph state, recording, problem count, CPU and step rate.
+- **Panel** at the bottom: Problems, Watch and Output, plus Timing (a built-in
+  [plugin](studio-plugins.md) panel).
+- **Status bar**: connection, graph state, recording, problem and error counts, process
+  restarts, CPU and step rate. Clicking the problem count opens Problems; clicking the error
+  count opens Output.
 
-With no nodes on the canvas, a start page offers new graphs, templates, recent files and
-examples.
+With no nodes on the canvas, a start page offers new graphs, templates, recent files,
+examples and the main shortcuts.
+
+**File → Open Example** lists the graphs in an `examples/` directory: the one in the current
+directory, or the first one found next to or up to five levels above the studio's
+executable. That covers a source checkout, the AppImage and the Flatpak; the Debian package
+installs the examples in `/usr/share/doc/ruro/examples/`, which you open with **Open…**.
 
 ![The start page](images/studio-welcome.png)
 
@@ -62,8 +78,10 @@ examples.
 - **Undo and redo** every edit with <kbd>Ctrl</kbd>+<kbd>Z</kbd> and
   <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> (or <kbd>Ctrl</kbd>+<kbd>Y</kbd>). A drag or a
   slider scrub is one step. Each tab has its own history.
-- **Templates**: File → New from Template starts from a camera pipeline, a PID loop or a sensor
-  fusion stub.
+- **Templates**: File → New from Template starts from an empty graph, a camera pipeline, a
+  PID loop or a sensor fusion stub.
+- **Right-click a node** for Watch All Outputs, Run in Its Own Process, Open Node Source,
+  Duplicate, Group into Subgraph and Delete.
 
 ![Several nodes selected](images/studio-selection.png)
 
@@ -110,18 +128,18 @@ button becomes **Apply changes** after a structural edit.
 Click the eye next to an output to **watch** it. Each watch is a tile in the Watch panel whose
 view depends on the data:
 
-| Data | Views |
+| Data | Views (default first) |
 |---|---|
 | Images | Image |
-| Numbers (scalars, vectors, joint states, any numeric message) | Plot, Values |
-| Point clouds, laser scans | 3D |
+| Numbers (scalars, vectors, joint states, any numeric message) | Plot, Values, Text |
+| Point clouds, laser scans | 3D, Text |
 | Poses, odometry, transforms | 3D, Text |
 | Anything else | Text |
 
-Switch views with the icon in a tile's header. The **3D view** draws points coloured by height
+When more than one view fits, switch with the icon in a tile's header. The **3D view** draws points coloured by height
 on a ground grid, every coordinate frame as an axis triad with its name, and the path of moving
-poses. Drag to orbit, shift-drag (or right-drag) to pan, scroll to zoom, and double-click to
-frame everything.
+poses. Drag to orbit, shift-drag (or right- or middle-drag) to pan, scroll to zoom, and
+double-click to frame everything.
 
 ![Point cloud and transform tree in the 3D view](images/studio-3d.png)
 
@@ -131,18 +149,21 @@ last exit, and can kill a process to test supervision.
 
 ## Recording and replay
 
-The record button in the title bar records every wire of the running graph to an MCAP file on
-the daemon (the path is on the daemon's machine, which may be the robot). While recording, the
-status bar shows a pulsing **REC** with the elapsed time; click it, or the button, to stop.
+While a graph runs, the record button in the title bar asks for a file name (by default
+`<graph>-<date>-<time>.mcap`) and records every output of the running graph to that MCAP
+file on the daemon (the path is on the daemon's machine, which may be the robot). While
+recording, the status bar shows a pulsing **REC** with the elapsed time; click it, or the
+button, to stop.
 
-**Run → Replay Recording…** replays a recording on the daemon. While it plays, a timeline at
-the bottom of the canvas has play/pause, back to start, a seek bar, the position and length,
-and the playback speed.
+**Run → Replay Recording…** asks for the path of a recording on the daemon and replays it.
+While it plays, a timeline at the bottom of the canvas has play/pause, back to start, a seek
+bar, the position and length, the playback speed (0.25× to 4×) and a button that stops the
+replay. See [Record and replay](record-replay.md) for what replay does to the graph.
 
 ![Recording, with a replay timeline](images/studio-replay.png)
 
-> Recording and replay need a daemon that implements them; see
-> [Record and replay](upcoming/record-replay.md).
+The studio has no emergency-stop control; use `ruro estop` (see
+[Runtime features](runtime.md#emergency-stop)).
 
 ## Fleet
 
@@ -151,6 +172,17 @@ processes and uptime. **Connect** switches the studio to another daemon. Clickin
 connection indicator in the status bar opens this view.
 
 ![Daemons on the network](images/studio-fleet.png)
+
+## ROS 2 topics
+
+The **ROS 2 Topics** view lists the topics of a ROS 2 system that uses rmw_zenoh. Set the
+**Router** (default `tcp/127.0.0.1:7447`, independent of the daemon connection) and the
+**Domain** (default from `ROS_DOMAIN_ID`), then press **Discover topics**. Each topic shows
+its type and its publisher and subscriber counts; for the
+[supported types](ros2.md#message-types), buttons add a `ros2/sub-*` or `ros2/pub-*` bridge
+node for it to the graph, with its topic, domain, router and QoS filled in.
+
+![ROS 2 topics](images/studio-ros2.png)
 
 ## Comparing versions
 
@@ -163,7 +195,9 @@ nodes an amber one, and removed nodes appear as dashed outlines where they were.
 
 ## Files, settings and recovery
 
-**Open** and **Save As** use the desktop's file dialogs through the XDG desktop portal.
+**Open**, **Save As** and **Compare with File…** use the desktop's file dialogs through the
+XDG desktop portal. If no portal answers, the studio falls back to its built-in file picker
+(always used with `--no-native-dialogs`).
 **Quick Open** (<kbd>Ctrl</kbd>+<kbd>P</kbd>) is a keyboard file picker with recent files.
 
 Settings live in `$XDG_CONFIG_HOME/ruro/studio.json` (usually `~/.config/ruro/`): theme, panel
@@ -189,7 +223,7 @@ bar, View → Theme, or the command palette. The choice is remembered.
 | Close tab, next tab | <kbd>Ctrl</kbd>+<kbd>W</kbd>, <kbd>Ctrl</kbd>+<kbd>Tab</kbd> |
 | Undo, redo | <kbd>Ctrl</kbd>+<kbd>Z</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> |
 | Cut, copy, paste, duplicate | <kbd>Ctrl</kbd>+<kbd>X</kbd>/<kbd>C</kbd>/<kbd>V</kbd>/<kbd>D</kbd> |
-| Select all, delete | <kbd>Ctrl</kbd>+<kbd>A</kbd>, <kbd>Del</kbd> |
+| Select all, delete | <kbd>Ctrl</kbd>+<kbd>A</kbd>, <kbd>Del</kbd> or <kbd>Backspace</kbd> |
 | Group into subgraph | <kbd>Ctrl</kbd>+<kbd>G</kbd> |
 | Fit graph to view | <kbd>Ctrl</kbd>+<kbd>0</kbd> |
 | Toggle sidebar, panel, inspector | <kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>Ctrl</kbd>+<kbd>J</kbd>, <kbd>Ctrl</kbd>+<kbd>I</kbd> |

@@ -10,11 +10,17 @@ Measured with `cargo bench` on a 16-thread x86-64 Linux machine:
 | Shared memory | 640×480 RGB | 26 µs |
 | Shared memory | 1080p RGB | 0.7 ms |
 
-Reproduce with:
+These figures come from one development machine; they have not been re-measured since and
+are not checked in CI. Reproduce them with:
 
 ```sh
 cargo bench -p ruro-node -p ruro-transport
 ```
+
+The `ruro-node` bench `local` measures in-process hops (`local_hop/*`, including a loaned
+1080p frame); `ruro-transport` has `hop` (raw shared-memory bytes, no serialisation) and
+`receive` (decoding). `scripts/bench.sh` saves and compares runs (see
+[Benchmarks](runtime.md#benchmarks)).
 
 ## What the numbers mean
 
@@ -33,4 +39,5 @@ cargo bench -p ruro-node -p ruro-transport
 - Watching outputs is cheap: taps produce previews only while someone watches.
 - `ruro status` and the studio show each node's p50/p99 step latency and CPU use; start there
   when something is slow.
-- Real-time scheduling for tight control loops is [in development](upcoming/realtime.md).
+- For tight control loops, use a [real-time group](realtime.md), and measure timer jitter
+  with `cargo bench -p ruro-host --bench jitter`.

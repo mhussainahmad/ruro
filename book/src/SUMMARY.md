@@ -11,9 +11,21 @@
 # Guides
 
 - [Writing nodes in Rust](writing-nodes.md)
+  - [Node packages and hosts](packages.md)
+- [Python nodes](python.md)
 - [Studio](studio.md)
   - [Studio plugins](studio-plugins.md)
+- [Runtime features](runtime.md)
+  - [Real-time scheduling](realtime.md)
+  - [Record and replay](record-replay.md)
+- [Hardware drivers](hardware.md)
+- [Simulation](simulation.md)
+  - [Simulation and the real robot](sim-to-real.md)
+- [Machine learning](ml.md)
+- [ROS 2 bridge](ros2.md)
 - [Deploying on robots](deployment.md)
+  - [Multi-machine graphs](multi-machine.md)
+  - [Security](security.md)
 
 # Reference
 
@@ -22,15 +34,7 @@
   - [Composite nodes](reference/composites.md)
 - [Architecture](architecture.md)
 - [Performance](performance.md)
-
-# In development
-
-- [Python nodes](upcoming/python.md)
-- [ROS 2 bridge](upcoming/ros2.md)
-- [Hardware drivers and simulators](upcoming/drivers.md)
-- [Record and replay](upcoming/record-replay.md)
-- [Real-time scheduling](upcoming/realtime.md)
-- [Multi-machine graphs](upcoming/multi-machine.md)
+- [Project status](status.md)
 
 ---
 

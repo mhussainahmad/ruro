@@ -20,24 +20,33 @@ Configure it in `/etc/default/ruro` (or with `sudo systemctl edit ruro-daemon`):
 
 ```sh
 # /etc/default/ruro
-RURO_LISTEN=tcp/0.0.0.0:7447       # accept connections from the network
+RURO_LISTEN=tls/0.0.0.0:7447         # accept connections from the network
+RURO_TLS_CERT=/etc/ruro/robot.pem    # with TLS and a token, see Security
+RURO_TLS_KEY=/etc/ruro/robot-key.pem
+RURO_TOKEN=change-me
 RURO_HOST=/opt/my-robot/bin/my-host  # host binary with your own nodes
 RURO_LOG=info,zenoh=warn
 ```
 
+The key and the file holding the token should be readable only by root and the `ruro`
+user.
+
 The unit:
 
 - listens on `tcp/127.0.0.1:7447` unless `RURO_LISTEN` says otherwise;
-- keeps deployed graphs in `/run/ruro` and uses `/var/lib/ruro` as its working directory;
+- keeps deployed graphs and its runtime files in `/run/ruro/ruro-<name>/` and uses
+  `/var/lib/ruro` as its working directory (relative paths in graphs, such as model files,
+  are resolved there);
 - raises `LimitRTPRIO` and `LimitMEMLOCK` so real-time process groups can use them;
 - applies systemd hardening that leaves shared memory (`/dev/shm`) and real-time scheduling
   available to the host processes.
 
 Hardware access is granted through groups. Add the `ruro` user to the groups that own your
-devices, for example:
+devices (`dialout` for serial ports, `video` for cameras, `input` for gamepads, and the
+groups of `/dev/gpiochip*` and `/dev/i2c-*` on your system), for example:
 
 ```sh
-sudo usermod -aG dialout,video ruro
+sudo usermod -aG dialout,video,input ruro
 sudo systemctl restart ruro-daemon
 ```
 
@@ -69,8 +78,14 @@ ruro logs
 If several daemons share one router, select one with `--daemon <name>` or `RURO_DAEMON`. A
 daemon's name defaults to its hostname; set it with `ruro daemon --name`.
 
-> The control protocol is not authenticated or encrypted. Only listen on networks you trust,
-> for example the robot's own network or a VPN.
+A daemon listening on `tcp/` accepts anyone who can reach it, without encryption. On any
+network you do not fully trust, use TLS and a token (see [Security](security.md)): the CLI
+then passes `--tls-ca` and `--token` (or `RURO_TLS_CA` and `RURO_TOKEN`). The studio does not
+support TLS or tokens yet; reach a protected robot from the studio through an SSH tunnel to
+the robot's local daemon instead.
+
+To run one graph across several computers of a robot, see
+[Multi-machine graphs](multi-machine.md).
 
 ## Docker
 
@@ -88,7 +103,8 @@ docker run -d --name ruro --restart unless-stopped \
   `--cap-add=SYS_NICE --ulimit rtprio=95 --ulimit memlock=-1`.
 - Give the container access to devices with `--device`, e.g. `--device /dev/ttyUSB0`.
 - To use your own nodes, build an image from this one that adds your host binary and sets
-  `RURO_HOST`.
+  `RURO_HOST`. The image does not contain the Python host.
+- The example graphs are in `/usr/share/ruro/examples/`.
 
 ## Cross-compiling for ARM
 
@@ -117,8 +133,10 @@ CI builds the ARM binaries on every push.
 
 ## Checklist
 
-- [ ] Daemon enabled as a service, listening on the robot's network.
+- [ ] Daemon enabled as a service, listening on the robot's network with TLS and a token.
 - [ ] Custom host installed and `RURO_HOST` set, if you have your own nodes.
 - [ ] Service user in the device groups (`dialout`, `video`, ...).
 - [ ] Graph validated against the robot's daemon: `ruro --connect tcp/robot:7447 check graph.yaml`.
 - [ ] Restart policies set on nodes that must stay up.
+- [ ] A hardware emergency stop within reach: `ruro estop` is a software stop, and the
+      bundled drivers do not implement it yet.

@@ -11,6 +11,10 @@ cargo build
 cargo test --workspace
 ```
 
+Building and testing the whole workspace needs Python 3.11 or newer with its shared library
+(`python3-dev` on Debian and Ubuntu), because of the Python host; see
+[Installation](installation.md#python).
+
 Before opening a pull request, run what CI runs:
 
 ```sh
@@ -21,23 +25,23 @@ cargo test --workspace
 
 ## Working on this book
 
-The book lives in `book/` and is built with [mdBook](https://rust-lang.github.io/mdBook/):
+The book lives in `book/` and is built with [mdBook](https://rust-lang.github.io/mdBook/)
+0.4 (CI uses 0.4.52):
 
 ```sh
-cargo install mdbook --locked
-mkdir -p book/src/images && cp docs/images/*.png book/src/images/
+cargo install mdbook --version 0.4.52 --locked
 mdbook serve book      # live preview at http://localhost:3000
 ```
 
-Screenshots come from `docs/images/` and are rendered headlessly from the studio:
+Images live in `book/src/images/`, where both the book and the README use them. The studio
+screenshots are rendered headlessly from the studio's tests:
 
 ```sh
-RURO_SCREENSHOTS=docs/images cargo test -p ruro-studio screenshots
+RURO_SCREENSHOTS=book/src/images cargo test -p ruro-studio screenshots
 ```
 
-Pages for features that are still being built live under `book/src/upcoming/` and start with a
-status note. When a feature ships, move its page into the main sections and check every
-command and field against the implementation.
+Check every command, flag and field you document against the implementation, and keep
+[Project status](status.md) honest about what is verified and what is not.
 
 ## Reporting issues
 

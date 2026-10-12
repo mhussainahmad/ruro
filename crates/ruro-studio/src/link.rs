@@ -6,11 +6,14 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use ruro_graph::Registry;
-use ruro_proto::{Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, SetParam, TapFrame};
+use ruro_proto::{
+    Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, PlaybackCommand, SetParam, TapFrame,
+};
 use zenoh::Wait;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[derive(Debug)]
 pub enum Command {
     Deploy(String),
     Stop,
@@ -29,6 +32,11 @@ pub enum Command {
         port: String,
     },
     FetchGraph,
+    /// Start recording to a file on the daemon, or stop with an empty path.
+    Record(String),
+    Playback(PlaybackCommand),
+    /// Talk to another daemon reachable through the same endpoint.
+    SwitchDaemon(String),
 }
 
 pub enum Event {
@@ -53,11 +61,16 @@ pub enum Event {
     },
     /// YAML of the graph currently running on the daemon.
     RunningGraph(String),
+    /// Status of any daemon on the network, for the fleet view.
+    Fleet(DaemonStatus),
 }
 
 pub struct Link {
     tx: Sender<Command>,
     pub events: Receiver<Event>,
+    /// What a disabled link was asked to send, for tests.
+    #[cfg(test)]
+    pub sent: Option<Receiver<Command>>,
 }
 
 impl Link {
@@ -74,14 +87,33 @@ impl Link {
             .name("ruro-link".into())
             .spawn(move || run(endpoint, daemon, spawn_daemon, commands, emit))
             .expect("spawn link thread");
-        Self { tx, events }
+        Self {
+            tx,
+            events,
+            #[cfg(test)]
+            sent: None,
+        }
     }
 
     /// A link that never connects, for tests and offline editing.
     pub fn disabled() -> Self {
-        let (tx, _) = unbounded();
+        let (tx, _sent) = unbounded();
         let (_, events) = unbounded();
-        Self { tx, events }
+        Self {
+            tx,
+            events,
+            #[cfg(test)]
+            sent: Some(_sent),
+        }
+    }
+
+    /// Commands sent through a disabled link since the last call.
+    #[cfg(test)]
+    pub fn take_sent(&self) -> Vec<Command> {
+        self.sent
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default()
     }
 
     pub fn send(&self, cmd: Command) {
@@ -102,9 +134,19 @@ impl Emitter {
     }
 }
 
+/// Why a session ended.
+enum Exit {
+    /// The daemon stopped answering.
+    Lost,
+    /// The user picked another daemon.
+    Switch(String),
+    /// The UI is gone.
+    Quit,
+}
+
 fn run(
     endpoint: String,
-    daemon: Option<String>,
+    mut daemon: Option<String>,
     spawn_daemon: bool,
     commands: Receiver<Command>,
     emit: Emitter,
@@ -124,7 +166,9 @@ fn run(
                     emit.emit(Event::Offline(format!("{e:#}")));
                     announced_offline = true;
                 }
-                drain_while_offline(&commands, &emit);
+                if let Some(name) = drain_while_offline(&commands, &emit) {
+                    daemon = Some(name);
+                }
                 continue;
             }
         };
@@ -133,7 +177,9 @@ fn run(
             Err(e) => {
                 emit.emit(Event::Offline(format!("{e:#}")));
                 announced_offline = true;
-                drain_while_offline(&commands, &emit);
+                if let Some(name) = drain_while_offline(&commands, &emit) {
+                    daemon = Some(name);
+                }
                 continue;
             }
         };
@@ -141,12 +187,17 @@ fn run(
             daemon: keys.daemon().to_owned(),
             endpoint: endpoint.clone(),
         });
-        if serve(&session, &keys, &commands, &emit).is_err() {
-            // The command channel closed: the UI is gone.
-            break;
+        match serve(&session, &keys, &commands, &emit) {
+            Exit::Quit => break,
+            Exit::Switch(name) => {
+                daemon = Some(name);
+                announced_offline = false;
+            }
+            Exit::Lost => {
+                emit.emit(Event::Offline("lost connection to daemon".into()));
+                announced_offline = true;
+            }
         }
-        emit.emit(Event::Offline("lost connection to daemon".into()));
-        announced_offline = true;
     }
     if let Some(mut child) = spawned {
         let _ = child.kill();
@@ -154,13 +205,14 @@ fn run(
     }
 }
 
-/// Serves one session until the daemon disappears. `Err` means the UI quit.
+/// Serves one session until the daemon disappears, the user switches to
+/// another daemon or the UI quits.
 fn serve(
     session: &zenoh::Session,
     keys: &Keys,
     commands: &Receiver<Command>,
     emit: &Emitter,
-) -> Result<(), ()> {
+) -> Exit {
     let last_status = std::sync::Arc::new(heartbeat::Heartbeat::now());
 
     let e = emit.clone();
@@ -180,6 +232,16 @@ fn serve(
         .callback(move |s| {
             if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&s.payload().to_bytes()) {
                 e.emit(Event::Metrics(m));
+            }
+        })
+        .wait();
+    // Every daemon on the network, for the fleet view.
+    let e = emit.clone();
+    let _fleet = session
+        .declare_subscriber(Keys::all_status())
+        .callback(move |s| {
+            if let Ok(st) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes()) {
+                e.emit(Event::Fleet(st));
             }
         })
         .wait();
@@ -206,12 +268,17 @@ fn serve(
     let mut taps: HashMap<(String, String), zenoh::pubsub::Subscriber<()>> = HashMap::new();
     loop {
         match commands.recv_timeout(Duration::from_millis(250)) {
+            Ok(Command::SwitchDaemon(name)) => {
+                if name != keys.daemon() {
+                    return Exit::Switch(name);
+                }
+            }
             Ok(cmd) => handle(session, keys, cmd, &mut taps, emit),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return Err(()),
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return Exit::Quit,
         }
         if last_status.elapsed() > Duration::from_secs(3) {
-            return Ok(());
+            return Exit::Lost;
         }
     }
 }
@@ -273,19 +340,38 @@ fn handle(
                 taps.insert((node, port), sub);
             }
         }
+        Command::Record(path) => emit.emit(Event::Reply {
+            op: "record",
+            result: request(Ctl::Record, &path),
+        }),
+        Command::Playback(c) => emit.emit(Event::Reply {
+            op: "playback",
+            result: serde_json::to_string(&c)
+                .map_err(|e| e.to_string())
+                .and_then(|json| request(Ctl::Playback, &json)),
+        }),
+        Command::SwitchDaemon(_) => {}
         Command::Unwatch { node, port } => {
             taps.remove(&(node, port));
         }
     }
 }
 
-fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) {
+/// Answers commands while offline. Returns a daemon the user switched to, if any.
+fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) -> Option<String> {
     let until = Instant::now() + Duration::from_secs(1);
+    let mut switch = None;
     while let Ok(cmd) = commands.recv_deadline(until) {
         let op = match cmd {
             Command::Deploy(_) => "deploy",
             Command::Stop => "stop",
             Command::Kill(_) => "kill",
+            Command::Record(_) => "record",
+            Command::Playback(_) => "playback",
+            Command::SwitchDaemon(name) => {
+                switch = Some(name);
+                continue;
+            }
             _ => continue,
         };
         emit.emit(Event::Reply {
@@ -293,6 +379,7 @@ fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) {
             result: Err("not connected to a daemon".into()),
         });
     }
+    switch
 }
 
 fn is_local(endpoint: &str) -> bool {

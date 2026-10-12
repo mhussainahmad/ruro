@@ -7,16 +7,22 @@ use egui::{
     vec2,
 };
 
-use crate::app::{Activity, Cmd, PanelTab, Studio, example_files, yaml_files};
+use crate::app::{Activity, AlignOp, Cmd, PanelTab, Studio, example_files, yaml_files};
 use crate::icons;
+use crate::theme::ThemeKind;
 use crate::theme::*;
 use crate::widgets;
+use ruro_proto::PlaybackCommand;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PaletteMode {
     Commands,
     Open,
     SaveAs,
+    /// Pick a graph file to compare the open graph with.
+    Compare,
+    /// Type the path of a recording on the daemon to replay.
+    Replay,
 }
 
 pub struct Palette {
@@ -29,10 +35,12 @@ pub struct Palette {
 impl Palette {
     pub fn new(mode: PaletteMode) -> Self {
         let query = match mode {
-            PaletteMode::Commands => String::new(),
-            PaletteMode::Open | PaletteMode::SaveAs => std::env::current_dir()
-                .map(|d| format!("{}/", d.display()))
-                .unwrap_or_default(),
+            PaletteMode::Commands | PaletteMode::Replay => String::new(),
+            PaletteMode::Open | PaletteMode::SaveAs | PaletteMode::Compare => {
+                std::env::current_dir()
+                    .map(|d| format!("{}/", d.display()))
+                    .unwrap_or_default()
+            }
         };
         Self {
             mode,
@@ -61,7 +69,7 @@ fn item(
 ) -> Item {
     Item {
         icon,
-        icon_color: TEXT_DIM,
+        icon_color: TEXT_DIM(),
         title: title.into(),
         detail: detail.into(),
         keys,
@@ -132,7 +140,7 @@ fn commands(s: &Studio) -> Vec<Item> {
             .outputs
             .first()
             .or(d.inputs.first())
-            .map_or(TEXT_DIM, |p| type_color(&p.ty));
+            .map_or(TEXT_DIM(), |p| type_color(&p.ty));
         v.push(it);
     }
     for n in s.doc.snarl.nodes() {
@@ -239,11 +247,336 @@ fn commands(s: &Studio) -> Vec<Item> {
             "Ctrl+I",
             Cmd::ToggleInspector,
         ),
+        item(
+            icons::NETWORK,
+            "View: Fleet",
+            "daemons on the network",
+            "",
+            Cmd::Activity(Activity::Fleet),
+        ),
+        item(
+            icons::COMPARE,
+            "View: Changes",
+            "",
+            "",
+            Cmd::Activity(Activity::Changes),
+        ),
     ]);
+    for (k, _) in &s.plugin_panels {
+        v.push(item(
+            icons::PANEL_BOTTOM,
+            format!("View: {}", k.title),
+            "",
+            "",
+            Cmd::ShowPanel(PanelTab::Plugin(k.id)),
+        ));
+    }
+    v.extend(edit_commands(s));
+    v.extend(more_commands(s));
     v
 }
 
-fn files(query: &str, save: bool) -> Vec<Item> {
+fn edit_commands(s: &Studio) -> Vec<Item> {
+    let mut v = vec![
+        item(icons::UNDO, "Edit: Undo", "", "Ctrl+Z", Cmd::Undo),
+        item(icons::REDO, "Edit: Redo", "", "Ctrl+Shift+Z", Cmd::Redo),
+        item(
+            icons::SQUARE_DASHED,
+            "Edit: Select All",
+            "",
+            "Ctrl+A",
+            Cmd::SelectAll,
+        ),
+    ];
+    let selected = s.selected_nodes().len();
+    if selected > 0 {
+        v.extend([
+            item(icons::COPY, "Edit: Copy", "", "Ctrl+C", Cmd::Copy),
+            item(icons::SCISSORS, "Edit: Cut", "", "Ctrl+X", Cmd::Cut),
+            item(
+                icons::COPY_PLUS,
+                "Edit: Duplicate",
+                "",
+                "Ctrl+D",
+                Cmd::Duplicate,
+            ),
+            item(
+                icons::TRASH_2,
+                "Edit: Delete Selection",
+                "",
+                "Del",
+                Cmd::DeleteSelection,
+            ),
+            item(
+                icons::GROUP,
+                "Edit: Group into Subgraph",
+                "",
+                "Ctrl+G",
+                Cmd::GroupSelection,
+            ),
+        ]);
+    }
+    if let Some(text) = s.clipboard.clone() {
+        v.push(item(
+            icons::CLIPBOARD_PASTE,
+            "Edit: Paste",
+            "",
+            "Ctrl+V",
+            Cmd::Paste(text),
+        ));
+    }
+    if selected > 1 {
+        for op in AlignOp::ALL {
+            v.push(item(
+                op.icon(),
+                format!("Arrange: {}", op.label()),
+                "",
+                "",
+                Cmd::Align(op),
+            ));
+        }
+    }
+    if let Some(n) = s.focused.and_then(|id| s.doc.snarl.get_node(id)) {
+        if n.is_composite() {
+            v.push(item(
+                icons::OPEN_IN,
+                format!("Subgraph: Open {}", n.id),
+                "",
+                "",
+                Cmd::OpenSubgraph(n.id.clone()),
+            ));
+            v.push(item(
+                icons::UNGROUP,
+                format!("Subgraph: Ungroup {}", n.id),
+                "",
+                "",
+                Cmd::Ungroup(n.id.clone()),
+            ));
+        } else if s.registry.get(&n.kind).is_some_and(|d| d.source.is_some()) {
+            v.push(item(
+                icons::FILE_CODE,
+                "Open Node Source",
+                n.kind.clone(),
+                "",
+                Cmd::OpenNodeSource(n.id.clone()),
+            ));
+        }
+    }
+    v
+}
+
+fn more_commands(s: &Studio) -> Vec<Item> {
+    let mut v = Vec::new();
+    for t in crate::templates::TEMPLATES {
+        v.push(item(
+            t.icon,
+            format!("File: New from Template: {}", t.title),
+            t.description,
+            "",
+            Cmd::NewFromTemplate(t.id),
+        ));
+    }
+    v.push(item(
+        icons::SEARCH,
+        "File: Quick Open…",
+        "",
+        "Ctrl+P",
+        Cmd::QuickOpen,
+    ));
+    for p in s.settings.recent.iter().take(8) {
+        v.push(item(
+            icons::HISTORY,
+            format!("File: Open Recent {}", crate::app::file_name(p)),
+            p.display().to_string(),
+            "",
+            Cmd::Open(p.clone()),
+        ));
+    }
+    if s.doc.path.is_some() {
+        v.push(item(
+            icons::COMPARE,
+            "File: Compare with Saved",
+            "",
+            "",
+            Cmd::CompareWithSaved,
+        ));
+    }
+    v.push(item(
+        icons::FILE_DIFF,
+        "File: Compare with File…",
+        "",
+        "",
+        Cmd::CompareDialog,
+    ));
+    if s.compare.is_some() {
+        v.push(item(
+            icons::X,
+            "File: Close Comparison",
+            "",
+            "",
+            Cmd::CloseCompare,
+        ));
+    }
+    v.push(item(
+        icons::X,
+        "File: Close Tab",
+        "",
+        "Ctrl+W",
+        Cmd::CloseTab(s.doc.uid),
+    ));
+    for d in s.tabs() {
+        if d.uid != s.doc.uid {
+            v.push(item(
+                icons::WORKFLOW,
+                format!("Go to Tab: {}", s.tab_title(d)),
+                "",
+                "",
+                Cmd::SwitchTab(d.uid),
+            ));
+        }
+    }
+    let (theme, glyph) = match s.theme {
+        ThemeKind::Dark => (ThemeKind::Light, icons::SUN),
+        ThemeKind::Light => (ThemeKind::Dark, icons::MOON),
+    };
+    v.push(item(
+        glyph,
+        format!(
+            "Preferences: {} Theme",
+            if theme == ThemeKind::Light {
+                "Light"
+            } else {
+                "Dark"
+            }
+        ),
+        "",
+        "",
+        Cmd::SetTheme(theme),
+    ));
+    let recording = s.status.as_ref().is_some_and(|st| st.recording.is_some());
+    if recording {
+        v.push(item(
+            icons::CIRCLE_STOP,
+            "Run: Stop Recording",
+            "",
+            "",
+            Cmd::StopRecording,
+        ));
+    } else if s.running_graph().is_some() {
+        v.push(item(
+            icons::DISC,
+            "Run: Start Recording",
+            s.default_recording(),
+            "",
+            Cmd::StartRecording(s.default_recording()),
+        ));
+    }
+    if s.online() {
+        v.push(item(
+            icons::FILM,
+            "Run: Replay Recording…",
+            "",
+            "",
+            Cmd::ReplayDialog,
+        ));
+    }
+    if let Some(pb) = s.status.as_ref().and_then(|st| st.playback.as_ref()) {
+        let (label, cmd) = if pb.paused {
+            ("Replay: Resume", PlaybackCommand::Resume)
+        } else {
+            ("Replay: Pause", PlaybackCommand::Pause)
+        };
+        v.push(item(icons::PAUSE, label, "", "", Cmd::Playback(cmd)));
+        v.push(item(
+            icons::X,
+            "Replay: Stop",
+            "",
+            "",
+            Cmd::Playback(PlaybackCommand::Stop),
+        ));
+    }
+    let current = s.daemon_name();
+    for name in s.fleet.keys() {
+        if Some(name.as_str()) != current {
+            v.push(item(
+                icons::PLUG,
+                format!("Fleet: Connect to {name}"),
+                "",
+                "",
+                Cmd::ConnectDaemon(name.clone()),
+            ));
+        }
+    }
+    v
+}
+
+/// Recordings are files on the daemon, which may be another machine: the
+/// user types a path.
+fn replay(query: &str) -> Vec<Item> {
+    let typed = query.trim();
+    if typed.is_empty() {
+        return Vec::new();
+    }
+    vec![item(
+        icons::FILM,
+        format!("Replay {typed}"),
+        "on the connected daemon",
+        "Enter",
+        Cmd::Playback(PlaybackCommand::Start {
+            file: typed.to_owned(),
+            rate: 1.0,
+        }),
+    )]
+}
+
+fn files(s: &Studio, query: &str, mode: PaletteMode) -> Vec<Item> {
+    let save = mode == PaletteMode::SaveAs;
+    let compare = mode == PaletteMode::Compare;
+    let mut v = files_in(query, save);
+    if compare {
+        for it in &mut v {
+            if let Cmd::Open(p) = &it.cmd {
+                it.cmd = Cmd::CompareWith(p.clone());
+                it.title = it.title.replacen("Open ", "Compare with ", 1);
+            }
+        }
+    }
+    if mode == PaletteMode::Open {
+        let typed = query.trim();
+        let recent: Vec<Item> = s
+            .settings
+            .recent
+            .iter()
+            .filter(|p| p.display().to_string().starts_with(typed) || typed.ends_with('/'))
+            .take(5)
+            .map(|p| {
+                let mut it = item(
+                    icons::HISTORY,
+                    crate::app::file_name(p),
+                    p.parent()
+                        .map(|d| d.display().to_string())
+                        .unwrap_or_default(),
+                    "recent",
+                    Cmd::Open(p.clone()),
+                );
+                it.icon_color = ACCENT_TEXT();
+                it
+            })
+            .collect();
+        v.retain(|it| {
+            !recent
+                .iter()
+                .any(|r| matches!((&r.cmd, &it.cmd), (Cmd::Open(a), Cmd::Open(b)) if a == b))
+        });
+        let at = usize::from(v.first().is_some_and(|it| it.keys == "Enter"));
+        for (i, r) in recent.into_iter().enumerate() {
+            v.insert(at + i, r);
+        }
+    }
+    v
+}
+
+fn files_in(query: &str, save: bool) -> Vec<Item> {
     let q = Path::new(query);
     let dir = if query.ends_with('/') {
         q.to_path_buf()
@@ -332,8 +665,8 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
     };
     let mut items = match pal.mode {
         PaletteMode::Commands => commands(s),
-        PaletteMode::Open => files(&pal.query, false),
-        PaletteMode::SaveAs => files(&pal.query, true),
+        PaletteMode::Replay => replay(&pal.query),
+        mode => files(s, &pal.query, mode),
     };
     if pal.mode == PaletteMode::Commands {
         let mut scored: Vec<(i32, Item)> = items
@@ -372,14 +705,14 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
         ))
         .show(ctx, |ui| {
             Frame::new()
-                .fill(CARD)
-                .stroke(Stroke::new(1.0, BORDER_STRONG))
+                .fill(CARD())
+                .stroke(Stroke::new(1.0, BORDER_STRONG()))
                 .corner_radius(CornerRadius::same(RADIUS_LG))
                 .shadow(egui::Shadow {
                     offset: [0, 10],
                     blur: 32,
                     spread: 0,
-                    color: Color32::from_black_alpha(160),
+                    color: shadow(160),
                 })
                 .inner_margin(Margin::same(6))
                 .show(ui, |ui| {
@@ -390,10 +723,12 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                         }
                         PaletteMode::Open => "Path of a graph to open",
                         PaletteMode::SaveAs => "Path to save the graph to",
+                        PaletteMode::Compare => "Path of a graph to compare with",
+                        PaletteMode::Replay => "Path of a recording on the daemon, e.g. run.mcap",
                     };
                     let field = Frame::new()
-                        .fill(FIELD)
-                        .stroke(Stroke::new(1.0, ACCENT))
+                        .fill(FIELD())
+                        .stroke(Stroke::new(1.0, ACCENT()))
                         .corner_radius(CornerRadius::same(RADIUS))
                         .inner_margin(Margin::symmetric(8, 5))
                         .show(ui, |ui| {
@@ -406,13 +741,13 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                                         icons::FOLDER_OPEN
                                     },
                                     14.0,
-                                    TEXT_DIM,
+                                    TEXT_DIM(),
                                 );
                                 ui.add(
                                     egui::TextEdit::singleline(&mut pal.query)
                                         .frame(Frame::NONE)
                                         .font(font(14.0))
-                                        .hint_text(RichText::new(hint).color(TEXT_FAINT))
+                                        .hint_text(RichText::new(hint).color(TEXT_FAINT()))
                                         .desired_width(f32::INFINITY),
                                 )
                             })
@@ -429,7 +764,7 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                     ui.add_space(4.0);
                     if items.is_empty() {
                         ui.add_space(4.0);
-                        ui.label(RichText::new("  No matching results").color(TEXT_FAINT));
+                        ui.label(RichText::new("  No matching results").color(TEXT_FAINT()));
                         ui.add_space(4.0);
                     }
                     egui::ScrollArea::vertical()
@@ -446,7 +781,7 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                                     ui.painter().rect_filled(
                                         rect,
                                         CornerRadius::same(RADIUS),
-                                        SELECTED,
+                                        SELECTED(),
                                     );
                                     if up || down {
                                         ui.scroll_to_rect(rect, None);
@@ -455,7 +790,7 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                                     ui.painter().rect_filled(
                                         rect,
                                         CornerRadius::same(RADIUS),
-                                        HOVER,
+                                        HOVER(),
                                     );
                                 }
                                 let p = ui.painter();
@@ -469,8 +804,12 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                                     14.0,
                                     it.icon_color,
                                 );
-                                let title =
-                                    widgets::galley(ui, it.title.clone(), font(13.0), TEXT_STRONG);
+                                let title = widgets::galley(
+                                    ui,
+                                    it.title.clone(),
+                                    font(13.0),
+                                    TEXT_STRONG(),
+                                );
                                 let tw = title.size().x;
                                 p.galley(
                                     pos2(
@@ -478,7 +817,7 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                                         rect.center().y - title.size().y / 2.0,
                                     ),
                                     title,
-                                    TEXT_STRONG,
+                                    TEXT_STRONG(),
                                 );
                                 if !it.detail.is_empty() {
                                     let room =
@@ -489,7 +828,7 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                                             Align2::LEFT_CENTER,
                                             widgets::truncate(&it.detail, room),
                                             font(12.0),
-                                            TEXT_FAINT,
+                                            TEXT_FAINT(),
                                         );
                                     }
                                 }
@@ -499,7 +838,7 @@ pub fn show(s: &mut Studio, ctx: &egui::Context) {
                                         Align2::RIGHT_CENTER,
                                         it.keys,
                                         font(11.5),
-                                        TEXT_DIM,
+                                        TEXT_DIM(),
                                     );
                                 }
                                 if resp.clicked() {

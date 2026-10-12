@@ -6,17 +6,18 @@ use ruro_graph::{ParamDesc, ParamKind, RestartPolicy};
 use ruro_proto::NodeState;
 use serde_json::Value;
 
-use crate::app::{Cmd, PanelTab, Studio};
+use crate::app::{AlignOp, Cmd, PanelTab, Studio};
 use crate::icons;
 use crate::theme::*;
 use crate::widgets::{self, Side};
 
-pub fn show(s: &mut Studio, ui: &mut Ui) {
+/// Draws the inspector. Returns its width.
+pub fn show(s: &mut Studio, ui: &mut Ui) -> f32 {
     egui::Panel::right("inspector")
         .resizable(true)
-        .default_size(312.0)
+        .default_size(s.settings.inspector_width.unwrap_or(312.0))
         .size_range(260.0..=520.0)
-        .frame(Frame::new().fill(CHROME))
+        .frame(Frame::new().fill(CHROME()))
         .show(ui, |ui| {
             widgets::edge(ui, Side::Left);
             Frame::new()
@@ -32,7 +33,7 @@ pub fn show(s: &mut Studio, ui: &mut Ui) {
                         ui.label(
                             RichText::new("INSPECTOR")
                                 .font(font_semibold(11.0))
-                                .color(TEXT_DIM),
+                                .color(TEXT_DIM()),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if widgets::icon_button(
@@ -58,13 +59,72 @@ pub fn show(s: &mut Studio, ui: &mut Ui) {
                             bottom: 16,
                         })
                         .show(ui, |ui| {
+                            let selected = s.selected_nodes();
                             match s.focused.filter(|&id| s.doc.snarl.get_node(id).is_some()) {
+                                _ if selected.len() > 1 => selection(s, ui, selected.len()),
                                 Some(id) => node(s, ui, id),
                                 None => graph(s, ui),
                             }
                         });
                 });
+        })
+        .response
+        .rect
+        .width()
+}
+
+/// Several nodes selected: operations on all of them.
+fn selection(s: &mut Studio, ui: &mut Ui, n: usize) {
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        widgets::icon(ui, icons::SQUARE_DASHED, 16.0, ACCENT_TEXT());
+        ui.label(
+            RichText::new(format!("{n} nodes selected"))
+                .font(font_semibold(15.0))
+                .color(TEXT_STRONG()),
+        );
+    });
+    ui.add_space(8.0);
+    widgets::hairline(ui);
+    section(s, ui, "Arrange", |s, ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for op in AlignOp::ALL {
+                if widgets::icon_button_sized(ui, op.icon(), op.label(), 28.0, 15.0, false)
+                    .clicked()
+                {
+                    s.push(Cmd::Align(op));
+                }
+            }
         });
+    });
+    section(s, ui, "Edit", |s, ui| {
+        for (glyph, label, keys, cmd) in [
+            (icons::COPY_PLUS, "Duplicate", "Ctrl+D", Cmd::Duplicate),
+            (icons::COPY, "Copy", "Ctrl+C", Cmd::Copy),
+            (
+                icons::GROUP,
+                "Group into subgraph",
+                "Ctrl+G",
+                Cmd::GroupSelection,
+            ),
+        ] {
+            if widgets::list_row(ui, glyph, TEXT_DIM(), label, keys, false).clicked() {
+                s.push(cmd);
+            }
+        }
+    });
+    ui.add_space(10.0);
+    if widgets::button(
+        ui,
+        Some(icons::TRASH_2),
+        &format!("Delete {n} nodes"),
+        widgets::ButtonKind::Danger,
+    )
+    .clicked()
+    {
+        s.push(Cmd::DeleteSelection);
+    }
 }
 
 fn section(s: &mut Studio, ui: &mut Ui, title: &str, add: impl FnOnce(&mut Studio, &mut Ui)) {
@@ -85,11 +145,11 @@ fn section(s: &mut Studio, ui: &mut Ui, title: &str, add: impl FnOnce(&mut Studi
 fn graph(s: &mut Studio, ui: &mut Ui) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        widgets::icon(ui, icons::WORKFLOW, 16.0, ACCENT_TEXT);
+        widgets::icon(ui, icons::WORKFLOW, 16.0, ACCENT_TEXT());
         ui.label(
             RichText::new("Graph")
                 .font(font_semibold(15.0))
-                .color(TEXT_STRONG),
+                .color(TEXT_STRONG()),
         );
     });
     ui.add_space(8.0);
@@ -114,7 +174,7 @@ fn graph(s: &mut Studio, ui: &mut Ui) {
                 .path
                 .as_ref()
                 .map_or("not saved".to_owned(), |p| p.display().to_string());
-            ui.label(RichText::new(widgets::truncate(&path, 34)).color(TEXT_DIM))
+            ui.label(RichText::new(widgets::truncate(&path, 34)).color(TEXT_DIM()))
                 .on_hover_text(path);
         });
         let graph = s.doc.to_graph(&s.registry);
@@ -144,7 +204,7 @@ fn graph(s: &mut Studio, ui: &mut Ui) {
         let n = s.issues.len();
         section(s, ui, "Problems", |s, ui| {
             ui.horizontal(|ui| {
-                widgets::icon(ui, icons::CIRCLE_ALERT, 14.0, ERR);
+                widgets::icon(ui, icons::CIRCLE_ALERT, 14.0, ERR());
                 if ui
                     .link(format!(
                         "{n} problem{} block running",
@@ -177,9 +237,9 @@ fn graph(s: &mut Studio, ui: &mut Ui) {
             ),
         ] {
             ui.horizontal_top(|ui| {
-                widgets::icon(ui, glyph, 13.0, TEXT_FAINT);
+                widgets::icon(ui, glyph, 13.0, TEXT_FAINT());
                 ui.add(
-                    egui::Label::new(RichText::new(text).font(font(12.0)).color(TEXT_DIM)).wrap(),
+                    egui::Label::new(RichText::new(text).font(font(12.0)).color(TEXT_DIM())).wrap(),
                 );
             });
             ui.add_space(4.0);
@@ -189,16 +249,25 @@ fn graph(s: &mut Studio, ui: &mut Ui) {
 
 fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
     let n = s.doc.snarl[id].clone();
-    let desc = s.registry.get(&n.kind).cloned();
-    let live_metrics = s.metrics.get(&n.id).filter(|_| s.live()).cloned();
+    let desc = s.doc.descriptor(&n, &s.registry).cloned();
+    let live_metrics = crate::canvas::node_metrics(&s.metrics, &n).filter(|_| s.live());
+    let composite = n.is_composite();
 
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        let tint = desc
-            .as_ref()
-            .and_then(|d| d.outputs.first().or(d.inputs.first()))
-            .map_or(TEXT_DIM, |p| type_color(&p.ty));
-        widgets::icon(ui, kind_icon(&n.kind), 16.0, tint);
+        let tint = if composite {
+            ACCENT_TEXT()
+        } else {
+            desc.as_ref()
+                .and_then(|d| d.outputs.first().or(d.inputs.first()))
+                .map_or(TEXT_DIM(), |p| type_color(&p.ty))
+        };
+        let glyph = if composite {
+            icons::BOXES
+        } else {
+            kind_icon(&n.kind)
+        };
+        widgets::icon(ui, glyph, 16.0, tint);
         let buf = match &mut s.rename {
             Some((nid, buf)) if *nid == id => buf,
             _ => {
@@ -214,9 +283,9 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
         );
         if let Some(m) = &live_metrics {
             let c = match m.state {
-                NodeState::Running => OK,
-                NodeState::Failed => ERR,
-                _ => WARN,
+                NodeState::Running => OK(),
+                NodeState::Failed => ERR(),
+                _ => WARN(),
             };
             widgets::dot(ui, c, 4.0).on_hover_text(format!("{:?}", m.state).to_lowercase());
         }
@@ -224,21 +293,72 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
             let new = buf.trim().to_owned();
             s.rename = None;
             if new != n.id {
-                rename(s, id, &n.id, new);
+                s.rename_node(id, &new);
             }
         }
     });
-    ui.label(
-        RichText::new(&n.kind)
+    let source = desc
+        .as_ref()
+        .and_then(|d| d.source.clone())
+        .filter(|_| !composite);
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(if n.kind == ruro_graph::COMPOSITE {
+                "inline subgraph"
+            } else {
+                &n.kind
+            })
             .font(font_mono(11.5))
-            .color(ACCENT_TEXT),
-    );
+            .color(ACCENT_TEXT()),
+        );
+        if let Some(src) = &source
+            && widgets::icon_button_sized(
+                ui,
+                icons::FILE_CODE,
+                &format!("Open node source\n{src}"),
+                20.0,
+                12.0,
+                false,
+            )
+            .clicked()
+        {
+            s.push(Cmd::OpenNodeSource(n.id.clone()));
+        }
+    });
     if let Some(d) = &desc {
-        ui.add(egui::Label::new(RichText::new(&d.doc).font(font(12.0)).color(TEXT_DIM)).wrap());
+        ui.add(egui::Label::new(RichText::new(&d.doc).font(font(12.0)).color(TEXT_DIM())).wrap());
+    } else if composite {
+        ui.label(RichText::new("The subgraph cannot be loaded.").color(ERR()));
     } else {
         ui.label(
-            RichText::new("This node type is not available on the connected host.").color(ERR),
+            RichText::new("This node type is not available on the connected host.").color(ERR()),
         );
+    }
+    if composite {
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if widgets::button(
+                ui,
+                Some(icons::OPEN_IN),
+                "Open subgraph",
+                widgets::ButtonKind::Secondary,
+            )
+            .clicked()
+            {
+                s.push(Cmd::OpenSubgraph(n.id.clone()));
+            }
+            if widgets::button(
+                ui,
+                Some(icons::UNGROUP),
+                "Ungroup",
+                widgets::ButtonKind::Secondary,
+            )
+            .clicked()
+            {
+                s.push(Cmd::Ungroup(n.id.clone()));
+            }
+        });
     }
     ui.add_space(8.0);
     widgets::hairline(ui);
@@ -260,8 +380,95 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
                 }
             },
         );
+        machine_row(s, ui, id);
         let default_rate = desc.as_ref().and_then(|d| d.default_rate);
         let is_source = desc.as_ref().is_some_and(|d| d.inputs.is_empty());
+        if !composite {
+            trigger_row(s, ui, id, &n, default_rate, is_source);
+        }
+        restart_row(s, ui, id, &n);
+    });
+    execution_end(s, ui, id, n, desc, live_metrics);
+}
+
+/// Which daemon runs the node's process. Applies to the whole process group.
+fn machine_row(s: &mut Studio, ui: &mut Ui, id: NodeId) {
+    let group = s.doc.snarl[id]
+        .group
+        .clone()
+        .filter(|g| !g.is_empty())
+        .unwrap_or_else(|| ruro_graph::DEFAULT_GROUP.to_owned());
+    let current = s.doc.groups.get(&group).and_then(|c| c.machine.clone());
+    let mut names: Vec<String> = s.fleet.keys().cloned().collect();
+    if let Some(c) = &current
+        && !names.contains(c)
+    {
+        names.push(c.clone());
+    }
+    let local = s.daemon_name().map(str::to_owned);
+    widgets::prop_row(
+        ui,
+        "Machine",
+        "Daemon that runs this node's process. Applies to every node in the process.",
+        |ui| {
+            let shown = current.clone().unwrap_or_else(|| match &local {
+                Some(d) => format!("this daemon ({d})"),
+                None => "this daemon".to_owned(),
+            });
+            let mut pick: Option<Option<String>> = None;
+            egui::ComboBox::from_id_salt("machine")
+                .selected_text(widgets::truncate(&shown, 28))
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(current.is_none(), "This daemon")
+                        .on_hover_text("Run on the daemon the graph is deployed to")
+                        .clicked()
+                    {
+                        pick = Some(None);
+                    }
+                    for name in &names {
+                        if ui
+                            .selectable_label(current.as_deref() == Some(name), name)
+                            .clicked()
+                        {
+                            pick = Some(Some(name.clone()));
+                        }
+                    }
+                    ui.separator();
+                    let draft_id = ui.id().with("custom-machine");
+                    let mut draft: String = ui.data(|d| d.get_temp(draft_id)).unwrap_or_default();
+                    let resp = widgets::text_field(ui, &mut draft, "other daemon name");
+                    if resp.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && ruro_graph::is_valid_ident(draft.trim())
+                    {
+                        pick = Some(Some(draft.trim().to_owned()));
+                        draft.clear();
+                    }
+                    ui.data_mut(|d| d.insert_temp(draft_id, draft));
+                });
+            if let Some(m) = pick {
+                let cfg = s.doc.groups.entry(group.clone()).or_default();
+                cfg.machine = m;
+                if *cfg == ruro_graph::GroupConfig::default() {
+                    s.doc.groups.shift_remove(&group);
+                }
+                s.doc.touch_structure();
+            }
+        },
+    );
+}
+
+fn trigger_row(
+    s: &mut Studio,
+    ui: &mut Ui,
+    id: NodeId,
+    n: &crate::model::GNode,
+    default_rate: Option<f64>,
+    is_source: bool,
+) {
+    {
         widgets::prop_row(
             ui,
             "Trigger",
@@ -290,10 +497,15 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
                         s.doc.touch_structure();
                     }
                 } else {
-                    ui.label(RichText::new("on input").color(TEXT_DIM));
+                    ui.label(RichText::new("on input").color(TEXT_DIM()));
                 }
             },
         );
+    }
+}
+
+fn restart_row(s: &mut Studio, ui: &mut Ui, id: NodeId, n: &crate::model::GNode) {
+    {
         widgets::prop_row(
             ui,
             "Restart",
@@ -317,18 +529,28 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
                     });
             },
         );
-    });
+    }
+}
 
+/// Parameters, ports, runtime metrics and the delete button.
+fn execution_end(
+    s: &mut Studio,
+    ui: &mut Ui,
+    id: NodeId,
+    n: crate::model::GNode,
+    desc: Option<ruro_graph::NodeDescriptor>,
+    live_metrics: Option<ruro_proto::NodeMetrics>,
+) {
     if let Some(d) = desc.as_ref().filter(|d| !d.params.is_empty()) {
         let live_params = live_metrics.is_some();
         section(s, ui, "Parameters", |s, ui| {
             if live_params {
                 ui.horizontal(|ui| {
-                    widgets::icon(ui, icons::ZAP, 12.0, OK);
+                    widgets::icon(ui, icons::ZAP, 12.0, OK());
                     ui.label(
                         RichText::new("Changes apply to the running node instantly")
                             .font(font(11.5))
-                            .color(TEXT_DIM),
+                            .color(TEXT_DIM()),
                     );
                 });
                 ui.add_space(2.0);
@@ -368,11 +590,11 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
                     ui.horizontal(|ui| {
                         ui.set_min_height(24.0);
                         widgets::dot(ui, type_color(&p.ty), 4.0);
-                        ui.label(RichText::new(&p.name).color(TEXT));
+                        ui.label(RichText::new(&p.name).color(TEXT()));
                         ui.label(
                             RichText::new(format!("{dir} · {}", p.ty))
                                 .font(font_mono(11.0))
-                                .color(TEXT_FAINT),
+                                .color(TEXT_FAINT()),
                         );
                         if dir == "out" {
                             ui.with_layout(
@@ -416,7 +638,7 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
         section(s, ui, "Runtime", |_, ui| {
             let row = |ui: &mut Ui, k: &str, v: String| {
                 widgets::prop_row(ui, k, "", |ui| {
-                    ui.label(RichText::new(v).font(font_mono(12.0)).color(TEXT))
+                    ui.label(RichText::new(v).font(font_mono(12.0)).color(TEXT()))
                 });
             };
             row(ui, "State", format!("{:?}", m.state).to_lowercase());
@@ -432,9 +654,9 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
             if let Some(e) = &m.last_error {
                 ui.add_space(2.0);
                 let color = if m.state == NodeState::Failed {
-                    ERR
+                    ERR()
                 } else {
-                    WARN
+                    WARN()
                 };
                 ui.add(
                     egui::Label::new(RichText::new(e).font(font_mono(11.5)).color(color)).wrap(),
@@ -452,29 +674,7 @@ fn node(s: &mut Studio, ui: &mut Ui, id: NodeId) {
     )
     .clicked()
     {
-        s.push(Cmd::DeleteFocused);
-    }
-}
-
-fn rename(s: &mut Studio, id: NodeId, old: &str, new: String) {
-    if !ruro_graph::is_valid_ident(&new) {
-        s.toast(
-            crate::app::Severity::Error,
-            "Node names may only contain letters, digits, - and _",
-        );
-    } else if s.doc.find(&new).is_some() {
-        s.toast(
-            crate::app::Severity::Error,
-            format!("A node named {new} already exists"),
-        );
-    } else {
-        for w in &mut s.watches {
-            if w.node == old {
-                w.node = new.clone();
-            }
-        }
-        s.doc.snarl[id].id = new;
-        s.doc.touch_structure();
+        s.push(Cmd::DeleteNode(n.id.clone()));
     }
 }
 
@@ -487,15 +687,25 @@ fn policy_name(p: RestartPolicy) -> &'static str {
 }
 
 /// Editor for one parameter. Returns the new value if it changed.
+/// Names a slider after its parameter for screen readers and UI tests (the
+/// visible label is drawn separately).
+fn named(resp: egui::Response, name: &str, value: f64) -> egui::Response {
+    resp.widget_info(|| egui::WidgetInfo::slider(true, value, name));
+    resp
+}
+
 fn param_widget(ui: &mut Ui, p: &ParamDesc, current: &Value) -> Option<Value> {
     ui.spacing_mut().slider_width = (ui.available_width() - 86.0).max(60.0);
     match p.kind {
         ParamKind::Int => {
             let mut v = current.as_i64().unwrap_or(0);
             let changed = match (p.min, p.max) {
-                (Some(a), Some(b)) => ui
-                    .add(egui::Slider::new(&mut v, a as i64..=b as i64))
-                    .changed(),
+                (Some(a), Some(b)) => named(
+                    ui.add(egui::Slider::new(&mut v, a as i64..=b as i64)),
+                    &p.name,
+                    v as f64,
+                )
+                .changed(),
                 _ => ui.add(egui::DragValue::new(&mut v)).changed(),
             };
             changed.then(|| Value::from(v))
@@ -503,13 +713,16 @@ fn param_widget(ui: &mut Ui, p: &ParamDesc, current: &Value) -> Option<Value> {
         ParamKind::Float => {
             let mut v = current.as_f64().unwrap_or(0.0);
             let changed = match (p.min, p.max) {
-                (Some(a), Some(b)) => ui
-                    .add(
+                (Some(a), Some(b)) => named(
+                    ui.add(
                         egui::Slider::new(&mut v, a..=b)
                             .logarithmic(b - a > 100.0 && a >= 0.0)
                             .max_decimals(3),
-                    )
-                    .changed(),
+                    ),
+                    &p.name,
+                    v,
+                )
+                .changed(),
                 _ => ui.add(egui::DragValue::new(&mut v).speed(0.01)).changed(),
             };
             changed.then(|| Value::from(v))

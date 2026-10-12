@@ -1,0 +1,23 @@
+# A closed control loop: a PID controller drives a simulated joint to follow a
+# target trajectory. Replace `arm` with your actuator driver and `target` with
+# your planner.
+name: pid-loop
+nodes:
+  target:
+    type: std/sine
+    rate: 100
+    params: { frequency: 0.25, amplitude: 1.0 }
+    pos: [0, 0]
+  pid:
+    type: std/pid
+    params: { kp: 4.0, ki: 0.5, kd: 0.05, limit: 3.0 }
+    pos: [360, 40]
+  arm:
+    type: std/fake-arm
+    rate: 200
+    group: actuator
+    pos: [720, 40]
+wires:
+  - target.value -> pid.setpoint
+  - arm.position -> pid.measured
+  - pid.command -> arm.velocity

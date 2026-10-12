@@ -1,0 +1,28 @@
+# A camera feeding an image pipeline. The camera runs in its own process so a
+# driver crash cannot take the pipeline down; the vision nodes share a process
+# and pass frames without copying.
+name: camera-pipeline
+nodes:
+  camera:
+    type: std/fake-camera
+    group: camera
+    rate: 30
+    params: { width: 640, height: 480 }
+    pos: [0, 0]
+  blur:
+    type: std/blur
+    group: vision
+    params: { radius: 3 }
+    pos: [380, 0]
+  gray:
+    type: std/grayscale
+    group: vision
+    pos: [380, 200]
+  stats:
+    type: std/image-stats
+    group: vision
+    pos: [760, 200]
+wires:
+  - camera.image -> blur.image
+  - blur.out -> gray.image
+  - gray.out -> stats.image

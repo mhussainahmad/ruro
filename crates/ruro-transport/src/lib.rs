@@ -34,6 +34,30 @@ fn quiet() {
     iceoryx2::prelude::set_log_level(LogLevel::Error);
 }
 
+/// How long opening a service keeps retrying while another process is
+/// creating or removing it.
+const OPEN_RETRY: Duration = Duration::from_secs(10);
+
+/// Calls `open` until it succeeds, fails with a non-transient error, or
+/// [`OPEN_RETRY`] passes. Processes of one graph start together, so one often
+/// tries to open a service at the moment another is still creating it.
+fn retry_while_in_flux<T, E>(
+    mut open: impl FnMut() -> std::result::Result<T, E>,
+    transient: impl Fn(&E) -> bool,
+) -> std::result::Result<T, E> {
+    let deadline = std::time::Instant::now() + OPEN_RETRY;
+    let mut pause = Duration::from_millis(1);
+    loop {
+        match open() {
+            Err(e) if transient(&e) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
+            result => return result,
+        }
+    }
+}
+
 /// A process-local handle to the shared-memory transport.
 pub struct Shm {
     node: iceoryx2::node::Node<Svc>,
@@ -75,29 +99,74 @@ impl Shm {
         topic: &str,
     ) -> Result<iceoryx2::service::port_factory::publish_subscribe::PortFactory<Svc, [u8], ()>>
     {
-        self.node
-            .service_builder(&Self::service_name(topic)?)
-            .publish_subscribe::<[u8]>()
-            .enable_safe_overflow(true)
-            .subscriber_max_buffer_size(MAX_DEPTH)
-            .history_size(0)
-            .max_publishers(4)
-            .max_subscribers(32)
-            .open_or_create()
-            .map_err(|e| anyhow!("failed to open topic `{topic}`: {e:?}"))
+        use iceoryx2::service::builder::publish_subscribe::{
+            PublishSubscribeCreateError as C, PublishSubscribeOpenError as O,
+            PublishSubscribeOpenOrCreateError as E,
+        };
+        let name = Self::service_name(topic)?;
+        retry_while_in_flux(
+            || {
+                self.node
+                    .service_builder(&name)
+                    .publish_subscribe::<[u8]>()
+                    .enable_safe_overflow(true)
+                    .subscriber_max_buffer_size(MAX_DEPTH)
+                    .history_size(0)
+                    .max_publishers(4)
+                    .max_subscribers(32)
+                    .open_or_create()
+            },
+            |e| {
+                matches!(
+                    e,
+                    E::SystemInFlux
+                        | E::PublishSubscribeOpenError(
+                            O::DoesNotExist
+                                | O::HangsInCreation
+                                | O::IsMarkedForDestruction
+                                | O::Interrupt
+                        )
+                        | E::PublishSubscribeCreateError(
+                            C::AlreadyExists
+                                | C::IsBeingCreatedByAnotherInstance
+                                | C::HangsInCreation
+                                | C::Interrupt
+                        )
+                )
+            },
+        )
+        .map_err(|e| anyhow!("failed to open topic `{topic}`: {e:?}"))
     }
 
     fn event_service(
         &self,
         topic: &str,
     ) -> Result<iceoryx2::service::port_factory::event::PortFactory<Svc>> {
-        self.node
-            .service_builder(&Self::event_name(topic)?)
-            .event()
-            .max_notifiers(8)
-            .max_listeners(32)
-            .open_or_create()
-            .map_err(|e| anyhow!("failed to open event for `{topic}`: {e:?}"))
+        use iceoryx2::service::builder::event::{
+            EventCreateError as C, EventOpenError as O, EventOpenOrCreateError as E,
+        };
+        let name = Self::event_name(topic)?;
+        retry_while_in_flux(
+            || {
+                self.node
+                    .service_builder(&name)
+                    .event()
+                    .max_notifiers(8)
+                    .max_listeners(32)
+                    .open_or_create()
+            },
+            |e| {
+                matches!(
+                    e,
+                    E::SystemInFlux
+                        | E::EventOpenError(O::DoesNotExist | O::HangsInCreation | O::Interrupt)
+                        | E::EventCreateError(
+                            C::AlreadyExists | C::IsBeingCreatedByAnotherInstance | C::Interrupt
+                        )
+                )
+            },
+        )
+        .map_err(|e| anyhow!("failed to open event for `{topic}`: {e:?}"))
     }
 
     pub fn publisher(&self, topic: &str) -> Result<ShmPublisher> {
@@ -216,6 +285,50 @@ impl ShmSubscriber {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_open_failures_are_retried_and_others_are_not() {
+        let mut calls = 0;
+        let r: std::result::Result<u8, &str> = retry_while_in_flux(
+            || {
+                calls += 1;
+                if calls < 4 { Err("in flux") } else { Ok(7) }
+            },
+            |e| *e == "in flux",
+        );
+        assert_eq!((r, calls), (Ok(7), 4));
+
+        let mut calls = 0;
+        let r: std::result::Result<u8, &str> = retry_while_in_flux(
+            || {
+                calls += 1;
+                Err("incompatible")
+            },
+            |e| *e == "in flux",
+        );
+        assert_eq!((r, calls), (Err("incompatible"), 1));
+    }
+
+    #[test]
+    fn processes_opening_a_topic_at_once_all_succeed() {
+        let topic = format!("ruro-test/{}/race", std::process::id());
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let topic = topic.clone();
+                std::thread::spawn(move || {
+                    let shm = Shm::new(&format!("ruro-race-{i}")).unwrap();
+                    if i % 2 == 0 {
+                        shm.publisher(&topic).map(|_| ())
+                    } else {
+                        shm.subscriber(&topic, 1).map(|_| ())
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+    }
 
     fn topic(name: &str) -> String {
         format!("ruro-test/{}/{name}", std::process::id())

@@ -373,7 +373,7 @@ fn flatten(
     let mut out = Graph {
         name: g.name.clone(),
         groups: g.groups.clone(),
-        clock: g.clock.clone(),
+        clock: g.clock,
         ..Default::default()
     };
     let mut ins: HashMap<&str, IndexMap<String, PortList>> = HashMap::new();

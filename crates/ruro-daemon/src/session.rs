@@ -120,6 +120,9 @@ fn start_recording(st: &Arc<State>, path: &Path) -> Result<String> {
     {
         bail!("directory {} does not exist", parent.display());
     }
+    if let Some(r) = &*st.recording.lock() {
+        bail!("already recording ({})", r.describe());
+    }
     // Groups on other machines are recorded there, and collected at the end.
     let mut recording_peers = Vec::new();
     let mut parts = Vec::new();

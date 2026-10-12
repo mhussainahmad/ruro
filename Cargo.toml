@@ -23,6 +23,8 @@ ruro-daemon = { path = "crates/ruro-daemon" }
 ruro-nodes-std = { path = "nodes/ruro-nodes-std" }
 ruro-schema = { path = "crates/ruro-schema" }
 ruro-tf = { path = "crates/ruro-tf" }
+ruro-pkg = { path = "crates/ruro-pkg" }
+ruro-py = { path = "crates/ruro-py" }
 
 anyhow = "1"
 thiserror = "2"
@@ -50,6 +52,10 @@ criterion = "0.7"
 indexmap = { version = "2", features = ["serde"] }
 signal-hook = "0.3"
 sha2 = "0.10"
+toml = "1"
+tempfile = "3"
+pyo3 = "0.29"
+pyo3-build-config = "0.29"
 
 [profile.release]
 lto = "thin"

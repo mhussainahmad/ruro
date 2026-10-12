@@ -83,6 +83,10 @@ enum Cmd {
     },
     /// Print message schemas, check compatibility, generate bindings.
     Schema(ruro_schema::cli::SchemaArgs),
+    /// Create a node package or add a node to one.
+    New(ruro_pkg::cli::NewArgs),
+    /// Build a host binary that links the packages listed in ruro.toml.
+    Build(ruro_pkg::cli::BuildArgs),
 }
 
 fn main() {
@@ -227,6 +231,8 @@ fn run(cli: Cli) -> Result<()> {
             bail!("failed to start {}: {err}", exe.display())
         }
         Cmd::Schema(args) => ruro_schema::cli::run(args),
+        Cmd::New(args) => ruro_pkg::cli::run_new(args),
+        Cmd::Build(args) => ruro_pkg::cli::run_build(args),
     }
 }
 

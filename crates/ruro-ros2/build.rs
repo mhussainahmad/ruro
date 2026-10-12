@@ -4,7 +4,10 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("interfaces");
+    // Read at run time: a build script compiled for one checkout can be reused
+    // from a shared target directory by another.
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo");
+    let root = Path::new(&manifest).join("interfaces");
     println!("cargo:rerun-if-changed={}", root.display());
     let mut entries = Vec::new();
     let mut packages: Vec<_> = std::fs::read_dir(&root)

@@ -147,3 +147,51 @@ fn host_describes_python_nodes() {
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no_such_module_anywhere"));
 }
+
+#[test]
+fn installed_distributions_provide_nodes_through_entry_points() {
+    // A minimal installed distribution: a module plus dist-info metadata
+    // declaring it in the `ruro.nodes` entry point group.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("py-entry-points");
+    let _ = std::fs::remove_dir_all(&dir);
+    let info = dir.join("acme_nodes-0.1.dist-info");
+    std::fs::create_dir_all(&info).unwrap();
+    std::fs::write(
+        dir.join("acme_nodes.py"),
+        "import ruro\n\n\
+         @ruro.node(kind=\"acme/double\", inputs={\"x\": ruro.Scalar}, outputs={\"y\": ruro.Scalar})\n\
+         class Double:\n    \
+             def step(self, ctx):\n        \
+                 for s in self.inputs.x:\n            \
+                     self.outputs.y.send(ruro.Scalar(2 * s.value))\n",
+    )
+    .unwrap();
+    std::fs::write(
+        info.join("METADATA"),
+        "Metadata-Version: 2.1\nName: acme-nodes\nVersion: 0.1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        info.join("entry_points.txt"),
+        "[ruro.nodes]\nacme = acme_nodes\n",
+    )
+    .unwrap();
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ruro-host-py"))
+        .arg("describe")
+        .env("RURO_PY_PATH", &dir)
+        .env_remove("RURO_PY_MODULES")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let registry: ruro_graph::Registry = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        registry.get("acme/double").is_some(),
+        "{:?}",
+        registry.nodes.keys()
+    );
+}

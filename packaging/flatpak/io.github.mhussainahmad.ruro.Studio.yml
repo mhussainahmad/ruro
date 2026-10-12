@@ -16,11 +16,17 @@
 #
 #   flatpak run io.github.mhussainahmad.ruro.Studio examples/camera.yaml
 #
-# The studio sets its Wayland app id / X11 WM class to `ruro-studio`; the desktop
-# file keeps StartupWMClass=ruro-studio so the window is matched to this entry.
+# App id: Flatpak requires a reverse-DNS id, so the manifest, desktop file,
+# icons and metainfo use io.github.mhussainahmad.ruro.Studio. The studio itself
+# currently sets its Wayland app id and X11 WM class to `ruro-studio`. On X11 the
+# desktop file's StartupWMClass=ruro-studio matches the window to this entry; on
+# Wayland compositors match the app id against the desktop file name, so the
+# window is not associated with it (generic icon, separate dock entry) until the
+# studio uses the same reverse-DNS id.
 #
-# The build needs libclang only if bindgen runs for the target (it does not for
-# Linux today); add the SDK's LLVM extension if that changes.
+# No libclang or LLVM extension is needed: iceoryx2 only runs bindgen for QNX.
+# The build does not need Python either (only ruro-py and ruro-host-py do, and
+# they are not built here).
 #
 # Note: inside the sandbox the studio can only start graphs whose nodes are linked
 # into the bundled `ruro-host`. To work with a robot or a custom host, run the
@@ -61,7 +67,7 @@ modules:
       - install -Dm755 target/release/ruro-host /app/bin/ruro-host
       - install -Dm755 target/release/ruro-studio /app/bin/ruro-studio
       # The studio looks for examples/ next to its install prefix.
-      - install -Dm644 -t /app/examples examples/*.yaml
+      - mkdir -p /app/examples && cp -r examples/. /app/examples/
       - install -Dm644 packaging/linux/ruro-studio.desktop
         /app/share/applications/io.github.mhussainahmad.ruro.Studio.desktop
       - desktop-file-edit --set-icon=io.github.mhussainahmad.ruro.Studio

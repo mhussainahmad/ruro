@@ -3,12 +3,17 @@
 #   cargo install cross --locked
 #   cross build --release --target aarch64-unknown-linux-gnu -p ruro-cli -p ruro-host
 #
-# Building the studio for ARM also needs the target's windowing libraries,
-# which the pre-build step installs.
-
-[target.aarch64-unknown-linux-gnu]
-pre-build = [
-    "dpkg --add-architecture $CROSS_DEB_ARCH",
-    "apt-get update",
-    "apt-get install -y --no-install-recommends libclang-dev clang libxkbcommon-dev:$CROSS_DEB_ARCH libwayland-dev:$CROSS_DEB_ARCH libgl1-mesa-dev:$CROSS_DEB_ARCH",
-]
+# The headless tools need no extra packages in the build image (iceoryx2 only
+# runs bindgen for QNX targets). Do not cross-build the whole workspace:
+# ruro-py and ruro-host-py link a Python library for the target.
+#
+# The studio loads its windowing and GL libraries at run time; if a build of
+# `-p ruro-studio` asks for them, install the target's development packages
+# with a pre-build step, for example:
+#
+# [target.aarch64-unknown-linux-gnu]
+# pre-build = [
+#     "dpkg --add-architecture $CROSS_DEB_ARCH",
+#     "apt-get update",
+#     "apt-get install -y --no-install-recommends libxkbcommon-dev:$CROSS_DEB_ARCH libwayland-dev:$CROSS_DEB_ARCH libgl1-mesa-dev:$CROSS_DEB_ARCH",
+# ]

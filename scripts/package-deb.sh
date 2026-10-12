@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Builds a Debian package containing ruro, ruro-host and ruro-studio.
 #
+# ruro-host-py (the host for Python nodes) is left out on purpose: it links
+# the libpython of the build machine, which would tie the package to one
+# Python minor version. Build it from source where Python nodes are needed.
+#
 #   scripts/package-deb.sh              # release build + package
 #   scripts/package-deb.sh --no-build   # package existing target/release binaries
 #
@@ -13,7 +17,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 build=1
@@ -82,9 +86,13 @@ rm -rf "$stage"
 mkdir -p "$stage/DEBIAN" "$out_dir"
 chmod 755 "$stage" "$stage/DEBIAN"
 
-# Binaries.
+# Binaries, without their symbol tables (as Debian policy asks; it roughly
+# halves their size).
 for bin in "${bins[@]}"; do
     install -Dm755 "$release_dir/$bin" "$stage/usr/bin/$bin"
+    if command -v strip >/dev/null; then
+        strip --strip-unneeded "$stage/usr/bin/$bin"
+    fi
 done
 
 # Desktop integration.
@@ -110,8 +118,11 @@ install -Dm644 packaging/systemd/user/ruro-daemon.service \
 # Documentation and examples.
 doc="$stage/usr/share/doc/ruro"
 install -Dm644 README.md "$doc/README.md"
+# Example graphs with the files they reference (robot model, Python nodes).
 install -d "$doc/examples"
-install -m644 examples/*.yaml "$doc/examples/"
+while IFS= read -r -d '' f; do
+    install -Dm644 "examples/$f" "$doc/examples/$f"
+done < <(cd examples && find . -type f ! -name '.*' ! -path '*/__pycache__/*' -printf '%P\0')
 if [[ -f CHANGELOG.md ]]; then
     gzip -9n <CHANGELOG.md >"$doc/changelog.gz"
     chmod 644 "$doc/changelog.gz"

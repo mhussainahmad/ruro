@@ -19,18 +19,17 @@
 ARG RUST_VERSION=1.95
 ARG DEBIAN_RELEASE=bookworm
 
+# The workspace's minimum supported Rust version (`rust-version` in Cargo.toml).
+# The headless tools need no system libraries beyond a C compiler, which the
+# image has; they do not pull in Python (only ruro-py and ruro-host-py do).
 FROM rust:${RUST_VERSION}-${DEBIAN_RELEASE} AS build
-# bindgen is a build dependency of iceoryx2; libclang keeps it usable on every target.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends clang libclang-dev \
-    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p ruro-cli -p ruro-host \
-    && install -Dm755 target/release/ruro /out/ruro \
-    && install -Dm755 target/release/ruro-host /out/ruro-host
+    && install -Dm755 -s target/release/ruro /out/ruro \
+    && install -Dm755 -s target/release/ruro-host /out/ruro-host
 
 FROM debian:${DEBIAN_RELEASE}-slim
 ARG UID=10001

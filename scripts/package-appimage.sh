@@ -85,6 +85,9 @@ mkdir -p "$appdir" "$out_dir"
 
 for bin in "${bins[@]}"; do
     install -Dm755 "$release_dir/$bin" "$appdir/usr/bin/$bin"
+    if command -v strip >/dev/null; then
+        strip --strip-unneeded "$appdir/usr/bin/$bin"
+    fi
 done
 install -Dm644 packaging/linux/ruro-studio.desktop "$appdir/usr/share/applications/ruro-studio.desktop"
 install -Dm644 packaging/icons/ruro-studio.svg "$appdir/usr/share/icons/hicolor/scalable/apps/ruro-studio.svg"
@@ -94,7 +97,9 @@ for png in packaging/icons/hicolor/*/apps/ruro-studio.png; do
 done
 # The studio offers examples/ found above its executable in File > Open Example.
 install -d "$appdir/examples"
-install -m644 examples/*.yaml "$appdir/examples/"
+while IFS= read -r -d '' f; do
+    install -Dm644 "examples/$f" "$appdir/examples/$f"
+done < <(cd examples && find . -type f ! -name '.*' ! -path '*/__pycache__/*' -printf '%P\0')
 install -Dm644 LICENSE-MIT "$appdir/usr/share/doc/ruro/LICENSE-MIT"
 install -Dm644 LICENSE-APACHE "$appdir/usr/share/doc/ruro/LICENSE-APACHE"
 for f in crates/ruro-studio/assets/fonts/LICENSE-*.txt crates/ruro-studio/assets/icons/LICENSE-*.txt; do

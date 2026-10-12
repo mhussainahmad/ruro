@@ -72,7 +72,8 @@ impl Default for Config {
     }
 }
 
-/// `ruro-host` next to the current executable, else `$RURO_HOST`, else `PATH`.
+/// The host binary given by `$RURO_HOST`, else `ruro-host` next to the
+/// current executable, else `ruro-host` looked up on `PATH`.
 pub fn default_host_binary() -> PathBuf {
     if let Some(p) = std::env::var_os("RURO_HOST") {
         return p.into();

@@ -1,6 +1,6 @@
 /*
  * Prints the mjModel/mjData layout table used by the `sim/mujoco` node
- * (src/mujoco/layout.rs) for the MuJoCo headers it is compiled against.
+ * (src/mujoco/ffi.rs) for the MuJoCo headers it is compiled against.
  *
  * MuJoCo has no stable ABI for struct fields, so supporting a new release
  * means generating its entry with this program and adding it to the table:

@@ -209,6 +209,8 @@ pub fn run_threaded(mut r: Runner, stop: Arc<AtomicBool>, rt: Option<Realtime>) 
     }
     r.stats.set_tid(current_tid());
     if r.start() {
+        // Pick up state that predates the thread, such as a latched e-stop.
+        r.poll_control();
         if let Some(sim) = clock.sim_clock() {
             sim.subscribe(r.waker.clone());
         }

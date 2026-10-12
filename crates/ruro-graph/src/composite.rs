@@ -368,9 +368,12 @@ fn flatten(
             format!("composites are nested more than {MAX_DEPTH} levels deep"),
         ));
     }
+    // Graph-wide settings come from the top-level graph. Exposed ports are not
+    // carried over: they name ports by their pre-flattening ids.
     let mut out = Graph {
         name: g.name.clone(),
         groups: g.groups.clone(),
+        clock: g.clock.clone(),
         ..Default::default()
     };
     let mut ins: HashMap<&str, IndexMap<String, PortList>> = HashMap::new();
@@ -977,5 +980,22 @@ wires: [cam.image -> outer.image]
         let g = Graph::from_yaml(INLINE).unwrap();
         let again = Graph::from_yaml(&g.to_yaml().unwrap()).unwrap();
         assert_eq!(g, again);
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use crate::{ClockSource, Graph};
+
+    #[test]
+    fn flattening_keeps_the_graph_clock_and_group_settings() {
+        let g = Graph::from_yaml(
+            "name: top\nclock: sim\ngroups:\n  rt: { realtime: { priority: 50 } }\nnodes:\n  inner:\n    type: composite\n    graph:\n      name: inner\n      outputs: { value: s.value }\n      nodes:\n        s: { type: std/sine, rate: 10, group: rt }\n  g: { type: std/gain }\nwires: [inner.value -> g.input]\n",
+        )
+        .unwrap();
+        let flat = g.flatten().unwrap();
+        assert_eq!(flat.clock, ClockSource::Sim);
+        assert_eq!(flat.groups.len(), 1);
+        assert_eq!(flat.nodes.len(), 2);
     }
 }

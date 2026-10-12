@@ -16,6 +16,9 @@
 mod control;
 mod executor;
 mod logging;
+mod record;
+pub mod rt;
+mod run;
 mod stats;
 
 use std::path::PathBuf;
@@ -28,7 +31,12 @@ use clap::{Parser, Subcommand};
 use ruro_graph::Graph;
 use ruro_proto::Keys;
 
-pub use executor::{Executor, Remote};
+pub use executor::{Executor, Options, Remote, clock_port};
+pub use record::Recorder;
+pub use run::step_order;
+
+/// Environment variable carrying the daemon's access token to its hosts.
+pub const TOKEN_ENV: &str = "RURO_TOKEN";
 
 #[derive(Parser)]
 #[command(
@@ -59,6 +67,18 @@ enum Cmd {
         /// Daemon endpoint for metrics, taps, parameters and logs.
         #[arg(long, default_value = ruro_proto::DEFAULT_ENDPOINT)]
         connect: String,
+        /// Start with the emergency stop engaged.
+        #[arg(long)]
+        estopped: bool,
+        /// Start recording the group's outputs into this MCAP file.
+        #[arg(long)]
+        record: Option<PathBuf>,
+        /// Nodes whose outputs are being replayed (comma separated).
+        #[arg(long, value_delimiter = ',')]
+        mute: Vec<String>,
+        /// Send messages to other machines uncompressed.
+        #[arg(long)]
+        no_compress: bool,
     },
 }
 
@@ -82,7 +102,20 @@ pub fn main() {
             group,
             daemon,
             connect,
-        } => run(&graph, &group, &daemon, &connect),
+            estopped,
+            record,
+            mute,
+            no_compress,
+        } => run(RunArgs {
+            graph,
+            group,
+            daemon,
+            connect,
+            estopped,
+            record,
+            mute,
+            compress: !no_compress,
+        }),
     };
     if let Err(e) = result {
         eprintln!("ruro-host: {e:#}");
@@ -90,25 +123,55 @@ pub fn main() {
     }
 }
 
-fn run(graph_path: &PathBuf, group: &str, daemon: &str, endpoint: &str) -> Result<()> {
-    let graph =
-        Graph::load(graph_path).with_context(|| format!("loading {}", graph_path.display()))?;
-    let keys = Keys::new(daemon);
+struct RunArgs {
+    graph: PathBuf,
+    group: String,
+    daemon: String,
+    connect: String,
+    estopped: bool,
+    record: Option<PathBuf>,
+    mute: Vec<String>,
+    compress: bool,
+}
 
-    let session = zenoh::open(ruro_proto::client_config(endpoint)?)
+fn run(args: RunArgs) -> Result<()> {
+    let graph =
+        Graph::load(&args.graph).with_context(|| format!("loading {}", args.graph.display()))?;
+    let keys = Keys::new(&args.daemon);
+    let group = args.group.as_str();
+
+    let security = ruro_proto::Security {
+        token: std::env::var(TOKEN_ENV).ok().filter(|t| !t.is_empty()),
+        ..Default::default()
+    };
+    let session = zenoh::open(ruro_proto::client_config_with(&args.connect, &security)?)
         .wait_session()
-        .with_context(|| format!("connecting to daemon at {endpoint}"))?;
+        .with_context(|| format!("connecting to daemon at {}", args.connect))?;
     logging::init(&session, &keys, group);
 
     let stop = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGTERM, stop.clone())?;
     signal_hook::flag::register(signal_hook::consts::SIGINT, stop.clone())?;
 
-    let mut exec = Executor::start(&graph, group, Remote::Shm(keys.clone()))?;
-    let _control = control::attach(&session, &keys, &exec)?;
+    let exec = Arc::new(Executor::start_with(
+        &graph,
+        group,
+        Options {
+            remote: Remote::Shm(keys.clone()),
+            session: Some(session.clone()),
+            compress: args.compress,
+            estopped: args.estopped,
+            muted: args.mute.clone(),
+        },
+    )?);
+    if let Some(path) = &args.record {
+        exec.start_recording(path)?;
+    }
+    let control = control::attach(&session, &keys, &exec)?;
     tracing::info!(
-        "group `{group}` running {} node(s)",
-        exec.node_ids().count()
+        "group `{group}` running {} node(s){}",
+        exec.node_ids().count(),
+        if args.estopped { " (e-stopped)" } else { "" }
     );
 
     let metrics_key = keys.metrics(group);
@@ -122,7 +185,8 @@ fn run(graph_path: &PathBuf, group: &str, daemon: &str, endpoint: &str) -> Resul
         }
     }
     tracing::info!("group `{group}` stopping");
-    exec.stop();
+    drop(control);
+    exec.shutdown();
     Ok(())
 }
 

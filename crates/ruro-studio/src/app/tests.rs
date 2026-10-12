@@ -183,6 +183,7 @@ fn simulate_live(h: &mut Harness<'static, Studio>) {
             ],
             recording: None,
             playback: None,
+            estopped: false,
         }),
     );
     let m = |id: &str, hz: f64, p50: f64, p99: f64, cpu: f64, age: Option<f64>| NodeMetrics {
@@ -196,6 +197,7 @@ fn simulate_live(h: &mut Harness<'static, Studio>) {
         errors: 0,
         last_error: None,
         dropped: 0,
+        timing: None,
     };
     ev(
         st,

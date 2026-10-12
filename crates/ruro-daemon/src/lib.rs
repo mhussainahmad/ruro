@@ -167,6 +167,7 @@ impl Daemon {
                             groups: s.status(),
                             recording: None,
                             playback: None,
+                            estopped: false,
                         };
                         drop(s);
                         let _ = session

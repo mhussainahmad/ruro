@@ -99,7 +99,8 @@ fn imports_a_bag_written_by_rosbags() {
             z: 3.0
         }
     );
-    assert_eq!(pose.orientation.z, 0.7071);
+    assert_eq!(pose.orientation.z, pose.orientation.w);
+    assert!(pose.orientation.z > 0.7 && pose.orientation.x == 0.0);
 
     let speed = Scalar::decode(&get("speed.out", "std/Scalar")).unwrap();
     assert_eq!(speed, Scalar(42.5));

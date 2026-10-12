@@ -1,0 +1,35 @@
+[package]
+name = "ruro-py"
+description = "Python node API for ruro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "ruro_py"
+# cdylib for the Python extension module built by maturin, rlib for hosts
+# that embed Python.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Build the importable extension module (used by maturin, see pyproject.toml).
+extension-module = ["pyo3/extension-module", "pyo3/abi3-py311"]
+
+[dependencies]
+ruro-msg = { workspace = true }
+ruro-node = { workspace = true }
+ruro-graph = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+pyo3 = { workspace = true }
+serde-value = "0.7"
+
+[build-dependencies]
+pyo3-build-config = { workspace = true }

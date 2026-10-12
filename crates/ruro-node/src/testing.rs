@@ -98,6 +98,34 @@ impl Harness {
         port.push_encoded(self.seq, now_ns(), &msg.to_bytes())
     }
 
+    /// Delivers an already encoded message to an input.
+    pub fn push_encoded(&mut self, input: &str, bytes: &[u8]) -> Result {
+        let port = self
+            .built
+            .inputs
+            .iter()
+            .find(|(n, _)| n == input)
+            .map(|(_, p)| p.clone())
+            .ok_or_else(|| anyhow!("no input `{input}`"))?;
+        self.seq += 1;
+        port.push_encoded(self.seq, now_ns(), bytes)
+    }
+
+    /// Message type of an input or output port.
+    pub fn port_type(&self, port: &str) -> Option<&'static str> {
+        let b = &self.built;
+        b.inputs
+            .iter()
+            .find(|(n, _)| n == port)
+            .map(|(_, p)| p.ty())
+            .or_else(|| {
+                b.outputs
+                    .iter()
+                    .find(|(n, _)| n == port)
+                    .map(|(_, p)| p.ty())
+            })
+    }
+
     /// Runs one step (calling `start` first if it has not run yet).
     pub fn step(&mut self) -> Result {
         if !self.started {

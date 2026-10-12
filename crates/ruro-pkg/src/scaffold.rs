@@ -163,8 +163,16 @@ pub fn new_package(dir: &Path, name: &str, ruro: &Source) -> Result<Vec<PathBuf>
         &render(CARGO_TOML, &[("name", name), ("ruro", &ruro_dep)]),
         &mut created,
     )?;
-    write_new(&dir.join("src/lib.rs"), &render(LIB_RS, &vars), &mut created)?;
-    write_new(&dir.join("src/scale.rs"), &render(NODE_RS, &vars), &mut created)?;
+    write_new(
+        &dir.join("src/lib.rs"),
+        &render(LIB_RS, &vars),
+        &mut created,
+    )?;
+    write_new(
+        &dir.join("src/scale.rs"),
+        &render(NODE_RS, &vars),
+        &mut created,
+    )?;
     write_new(&dir.join(".gitignore"), GITIGNORE, &mut created)?;
     let manifest = Manifest {
         project: Project {
@@ -257,7 +265,10 @@ mod tests {
         let pkg = dir.path().join("my-nodes");
         let files = new_package(&pkg, "my-nodes", &Source::path("/opt/ruro")).unwrap();
         assert_eq!(files.len(), 5);
-        for f in files.iter().filter(|f| f.extension().is_some_and(|e| e == "rs")) {
+        for f in files
+            .iter()
+            .filter(|f| f.extension().is_some_and(|e| e == "rs"))
+        {
             parses(f);
         }
         let cargo: toml::Table =
@@ -282,7 +293,10 @@ mod tests {
         new_node(dir.path(), "bot/low-pass").unwrap();
         new_node(dir.path(), "bot/edge_detect").unwrap();
         let lib = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
-        assert!(lib.contains("mod scale;\nmod low_pass;\nmod edge_detect;\n"), "{lib}");
+        assert!(
+            lib.contains("mod scale;\nmod low_pass;\nmod edge_detect;\n"),
+            "{lib}"
+        );
         assert!(lib.contains("pub use low_pass::LowPass;"));
         assert!(lib.contains("pub use edge_detect::EdgeDetect;"));
         parses(&dir.path().join("src/lib.rs"));
@@ -294,7 +308,10 @@ mod tests {
     #[test]
     fn declares_module_in_a_lib_without_modules() {
         let out = declare_module("//! doc\n\n/// Links.\npub fn link() {}\n", "a", "A");
-        assert_eq!(out, "//! doc\n\nmod a;\n\npub use a::A;\n/// Links.\npub fn link() {}\n");
+        assert_eq!(
+            out,
+            "//! doc\n\nmod a;\n\npub use a::A;\n/// Links.\npub fn link() {}\n"
+        );
     }
 
     #[test]

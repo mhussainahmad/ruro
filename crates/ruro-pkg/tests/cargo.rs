@@ -36,7 +36,11 @@ fn cargo(dir: &Path, args: &[&str]) {
         .env("CARGO_TARGET_DIR", shared_target())
         .status()
         .unwrap();
-    assert!(status.success(), "cargo {args:?} failed in {}", dir.display());
+    assert!(
+        status.success(),
+        "cargo {args:?} failed in {}",
+        dir.display()
+    );
 }
 
 fn scaffold(name: &str) -> PathBuf {

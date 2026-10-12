@@ -107,6 +107,9 @@ pub fn run_build(args: BuildArgs) -> Result<()> {
         },
     )?;
     println!("built {}", bin.display());
-    println!("run graphs with its nodes:\n  ruro daemon --host {}", bin.display());
+    println!(
+        "run graphs with its nodes:\n  ruro daemon --host {}",
+        bin.display()
+    );
     Ok(())
 }

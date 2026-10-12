@@ -66,6 +66,12 @@ impl<'a> Builder<'a> {
         Ok(Output::new(port))
     }
 
+    /// The parameter value the graph sets, as JSON, without conversion. For
+    /// nodes whose parameter types are only known at run time.
+    pub fn raw_param(&self, name: &str) -> Option<&Value> {
+        self.params.get(name)
+    }
+
     /// Reads a parameter from the graph, falling back to `default`.
     pub fn param<T: ParamValue>(&self, name: &str, default: T) -> Result<T> {
         match self.params.get(name) {

@@ -3610,6 +3610,15 @@ dependencies = [
 
 [[package]]
 name = "ordered-float"
+version = "2.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "ordered-float"
 version = "5.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c860fd3227ca4ac3cc032e2cd20cba3f02ccdf4b610538f8ee6584d56bb62e96"
@@ -4030,6 +4039,63 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
+name = "pyo3"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "700d18fa267b73b9b521fd7e13580e2f446916f176cacee1ab63fcc8191f1655"
+dependencies = [
+ "libc",
+ "once_cell",
+ "portable-atomic",
+ "pyo3-build-config",
+ "pyo3-ffi",
+ "pyo3-macros",
+]
+
+[[package]]
+name = "pyo3-build-config"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b3fc0c4d08f6bb10e71fe39dfb9e2f59c6eb6854e22ec8092f50c69a4499adb"
+dependencies = [
+ "target-lexicon",
+]
+
+[[package]]
+name = "pyo3-ffi"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfc0b8e19df29aad7086cf977bb0c2a2f143e30567eb113e9cf72b62ca698330"
+dependencies = [
+ "libc",
+ "pyo3-build-config",
+]
+
+[[package]]
+name = "pyo3-macros"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6100e8a4b5eba53afaa5ed078364851a0b2499c553a44c31026b929049b49dc6"
+dependencies = [
+ "proc-macro2",
+ "pyo3-macros-backend",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "pyo3-macros-backend"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6143877a16e82b5a727b7127ff4cd86858a24a28d745d72f43e6f227c7b1bdb3"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4359,6 +4425,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruro-host-py"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+ "pyo3-build-config",
+ "ruro-daemon",
+ "ruro-graph",
+ "ruro-host",
+ "ruro-msg",
+ "ruro-proto",
+ "ruro-py",
+ "ruro-tf",
+ "serde_json",
+ "zenoh",
+]
+
+[[package]]
 name = "ruro-macros"
 version = "0.1.0"
 dependencies = [
@@ -4424,6 +4507,23 @@ dependencies = [
  "serde",
  "serde_json",
  "zenoh",
+]
+
+[[package]]
+name = "ruro-py"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "parking_lot",
+ "pyo3",
+ "pyo3-build-config",
+ "ruro-graph",
+ "ruro-msg",
+ "ruro-node",
+ "serde",
+ "serde-value",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -4647,6 +4747,16 @@ dependencies = [
  "serde_core",
  "smallvec",
  "zmij",
+]
+
+[[package]]
+name = "serde-value"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
+dependencies = [
+ "ordered-float 2.10.1",
+ "serde",
 ]
 
 [[package]]
@@ -5111,6 +5221,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "target-lexicon"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
 name = "tempfile"
@@ -6022,7 +6138,7 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "once_cell",
- "ordered-float",
+ "ordered-float 5.4.0",
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",

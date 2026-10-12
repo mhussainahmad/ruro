@@ -144,7 +144,11 @@ impl Source {
             parts.push(format!("path = {}", quote(&p.to_string_lossy())));
         } else if let Some(g) = &self.git {
             parts.push(format!("git = {}", quote(g)));
-            for (k, v) in [("branch", &self.branch), ("tag", &self.tag), ("rev", &self.rev)] {
+            for (k, v) in [
+                ("branch", &self.branch),
+                ("tag", &self.tag),
+                ("rev", &self.rev),
+            ] {
                 if let Some(v) = v {
                     parts.push(format!("{k} = {}", quote(v)));
                 }

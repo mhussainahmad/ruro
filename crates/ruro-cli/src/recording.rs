@@ -76,20 +76,22 @@ fn send(c: &Client, cmd: &PlaybackCommand) -> Result<String> {
 
 /// Starts a replay and follows it until it ends; Ctrl-C stops it.
 pub fn play(c: &Client, file: &Path, rate: f64) -> Result<()> {
-    let file = absolute(file)?;
+    let file = absolute(file)?.display().to_string();
+    // Subscribed before starting, so every status that arrives after the
+    // reply describes the replay we started (or its end).
+    let sub = c.session.declare_subscriber(c.keys.status()).wait_sub()?;
     println!(
         "{}",
         send(
             c,
             &PlaybackCommand::Start {
-                file: file.display().to_string(),
+                file: file.clone(),
                 rate,
             }
         )?
     );
     let stop = crate::ctrl_c_flag()?;
-    let sub = c.session.declare_subscriber(c.keys.status()).wait_sub()?;
-    let mut seen = false;
+    let started = std::time::Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let Ok(Some(sample)) = sub.recv_timeout(Duration::from_millis(200)) else {
             continue;
@@ -99,28 +101,42 @@ pub fn play(c: &Client, file: &Path, rate: f64) -> Result<()> {
         else {
             continue;
         };
-        match status.playback {
-            Some(p) => {
-                seen = true;
-                eprint!(
-                    "\r{:>7.1} / {:.1} s  x{}{}   ",
-                    p.position_s,
-                    p.duration_s,
-                    p.rate,
-                    if p.paused { "  paused" } else { "" }
-                );
-            }
-            None if seen => {
-                eprintln!("\nplayback finished");
-                return Ok(());
-            }
-            None => {}
+        if playback_ended(&file, status.playback.as_ref(), started.elapsed()) {
+            eprintln!("\nplayback finished");
+            return Ok(());
+        }
+        if let Some(p) = status.playback {
+            eprint!(
+                "\r{:>7.1} / {:.1} s  x{}{}   ",
+                p.position_s,
+                p.duration_s,
+                p.rate,
+                if p.paused { "  paused" } else { "" }
+            );
         }
     }
     eprintln!();
     println!("{}", send(c, &PlaybackCommand::Stop)?);
     Ok(())
 }
+
+/// Whether a daemon status received `elapsed` after starting a replay of
+/// `file` shows that replay over: nothing playing, or another file. A
+/// status computed just before the start can still be in flight, so an
+/// empty one is only trusted after a status period.
+fn playback_ended(
+    file: &str,
+    playback: Option<&ruro_proto::PlaybackStatus>,
+    elapsed: Duration,
+) -> bool {
+    match playback {
+        Some(p) => p.file != file,
+        None => elapsed >= STATUS_PERIOD,
+    }
+}
+
+/// How often the daemon publishes its status.
+const STATUS_PERIOD: Duration = Duration::from_millis(500);
 
 trait WaitSub<T> {
     fn wait_sub(self) -> Result<T>;
@@ -231,5 +247,48 @@ pub fn bag(cmd: BagCmd) -> Result<()> {
             println!("wrote {converted} message(s) to {}", out.display());
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ruro_proto::PlaybackStatus;
+
+    fn playing(file: &str) -> PlaybackStatus {
+        PlaybackStatus {
+            file: file.into(),
+            position_s: 0.5,
+            duration_s: 2.0,
+            paused: false,
+            rate: 1.0,
+        }
+    }
+
+    #[test]
+    fn a_replay_that_ends_before_any_status_still_finishes() {
+        // A 10 ms recording is over long before the first status shows it.
+        let late = STATUS_PERIOD + Duration::from_millis(10);
+        assert!(playback_ended("/a.mcap", None, late));
+    }
+
+    #[test]
+    fn a_status_from_before_the_start_does_not_end_the_replay() {
+        assert!(!playback_ended("/a.mcap", None, Duration::from_millis(20)));
+    }
+
+    #[test]
+    fn follows_its_own_replay_until_another_one_replaces_it() {
+        let elapsed = Duration::from_secs(3);
+        assert!(!playback_ended(
+            "/a.mcap",
+            Some(&playing("/a.mcap")),
+            elapsed
+        ));
+        assert!(playback_ended(
+            "/a.mcap",
+            Some(&playing("/b.mcap")),
+            elapsed
+        ));
     }
 }

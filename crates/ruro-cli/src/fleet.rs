@@ -56,11 +56,12 @@ pub fn fleet(session: &zenoh::Session) -> Result<()> {
         "NAME", "VERSION", "GRAPH", "GROUPS", "UPTIME", "CPU"
     );
     for (name, st) in &daemons {
-        let cpu: f64 = metrics
-            .iter()
-            .filter(|((d, _), _)| d == name)
-            .flat_map(|(_, m)| m.nodes.iter().map(|n| n.cpu_pct))
-            .sum();
+        let cpu = cpu_cell(
+            metrics
+                .iter()
+                .filter(|((d, _), _)| d == name)
+                .map(|(_, m)| m),
+        );
         let running = st.groups.iter().filter(|g| g.pid.is_some()).count();
         let mut state = Vec::new();
         if st.estopped {
@@ -73,7 +74,7 @@ pub fn fleet(session: &zenoh::Session) -> Result<()> {
             state.push("playing".to_owned());
         }
         println!(
-            "{:<16} {:<8} {:<20} {:>6} {:>8} {:>6.1}%  {}",
+            "{:<16} {:<8} {:<20} {:>6} {:>8} {:>7}  {}",
             name,
             st.version,
             st.graph.as_deref().unwrap_or("-"),
@@ -84,6 +85,19 @@ pub fn fleet(session: &zenoh::Session) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// CPU use summed over a daemon's groups, or `-` when none reported.
+fn cpu_cell<'a>(groups: impl Iterator<Item = &'a GroupMetrics>) -> String {
+    let mut groups = groups.peekable();
+    if groups.peek().is_none() {
+        return "-".into();
+    }
+    // Not `sum`, which starts from -0.0 and prints an idle daemon as "-0.0%".
+    let cpu = groups
+        .flat_map(|m| &m.nodes)
+        .fold(0.0, |cpu, n| cpu + n.cpu_pct);
+    format!("{cpu:.1}%")
 }
 
 /// SHA-256 of `data`, lowercase hex.
@@ -139,6 +153,17 @@ pub fn upload_host(c: &Client, path: &Path, name: Option<&str>) -> Result<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_daemons_show_no_cpu_rather_than_minus_zero() {
+        assert_eq!(cpu_cell(std::iter::empty()), "-");
+        let idle = GroupMetrics {
+            group: "g".into(),
+            pid: 1,
+            nodes: Vec::new(),
+        };
+        assert_eq!(cpu_cell([&idle].into_iter()), "0.0%");
+    }
 
     #[test]
     fn sha256_matches_known_vector() {

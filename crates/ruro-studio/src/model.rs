@@ -154,6 +154,10 @@ pub struct Doc {
     pub composites: HashMap<String, NodeDescriptor>,
     /// For a subgraph opened from an inline composite: the parent document and node id.
     pub parent: Option<(u64, String)>,
+    /// Wires of nodes whose type is not known yet, such as graphs opened
+    /// before the daemon sent its node types. Saved and deployed as they are
+    /// until [`Doc::resolve_pending`] puts them on the canvas.
+    pub pending: Vec<Wire>,
     history: History,
 }
 
@@ -180,6 +184,7 @@ impl Doc {
             structure_rev: 0,
             composites: HashMap::new(),
             parent: None,
+            pending: Vec::new(),
             history: History {
                 undo: Vec::new(),
                 redo: Vec::new(),
@@ -232,32 +237,21 @@ impl Doc {
             );
         }
         warnings.extend(self.refresh_composites(registry));
+        self.pending.clear();
         for wire in &graph.wires {
-            let resolved = (|| {
-                let from = *ids.get(wire.from.node.as_str())?;
-                let to = *ids.get(wire.to.node.as_str())?;
-                let out = self
-                    .descriptor(&self.snarl[from], registry)?
-                    .outputs
-                    .iter()
-                    .position(|p| p.name == wire.from.port)?;
-                let inp = self
-                    .descriptor(&self.snarl[to], registry)?
-                    .inputs
-                    .iter()
-                    .position(|p| p.name == wire.to.port)?;
-                Some((
-                    OutPinId {
-                        node: from,
-                        output: out,
-                    },
-                    InPinId {
-                        node: to,
-                        input: inp,
-                    },
-                ))
-            })();
-            match resolved {
+            let typed = |n: &str| {
+                ids.get(n)
+                    .is_some_and(|&id| self.descriptor(&self.snarl[id], registry).is_some())
+            };
+            let exists = |n: &str| ids.contains_key(n);
+            if exists(&wire.from.node)
+                && exists(&wire.to.node)
+                && !(typed(&wire.from.node) && typed(&wire.to.node))
+            {
+                self.pending.push(wire.clone());
+                continue;
+            }
+            match self.resolve_wire(wire, registry) {
                 Some((o, i)) => {
                     self.snarl.connect(o, i);
                 }
@@ -265,6 +259,60 @@ impl Doc {
             }
         }
         self.structure_rev += 1;
+        warnings
+    }
+
+    /// The canvas pins a wire connects, if its nodes and ports exist.
+    fn resolve_wire(&self, wire: &Wire, registry: &Registry) -> Option<(OutPinId, InPinId)> {
+        let from = self.find(&wire.from.node)?;
+        let to = self.find(&wire.to.node)?;
+        let output = self
+            .descriptor(&self.snarl[from], registry)?
+            .outputs
+            .iter()
+            .position(|p| p.name == wire.from.port)?;
+        let input = self
+            .descriptor(&self.snarl[to], registry)?
+            .inputs
+            .iter()
+            .position(|p| p.name == wire.to.port)?;
+        Some((OutPinId { node: from, output }, InPinId { node: to, input }))
+    }
+
+    /// Puts pending wires whose node types are now known on the canvas,
+    /// without making an edit of it. Returns warnings for wires whose ports
+    /// do not exist, which are dropped.
+    pub fn resolve_pending(&mut self, registry: &Registry) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for wire in std::mem::take(&mut self.pending) {
+            let typed = |n: &str| {
+                self.find(n)
+                    .is_some_and(|id| self.descriptor(&self.snarl[id], registry).is_some())
+            };
+            if !(typed(&wire.from.node) && typed(&wire.to.node)) {
+                self.pending.push(wire);
+                continue;
+            }
+            let Some((o, i)) = self.resolve_wire(&wire, registry) else {
+                warnings.push(format!("dropped wire `{wire}`: port not found"));
+                continue;
+            };
+            self.snarl.connect(o, i);
+            // The wire was there all along: the history gets it too.
+            let h = &mut self.history;
+            let snaps = h.undo.iter_mut().chain(&mut h.redo);
+            for snap in snaps
+                .chain(std::iter::once(&mut h.current))
+                .chain(h.saved.as_mut())
+            {
+                let id = |n: NodeId| snap.snarl.get_node(n).map(|g| g.id.as_str());
+                if id(o.node) == Some(wire.from.node.as_str())
+                    && id(i.node) == Some(wire.to.node.as_str())
+                {
+                    snap.snarl.connect(o, i);
+                }
+            }
+        }
         warnings
     }
 
@@ -336,6 +384,13 @@ impl Doc {
                 Some(Wire { from, to, depth })
             })
             .collect();
+        wires.extend(
+            self.pending
+                .iter()
+                .filter(|w| graph.nodes.contains_key(&w.from.node))
+                .filter(|w| graph.nodes.contains_key(&w.to.node))
+                .cloned(),
+        );
         wires.sort_by(|a, b| (&a.from, &a.to).cmp(&(&b.from, &b.to)));
         graph.wires = wires;
         graph
@@ -395,6 +450,10 @@ impl Doc {
         }
         for p in self.outputs.values_mut() {
             *p = fix(p);
+        }
+        for w in &mut self.pending {
+            w.from = fix(&w.from);
+            w.to = fix(&w.to);
         }
         if let Some(d) = self.composites.remove(&old) {
             self.composites.insert(new.to_owned(), d);
@@ -610,6 +669,32 @@ wires:
         .unwrap();
         let (_, warnings) = Doc::from_graph(&g, &registry(), None);
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn wires_to_types_not_yet_known_survive_until_the_registry_arrives() {
+        // Files open before the daemon has sent its node types.
+        let g = Graph::from_yaml(
+            "name: w\nnodes:\n  a: { type: t/a }\n  b: { type: t/b }\nwires: [a.x -> b.i, a.zz -> b.i]\n",
+        )
+        .unwrap();
+        let empty = Registry::default();
+        let (mut doc, warnings) = Doc::from_graph(&g, &empty, Some("/tmp/w.yaml".into()));
+        assert_eq!(warnings.len(), 2, "two unknown types: {warnings:?}");
+        assert_eq!(doc.snarl.wires().count(), 0);
+        assert_eq!(
+            doc.to_graph(&empty).wires,
+            g.wires,
+            "saved and deployed as loaded"
+        );
+
+        let reg = registry();
+        let warnings = doc.resolve_pending(&reg);
+        assert_eq!(warnings.len(), 1, "a.zz does not exist: {warnings:?}");
+        assert_eq!(doc.snarl.wires().count(), 1);
+        assert_eq!(doc.to_graph(&reg).wires, g.wires[..1]);
+        assert!(doc.pending.is_empty());
+        assert!(!doc.dirty && !doc.can_undo(), "nothing the user did");
     }
 
     #[test]

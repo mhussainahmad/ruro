@@ -39,6 +39,8 @@ pub const FLEET_STALE: Duration = Duration::from_secs(5);
 pub struct Options {
     pub endpoint: String,
     pub daemon: Option<String>,
+    /// TLS certificates and access token for reaching the daemon.
+    pub security: ruro_proto::Security,
     pub spawn_daemon: bool,
     pub file: Option<PathBuf>,
     /// Settings and autosave locations. `None` keeps everything in memory.
@@ -54,6 +56,7 @@ impl Options {
         Self {
             endpoint: String::new(),
             daemon: None,
+            security: Default::default(),
             spawn_daemon: false,
             file: None,
             store: None,
@@ -293,6 +296,7 @@ impl Studio {
             Link::start(
                 opts.endpoint,
                 opts.daemon,
+                opts.security,
                 opts.spawn_daemon,
                 cc.egui_ctx.clone(),
             )
@@ -771,6 +775,11 @@ impl Studio {
         if self.composites_rev != key {
             self.composites_rev = key;
             self.doc.refresh_composites(&self.registry);
+            if !self.doc.pending.is_empty() {
+                for w in self.doc.resolve_pending(&self.registry) {
+                    self.toast(Severity::Warning, w);
+                }
+            }
         }
         // Subgraph files are read from disk, so validate those graphs less often.
         let has_files = self

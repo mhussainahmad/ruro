@@ -32,6 +32,8 @@ pub const DEFAULT_PORT: u16 = 7447;
 
 /// How long control requests to hosts and peer daemons may take.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a peer gets to confirm a forwarded e-stop.
+const FORWARD_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -98,6 +100,36 @@ pub fn load_registry(host: &Path) -> Result<Registry> {
     serde_json::from_slice(&out.stdout).context("parsing node registry")
 }
 
+/// E-stop requests forwarded from the daemon that deployed the graph to the
+/// peers running parts of it. Peers do not forward them further.
+const FORWARDED_ENGAGE: &str = "engage-forwarded";
+const FORWARDED_RELEASE: &str = "release-forwarded";
+
+/// Who engaged the emergency stop: someone at this daemon, or the daemon
+/// whose graph this one runs part of. A release forwarded from there does
+/// not lift a stop engaged here.
+#[derive(Debug, Default)]
+pub(crate) struct EstopBy {
+    here: bool,
+    forwarded: bool,
+}
+
+impl EstopBy {
+    fn apply(&mut self, engage: bool, forwarded: bool) {
+        match (engage, forwarded) {
+            (true, false) => self.here = true,
+            (true, true) => self.forwarded = true,
+            // A release at this daemon lifts every stop.
+            (false, false) => *self = Self::default(),
+            (false, true) => self.forwarded = false,
+        }
+    }
+
+    fn engaged(&self) -> bool {
+        self.here || self.forwarded
+    }
+}
+
 /// Everything the daemon's threads share.
 pub(crate) struct State {
     pub name: String,
@@ -106,7 +138,9 @@ pub(crate) struct State {
     pub sup: Mutex<Supervisor>,
     pub host: PathBuf,
     pub registry: Mutex<Registry>,
+    /// Whether the emergency stop is engaged, by anyone.
     pub estop: AtomicBool,
+    pub estop_by: Mutex<EstopBy>,
     pub recording: Mutex<Option<RecordSession>>,
     pub playback: Mutex<Option<Playback>>,
     /// Daemons running groups of the graph deployed here.
@@ -168,6 +202,15 @@ impl Daemon {
         // Hosts reach the router over a private Unix socket, so they need
         // neither the network endpoint nor TLS certificates.
         let socket = dir.join("zenoh.sock");
+        // A socket that answers belongs to a daemon of the same name;
+        // removing it would cut that daemon off from its hosts.
+        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+            bail!(
+                "a daemon named `{}` is already running (socket {})",
+                config.name,
+                socket.display()
+            );
+        }
         let _ = std::fs::remove_file(&socket);
         let local = format!("unixsock-stream/{}", socket.display());
         let dictionary = match &config.security.token {
@@ -198,6 +241,7 @@ impl Daemon {
             host: config.host.clone(),
             registry: Mutex::new(registry),
             estop: AtomicBool::new(false),
+            estop_by: Mutex::new(EstopBy::default()),
             recording: Mutex::new(None),
             playback: Mutex::new(None),
             peers: Mutex::new(BTreeSet::new()),
@@ -368,6 +412,8 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
         "deploy" => deploy(st, &text()),
         "deploy-groups" => {
             let graph = Graph::from_yaml(&text())?;
+            // Part of another daemon's graph now: none of its own to forward to.
+            st.peers.lock().clear();
             session::stop_playback(st);
             st.sup.lock().stop_all();
             session::finish_recording(st, false)?;
@@ -421,23 +467,82 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             session::playback(st, cmd)
         }
         "estop" => {
-            let engage = match text().trim() {
-                "engage" | "" => true,
-                "release" => false,
+            let (engage, forwarded) = match text().trim() {
+                "engage" | "" => (true, false),
+                "release" => (false, false),
+                FORWARDED_ENGAGE => (true, true),
+                FORWARDED_RELEASE => (false, true),
                 other => bail!("expected `engage` or `release`, got `{other}`"),
             };
-            st.estop.store(engage, Ordering::Relaxed);
-            st.sup.lock().host_state.estopped = engage;
+            let engaged = {
+                let mut by = st.estop_by.lock();
+                by.apply(engage, forwarded);
+                by.engaged()
+            };
+            st.estop.store(engaged, Ordering::Relaxed);
+            st.sup.lock().host_state.estopped = engaged;
             st.publish_estop();
             tracing::warn!(
                 "emergency stop {}",
-                if engage { "engaged" } else { "released" }
+                if engaged { "engaged" } else { "released" }
             );
-            Ok(if engage {
-                "e-stop engaged".into()
+            let done = match (engage, engaged) {
+                (true, _) => "e-stop engaged",
+                (false, false) => "e-stop released",
+                (false, true) => "e-stop stays engaged: it was engaged here",
+            };
+            if forwarded {
+                return Ok(done.into());
+            }
+            // The machines running the rest of the graph follow, without
+            // passing it further.
+            let peers: Vec<String> = st.peers.lock().iter().cloned().collect();
+            let op = if engage {
+                FORWARDED_ENGAGE
             } else {
-                "e-stop released".into()
-            })
+                FORWARDED_RELEASE
+            };
+            // All at once, and briefly: a peer that does not answer must not
+            // hold the stop back from the others, nor outlast the client.
+            let results: Vec<(&String, Result<String>)> = std::thread::scope(|s| {
+                let pending: Vec<_> = peers
+                    .iter()
+                    .map(|p| {
+                        let ask = || {
+                            ruro_proto::request(
+                                &st.session,
+                                &Keys::new(p),
+                                Ctl::Estop,
+                                op,
+                                FORWARD_TIMEOUT,
+                            )
+                        };
+                        (p, s.spawn(ask))
+                    })
+                    .collect();
+                pending
+                    .into_iter()
+                    .map(|(p, h)| {
+                        let r = h.join().unwrap_or_else(|_| Err(anyhow!("request failed")));
+                        (p, r)
+                    })
+                    .collect()
+            });
+            let failed: Vec<String> = results
+                .iter()
+                .filter_map(|(p, r)| r.as_ref().err().map(|e| format!("`{p}` ({e:#})")))
+                .collect();
+            if !failed.is_empty() {
+                bail!("{done} here, but not on {}", failed.join(", "));
+            }
+            Ok(std::iter::once(done.to_owned())
+                .chain(
+                    results
+                        .into_iter()
+                        .filter_map(|(p, r)| Some(format!("{p}: {}", r.ok()?))),
+                )
+                .collect::<Vec<_>>()
+                .join("; "))
         }
         "upload" => {
             let chunk: ruro_proto::UploadChunk = ruro_proto::decode(payload)?;
@@ -469,28 +574,47 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
         .collect();
 
     // Node types: this daemon's hosts plus whatever the peers offer.
-    let mut descriptors: Vec<_> = st.registry.lock().iter().cloned().collect();
+    let local = st.registry.lock().clone();
     let custom_hosts: BTreeSet<String> = graph
         .groups
         .values()
         .filter(|c| c.machine.as_deref() == Some(st.name.as_str()))
         .filter_map(|c| c.host.clone())
         .collect();
+    let mut hosts = HashMap::new();
     for h in custom_hosts {
         let path = st.sup.lock().resolve_host(Some(&h))?;
-        descriptors.extend(load_registry(&path)?.iter().cloned());
+        hosts.insert(h, load_registry(&path)?);
     }
+    let mut peers = HashMap::new();
     for m in &machines {
         let body = st.peer_request(m, Ctl::Registry, "")?;
         let r: Registry = serde_json::from_str(&body).context("peer registry")?;
-        descriptors.extend(r.iter().cloned());
+        peers.insert(m.clone(), r);
     }
-    let registry = Registry::new(descriptors);
+    let registry = Registry::new(
+        local
+            .iter()
+            .chain(hosts.values().flat_map(Registry::iter))
+            .chain(peers.values().flat_map(Registry::iter))
+            .cloned(),
+    );
     let mut issues: Vec<String> = ruro_graph::validate(&graph, &registry)
         .iter()
         .map(ToString::to_string)
         .collect();
     issues.extend(runtime_issues(&graph, &registry));
+    // The types a group's host links. Peers only report their default host.
+    let offered = |group: &str| {
+        let config = graph.group_config(group);
+        match (config.machine.as_deref(), config.host.as_deref()) {
+            (Some(m), None) if m != st.name => peers.get(m),
+            (Some(m), Some(_)) if m != st.name => None,
+            (_, Some(h)) => hosts.get(h),
+            (_, None) => Some(&local),
+        }
+    };
+    issues.extend(placement_issues(&graph, &registry, offered));
     if !issues.is_empty() {
         bail!("graph is invalid:\n  {}", issues.join("\n  "));
     }
@@ -506,6 +630,10 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
     }
     let normalized = graph.to_yaml()?;
     for m in &machines {
+        // A peer's hosts start stopped when the stop is engaged here.
+        if st.estop.load(Ordering::Relaxed) {
+            st.peer_request(m, Ctl::Estop, FORWARDED_ENGAGE)?;
+        }
         st.peer_request(m, Ctl::DeployGroups, &normalized)?;
         st.peers.lock().insert(m.clone());
     }
@@ -519,6 +647,31 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
             machines.into_iter().collect::<Vec<_>>().join(", ")
         )
     })
+}
+
+/// Nodes placed in a group whose host does not link their type, which
+/// would fail to start there. `offered` gives a group's host types, or
+/// `None` when they are not known here.
+fn placement_issues<'a>(
+    graph: &Graph,
+    registry: &Registry,
+    offered: impl Fn(&str) -> Option<&'a Registry>,
+) -> Vec<String> {
+    let mut issues = Vec::new();
+    for (id, node) in &graph.nodes {
+        // Unknown everywhere: already reported by validation.
+        if registry.get(&node.kind).is_none() {
+            continue;
+        }
+        let group = node.group();
+        if offered(group).is_some_and(|r| r.get(&node.kind).is_none()) {
+            issues.push(format!(
+                "node `{id}`: type `{}` is not linked into the host of group `{group}`",
+                node.kind
+            ));
+        }
+    }
+    issues
 }
 
 /// Checks that need the runtime's conventions rather than node descriptors.
@@ -567,6 +720,44 @@ fn runtime_issues(graph: &Graph, registry: &Registry) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nodes_must_run_in_a_group_whose_host_links_their_type() {
+        let desc = |kind: &str| ruro_graph::NodeDescriptor {
+            kind: kind.into(),
+            ..Default::default()
+        };
+        let std_host = Registry::new([desc("std/sine")]);
+        let custom_host = Registry::new([desc("std/sine"), desc("my/scale")]);
+        let all = Registry::new([desc("std/sine"), desc("my/scale")]);
+        let g = Graph::from_yaml(
+            "name: x\ngroups:\n  custom: { host: my-host }\n  far: { machine: robot, host: other }\nnodes:\n  a: { type: std/sine, group: custom }\n  b: { type: my/scale }\n  c: { type: my/scale, group: custom }\n  d: { type: my/scale, group: far }\n",
+        )
+        .unwrap();
+        let offered = |group: &str| match group {
+            "custom" => Some(&custom_host),
+            "far" => None,
+            _ => Some(&std_host),
+        };
+        let issues = placement_issues(&g, &all, offered);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("`b`") && issues[0].contains("`main`"));
+    }
+
+    #[test]
+    fn a_forwarded_release_leaves_a_local_stop_engaged() {
+        let mut by = EstopBy::default();
+        by.apply(true, false);
+        by.apply(true, true);
+        by.apply(false, true);
+        assert!(by.engaged());
+        by.apply(true, true);
+        by.apply(false, false);
+        assert!(!by.engaged(), "a local release lifts both");
+        by.apply(true, true);
+        by.apply(false, true);
+        assert!(!by.engaged());
+    }
 
     #[test]
     fn runtime_checks() {

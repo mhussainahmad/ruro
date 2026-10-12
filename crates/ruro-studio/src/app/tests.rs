@@ -272,6 +272,33 @@ fn command_palette_runs_commands_and_dismisses() {
 }
 
 #[test]
+fn wires_appear_once_the_daemon_sends_node_types() {
+    // Without a local host the studio knows no node types until the daemon
+    // answers, and graphs given on the command line open before that.
+    ruro_nodes_std::link();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1000.0))
+        .build_eframe(|cc| {
+            let mut s = Studio::new(cc, Options::offline());
+            s.registry = ruro_graph::Registry::default();
+            s.open(&examples().join("camera.yaml"));
+            s
+        });
+    h.run_steps(2);
+    assert_eq!(h.state().doc.snarl.wires().count(), 0);
+    let empty = ruro_graph::Registry::default();
+    assert_eq!(h.state().doc.to_graph(&empty).wires.len(), 3);
+
+    let ctx = h.ctx.clone();
+    h.state_mut()
+        .handle_event(&ctx, Event::Registry(std_registry()));
+    h.run_steps(2);
+    let st = h.state();
+    assert_eq!(st.doc.snarl.wires().count(), 3);
+    assert!(!st.doc.dirty);
+}
+
+#[test]
 fn invalid_graph_is_not_deployed() {
     let dir = tempdir("invalid");
     let path = dir.join("bad.yaml");
@@ -873,6 +900,33 @@ fn record_and_replay_controls_send_requests() {
 }
 
 #[test]
+fn recording_notifications_show_what_the_daemon_did() {
+    let mut h = harness(None);
+    let ctx = h.ctx.clone();
+    let reply = |op, msg: &str| Event::Reply {
+        op,
+        result: Ok(msg.into()),
+    };
+    let st = h.state_mut();
+    st.handle_event(&ctx, reply("record", "recording 2 group(s) to /d/run.mcap"));
+    st.handle_event(
+        &ctx,
+        reply(
+            "stop recording",
+            "recorded 297 message(s) on 4 channel(s) over 5.8 s to /d/run.mcap",
+        ),
+    );
+    let texts: Vec<&str> = st.toasts.iter().map(|t| t.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "Recording 2 group(s) to /d/run.mcap",
+            "Recorded 297 message(s) on 4 channel(s) over 5.8 s to /d/run.mcap"
+        ]
+    );
+}
+
+#[test]
 fn fleet_lists_daemons_and_switches() {
     let mut h = harness(None);
     let ctx = h.ctx.clone();
@@ -1405,4 +1459,187 @@ fn screenshots() {
     let mut h = shot(None);
     with_ros_topics(&mut h);
     save(&mut h, "studio-ros2");
+}
+
+/// The studio against a real daemon and real host processes: deploy, live
+/// metrics, a watched image, parameters, recording and replay. Opt in with
+/// `RURO_E2E=1`; needs `ruro-host` built in the target directory
+/// (`cargo build -p ruro-host`) or named by `$RURO_HOST`. Saves a screenshot
+/// to `$RURO_SCREENSHOTS` when set.
+#[test]
+fn studio_drives_a_real_daemon() {
+    use std::time::{Duration, Instant};
+    if std::env::var_os("RURO_E2E").is_none_or(|v| v != "1") {
+        return;
+    }
+    let host = std::env::var_os("RURO_HOST")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            // target/<profile>/deps/<test> -> target/<profile>/ruro-host
+            let exe = std::env::current_exe().unwrap();
+            exe.parent().unwrap().parent().unwrap().join("ruro-host")
+        });
+    assert!(host.exists(), "no host binary at {}", host.display());
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let endpoint = format!("tcp/127.0.0.1:{port}");
+    let name = format!("studio-e2e-{}", std::process::id());
+    let mut config = ruro_daemon::Config::new();
+    config.name = name.clone();
+    config.listen = endpoint.clone();
+    config.host = host;
+    // Sessions without the token are refused, so this also covers the
+    // studio's authentication.
+    let security = ruro_proto::Security {
+        token: Some("e2e-token".into()),
+        ..Default::default()
+    };
+    config.security = security.clone();
+    // Dropped last, so a failing assertion still stops the hosts.
+    let daemon = ruro_daemon::Daemon::start(config).expect("daemon starts");
+
+    let shots = std::env::var_os("RURO_SCREENSHOTS").map(PathBuf::from);
+    let mut opts = Some(Options {
+        endpoint,
+        daemon: Some(name.clone()),
+        security,
+        spawn_daemon: false,
+        file: None,
+        store: None,
+        native_dialogs: false,
+    });
+    ruro_nodes_std::link();
+    let builder = Harness::builder().with_size(egui::vec2(1600.0, 1000.0));
+    let builder = if shots.is_some() {
+        builder.wgpu()
+    } else {
+        builder
+    };
+    let mut h = builder.build_eframe(move |cc| {
+        let mut s = Studio::new(cc, opts.take().unwrap());
+        s.open(&examples().join("camera.yaml"));
+        s
+    });
+    let wait = |h: &mut Harness<'static, Studio>, what: &str, done: &dyn Fn(&Studio) -> bool| {
+        let start = Instant::now();
+        loop {
+            h.run_steps(1);
+            if done(h.state()) {
+                return;
+            }
+            let st = h.state();
+            let toasts: Vec<&str> = st.toasts.iter().map(|t| t.text.as_str()).collect();
+            let hz: Vec<(&String, f64)> = st.metrics.iter().map(|(n, m)| (n, m.hz)).collect();
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "timed out waiting for {what}; toasts {toasts:?}, deployed {:?}, metrics {hz:?}, status {:?}, logs {:?}",
+                st.deployed_rev,
+                st.status,
+                st.logs,
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let toasted = |st: &Studio, prefix: &str| st.toasts.iter().any(|t| t.text.starts_with(prefix));
+    let playback = |st: &Studio| st.status.as_ref().and_then(|s| s.playback.clone());
+
+    wait(&mut h, "the connection", &|st| {
+        matches!(&st.conn, Conn::Online { daemon, .. } if *daemon == name)
+            && st.registry.get("std/blur").is_some()
+    });
+
+    // Deploy, then live metrics from both processes.
+    h.state_mut().push(Cmd::Deploy);
+    wait(&mut h, "live metrics", &|st| {
+        st.deployed_rev.is_some()
+            && ["camera", "blur", "gray", "stats"]
+                .iter()
+                .all(|n| st.metrics.get(*n).is_some_and(|m| m.hz > 0.0))
+    });
+    let status = h.state().status.clone().expect("status");
+    assert_eq!(status.graph.as_deref(), Some("camera-demo"));
+    assert_eq!(status.groups.len(), 2);
+
+    // A watched image arrives and picks a visualizer.
+    h.state_mut().push(Cmd::Watch {
+        node: "camera".into(),
+        port: "image".into(),
+        ty: "std/Image".into(),
+    });
+    wait(&mut h, "a camera frame", &|st| {
+        st.watches.iter().any(|w| w.visualizer().is_some())
+    });
+
+    // A parameter edit reaches the running node, which logs the change.
+    let blur = h.state().doc.find("blur").unwrap();
+    h.state_mut()
+        .set_param(blur, "radius", serde_json::json!(7));
+    wait(&mut h, "the parameter change", &|st| {
+        st.logs
+            .iter()
+            .any(|l| l.message.contains("blur.radius = 7"))
+    });
+
+    // Recording, started and stopped from the UI.
+    let dir = tempdir("e2e");
+    let file = dir.join("run.mcap").display().to_string();
+    h.state_mut().push(Cmd::StartRecording(file.clone()));
+    wait(&mut h, "the recording to start", &|st| {
+        toasted(st, "Recording 2 group(s) to")
+            && st.recording_since.is_some()
+            && st.status.as_ref().and_then(|s| s.recording.as_deref()) == Some(file.as_str())
+    });
+    if let Some(dir) = &shots {
+        let dir = if dir.is_relative() {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(dir)
+        } else {
+            dir.clone()
+        };
+        std::fs::create_dir_all(&dir).unwrap();
+        h.run_steps(6);
+        let img = h.render().expect("render");
+        img.save(dir.join("studio-e2e.png")).unwrap();
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    h.state_mut().push(Cmd::StopRecording);
+    wait(&mut h, "the recording to stop", &|st| {
+        st.recording_since.is_none() && toasted(st, "Recorded ")
+    });
+    assert!(
+        !toasted(h.state(), "Recording to"),
+        "{:?}",
+        h.state().toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
+    );
+    assert!(std::fs::metadata(&file).unwrap().len() > 0);
+
+    // A replay of that recording, paused and stopped from the UI.
+    h.state_mut().push(Cmd::Playback(PlaybackCommand::Start {
+        file: file.clone(),
+        rate: 0.25,
+    }));
+    wait(&mut h, "the replay", &|st| {
+        playback(st).is_some_and(|p| p.file == file && p.duration_s > 0.5)
+    });
+    h.state_mut().push(Cmd::Playback(PlaybackCommand::Pause));
+    wait(&mut h, "the pause", &|st| {
+        playback(st).is_some_and(|p| p.paused)
+    });
+    h.state_mut().push(Cmd::Playback(PlaybackCommand::Stop));
+    wait(&mut h, "the replay to end", &|st| {
+        st.status.is_some() && playback(st).is_none()
+    });
+
+    h.state_mut().push(Cmd::Stop);
+    wait(&mut h, "the graph to stop", &|st| {
+        st.status.as_ref().is_some_and(|s| s.graph.is_none())
+    });
+    drop(h);
+    drop(daemon);
+    let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
+    let _ = std::fs::remove_dir_all(&dir);
 }

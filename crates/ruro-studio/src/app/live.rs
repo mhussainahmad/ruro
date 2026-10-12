@@ -105,13 +105,9 @@ impl Studio {
                     self.toast(Severity::Info, "Stopped");
                 }
                 ("kill", Ok(msg)) => self.toast(Severity::Warning, capitalize(&msg)),
-                ("record", Ok(path)) => {
-                    if path.is_empty() {
-                        self.toast(Severity::Info, "Recording stopped");
-                    } else {
-                        self.toast(Severity::Success, format!("Recording to {path}"));
-                    }
-                }
+                // The daemon says what it records, or what it wrote.
+                ("record", Ok(msg)) => self.toast(Severity::Success, capitalize(&msg)),
+                ("stop recording", Ok(msg)) => self.toast(Severity::Info, capitalize(&msg)),
                 (_, Ok(_)) => {}
                 (op, Err(e)) => {
                     self.pending_deploy = None;

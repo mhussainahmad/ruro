@@ -34,7 +34,7 @@ use std::path::Path;
 pub enum Error {
     #[error("XML: {0}")]
     Xml(#[from] roxmltree::Error),
-    #[error("reading {path}: {source}")]
+    #[error("reading {path}")]
     Io {
         path: String,
         source: std::io::Error,
@@ -310,5 +310,18 @@ impl Robot {
     /// (concatenated in [`Robot::active_joints`] order).
     pub fn forward_kinematics(&self, q: &[f64]) -> Result<Kinematics> {
         kinematics::compute(self, q)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn io_errors_name_the_file_and_chain_the_cause_once() {
+        let err = Robot::from_file("/nonexistent/robot.urdf").unwrap_err();
+        assert_eq!(err.to_string(), "reading /nonexistent/robot.urdf");
+        let cause = std::error::Error::source(&err).expect("io error as the source");
+        assert!(cause.to_string().contains("No such file"));
     }
 }

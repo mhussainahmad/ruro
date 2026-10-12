@@ -14,8 +14,8 @@
 //! A **visualizer** draws a watched output port in the Watch panel. Register
 //! one with [`inventory::submit!`]:
 //!
-//! ```ignore
-//! use ruro_studio::plugin::{PreviewKind, Visualizer, VisualizerKind, WatchInfo, inventory};
+//! ```no_run
+//! use ruro_studio::plugin::{PreviewKind, Visualizer, VisualizerKind, inventory};
 //!
 //! struct Gauge { value: f64 }
 //!
@@ -39,6 +39,7 @@
 //!         create: |_| Box::new(Gauge { value: 0.0 }),
 //!     }
 //! }
+//! # fn main() {}
 //! ```
 //!
 //! The highest-scoring visualizer is used for a port; users can switch to any
@@ -46,7 +47,31 @@
 //!
 //! A **panel** adds a tab to the bottom panel. It sees the open graph and the
 //! live state of the daemon, and can ask the studio to focus or watch things
-//! through its [`PanelContext`]. See [`PanelKind`].
+//! through its [`PanelContext`]:
+//!
+//! ```no_run
+//! use ruro_studio::plugin::{PanelContext, PanelKind, StudioPanel, inventory};
+//! use ruro_studio::theme::{TEXT_DIM, font};
+//!
+//! struct NodeCount;
+//!
+//! impl StudioPanel for NodeCount {
+//!     fn show(&mut self, cx: &mut PanelContext<'_>, ui: &mut egui::Ui) {
+//!         let text = format!("{} nodes, {} running", cx.graph.nodes.len(), cx.metrics.len());
+//!         ui.label(egui::RichText::new(text).font(font(12.5)).color(TEXT_DIM()));
+//!         if let Some(first) = cx.graph.nodes.keys().next().cloned() {
+//!             if ui.button("Select the first node").clicked() {
+//!                 cx.focus(&first);
+//!             }
+//!         }
+//!     }
+//! }
+//!
+//! inventory::submit! {
+//!     PanelKind { id: "my/count", title: "Count", create: || Box::new(NodeCount) }
+//! }
+//! # fn main() {}
+//! ```
 
 use std::collections::HashMap;
 

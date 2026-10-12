@@ -672,6 +672,49 @@ fn unsaved_work_is_autosaved_and_recovered() {
 }
 
 #[test]
+fn recovering_an_open_file_reuses_its_tab() {
+    let dir = tempdir("recover-open");
+    let path = copy_example("camera.yaml", &dir);
+    let autosave = dir.join("state/autosave");
+    std::fs::create_dir_all(&autosave).unwrap();
+    // The last session closed with an unsaved extra node in camera.yaml.
+    let mut edited = ruro_graph::Graph::load(&path).unwrap();
+    edited
+        .nodes
+        .insert("extra".into(), ruro_graph::NodeInstance::new("std/sine"));
+    std::fs::write(autosave.join("1-9.yaml"), edited.to_yaml().unwrap()).unwrap();
+    std::fs::write(
+        autosave.join("1-9.json"),
+        serde_json::json!({ "original": path, "name": "camera-demo" }).to_string(),
+    )
+    .unwrap();
+    let store = crate::settings::Store {
+        config_dir: dir.join("config"),
+        state_dir: dir.join("state"),
+    };
+    // The session reopens the file before the user restores the autosave.
+    let mut h = build(
+        egui::vec2(1400.0, 900.0),
+        Options {
+            store: Some(store),
+            ..Options::offline()
+        },
+        Some(path),
+    );
+    h.get_by_label("Restore").click();
+    h.run_steps(3);
+    assert_eq!(h.state().tabs().len(), 1, "no second tab for the same file");
+    assert!(h.state().doc.find("extra").is_some());
+    assert!(h.state().doc.dirty);
+    key(&mut h, CTRL, egui::Key::Z);
+    assert!(
+        h.state().doc.find("extra").is_none(),
+        "the disk version is one undo away"
+    );
+    assert!(!h.state().doc.dirty);
+}
+
+#[test]
 fn deploy_flattens_and_watches_resolve_into_composites() {
     let mut h = harness(Some(examples().join("camera.yaml")));
     {

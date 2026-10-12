@@ -219,9 +219,14 @@ impl Studio {
             self.write_back_subgraph();
             if let Some((parent, _)) = self.doc.parent.clone() {
                 let current = self.doc.uid;
+                let parent_saved = self.doc_by_uid(parent).is_some_and(|p| p.path.is_some());
                 self.switch_tab(parent);
                 self.save(None);
-                self.switch_tab(current);
+                // A parent that was never saved asks for a file name; stay on it so
+                // the answer saves the parent rather than this subgraph.
+                if parent_saved {
+                    self.switch_tab(current);
+                }
             }
             return;
         }
@@ -353,11 +358,38 @@ impl Studio {
         for r in items {
             match Graph::load(&r.file) {
                 Ok(graph) => {
-                    let (mut doc, _) = Doc::from_graph(&graph, &self.registry, r.original.clone());
-                    // Unsaved relative to the file on disk, if there is one.
-                    doc.reset_history(false);
-                    doc.dirty = true;
-                    self.new_tab(doc);
+                    // The file may already be open (the session reopens it): put the
+                    // recovered content into that tab, one undo away from the disk version.
+                    let open = r.original.as_deref().and_then(|orig| {
+                        let orig = orig.canonicalize().unwrap_or_else(|_| orig.to_path_buf());
+                        self.tabs()
+                            .iter()
+                            .find(|d| {
+                                d.path.as_ref().is_some_and(|p| {
+                                    p.canonicalize().unwrap_or_else(|_| p.clone()) == orig
+                                })
+                            })
+                            .map(|d| d.uid)
+                    });
+                    match open {
+                        Some(uid) => {
+                            self.switch_tab(uid);
+                            self.doc.commit();
+                            for w in self.doc.load_graph(&graph, &self.registry) {
+                                self.toast(Severity::Warning, w);
+                            }
+                            self.doc.touch_structure();
+                            self.doc.commit();
+                        }
+                        None => {
+                            let (mut doc, _) =
+                                Doc::from_graph(&graph, &self.registry, r.original.clone());
+                            // Unsaved relative to the file on disk, if there is one.
+                            doc.reset_history(false);
+                            doc.dirty = true;
+                            self.new_tab(doc);
+                        }
+                    }
                 }
                 Err(e) => self.toast(Severity::Error, format!("Cannot recover {}: {e}", r.name)),
             }

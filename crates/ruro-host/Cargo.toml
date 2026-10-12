@@ -19,6 +19,9 @@ ruro-graph = { workspace = true }
 ruro-proto = { workspace = true }
 ruro-transport = { workspace = true }
 ruro-nodes-std = { workspace = true }
+ruro-nodes-hw = { workspace = true }
+ruro-nodes-sim = { workspace = true }
+ruro-nodes-ml = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }

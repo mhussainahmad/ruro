@@ -86,6 +86,7 @@ pub fn init(session: &zenoh::Session, keys: &Keys, group: &str) {
         EnvFilter::try_from_env("RURO_LOG").unwrap_or_else(|_| EnvFilter::new("info,zenoh=warn"));
     let stderr = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .with_target(false)
         .with_thread_names(true)
         .compact();

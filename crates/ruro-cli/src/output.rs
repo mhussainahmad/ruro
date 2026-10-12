@@ -63,21 +63,47 @@ pub fn preview_line(p: &Preview) -> String {
     }
 }
 
+/// Whether output gets ANSI colours: on a terminal, unless `NO_COLOR` is set.
+fn color() -> bool {
+    use std::io::IsTerminal;
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none())
+}
+
+/// `text` in the SGR style `sgr` (e.g. `1;31`) when colouring.
+fn paint(sgr: &str, text: &str) -> String {
+    styled(color(), sgr, text)
+}
+
+fn styled(on: bool, sgr: &str, text: &str) -> String {
+    if on {
+        format!("\x1b[{sgr}m{text}\x1b[0m")
+    } else {
+        text.to_owned()
+    }
+}
+
 pub fn log_line(l: &LogLine) -> String {
+    log_line_styled(l, color())
+}
+
+fn log_line_styled(l: &LogLine, on: bool) -> String {
+    let paint = |sgr: &str, text: &str| styled(on, sgr, text);
     let level = match l.level {
-        Level::Error => "\x1b[31mERROR\x1b[0m",
-        Level::Warn => "\x1b[33m WARN\x1b[0m",
-        Level::Info => "\x1b[32m INFO\x1b[0m",
-        Level::Debug => "DEBUG",
-        Level::Trace => "TRACE",
+        Level::Error => paint("31", "ERROR"),
+        Level::Warn => paint("33", " WARN"),
+        Level::Info => paint("32", " INFO"),
+        Level::Debug => "DEBUG".into(),
+        Level::Trace => "TRACE".into(),
     };
     let source = match &l.node {
         Some(n) => format!("{}/{n}", l.group),
         None => l.group.clone(),
     };
     format!(
-        "{} {level} \x1b[2m{source}\x1b[0m {}",
+        "{} {level} {} {}",
         clock(l.ts_ns),
+        paint("2", &source),
         l.message
     )
 }
@@ -107,7 +133,10 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
         duration(status.uptime_s)
     );
     if status.estopped {
-        println!("\x1b[1;31mEMERGENCY STOP ENGAGED\x1b[0m (release with `ruro estop --release`)");
+        println!(
+            "{} (release with `ruro estop --release`)",
+            paint("1;31", "EMERGENCY STOP ENGAGED")
+        );
     }
     if let Some(r) = &status.recording {
         println!("recording to {r}");
@@ -145,8 +174,8 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
             String::new()
         };
         println!(
-            "\x1b[1mgroup {}\x1b[0m  {state}  pid {pid}{restarts}",
-            g.name
+            "{}  {state}  pid {pid}{restarts}",
+            paint("1", &format!("group {}", g.name))
         );
         let m = metrics.iter().find(|m| m.group == g.name);
         for id in &g.nodes {
@@ -184,7 +213,7 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
                         );
                     }
                     if let Some(e) = &n.last_error {
-                        println!("  {:<12} \x1b[31m{e}\x1b[0m", "");
+                        println!("  {:<12} {}", "", paint("31", e));
                     }
                 }
                 None => println!("  {id:<12} -"),
@@ -210,5 +239,24 @@ pub fn duration(s: f64) -> String {
         0..60 => format!("{s}s"),
         60..3600 => format!("{}m{}s", s / 60, s % 60),
         _ => format!("{}h{}m", s / 3600, s / 60 % 60),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colour_codes_only_when_colouring() {
+        let line = LogLine {
+            ts_ns: 0,
+            level: Level::Error,
+            group: "vision".into(),
+            node: Some("blur".into()),
+            message: "failed".into(),
+        };
+        let plain = log_line_styled(&line, false);
+        assert!(plain.ends_with(" ERROR vision/blur failed"), "{plain:?}");
+        assert!(log_line_styled(&line, true).contains("\x1b[31mERROR\x1b[0m"));
     }
 }

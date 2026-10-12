@@ -197,6 +197,7 @@ fn main() {
         )
         .with_target(false)
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .compact()
         .init();
     let cli = Cli::parse();

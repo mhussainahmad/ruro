@@ -771,6 +771,11 @@ impl Studio {
         if self.composites_rev != key {
             self.composites_rev = key;
             self.doc.refresh_composites(&self.registry);
+            if !self.doc.pending.is_empty() {
+                for w in self.doc.resolve_pending(&self.registry) {
+                    self.toast(Severity::Warning, w);
+                }
+            }
         }
         // Subgraph files are read from disk, so validate those graphs less often.
         let has_files = self

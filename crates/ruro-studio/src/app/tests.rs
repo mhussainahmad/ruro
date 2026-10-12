@@ -272,6 +272,33 @@ fn command_palette_runs_commands_and_dismisses() {
 }
 
 #[test]
+fn wires_appear_once_the_daemon_sends_node_types() {
+    // Without a local host the studio knows no node types until the daemon
+    // answers, and graphs given on the command line open before that.
+    ruro_nodes_std::link();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1600.0, 1000.0))
+        .build_eframe(|cc| {
+            let mut s = Studio::new(cc, Options::offline());
+            s.registry = ruro_graph::Registry::default();
+            s.open(&examples().join("camera.yaml"));
+            s
+        });
+    h.run_steps(2);
+    assert_eq!(h.state().doc.snarl.wires().count(), 0);
+    let empty = ruro_graph::Registry::default();
+    assert_eq!(h.state().doc.to_graph(&empty).wires.len(), 3);
+
+    let ctx = h.ctx.clone();
+    h.state_mut()
+        .handle_event(&ctx, Event::Registry(std_registry()));
+    h.run_steps(2);
+    let st = h.state();
+    assert_eq!(st.doc.snarl.wires().count(), 3);
+    assert!(!st.doc.dirty);
+}
+
+#[test]
 fn invalid_graph_is_not_deployed() {
     let dir = tempdir("invalid");
     let path = dir.join("bad.yaml");

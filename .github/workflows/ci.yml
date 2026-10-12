@@ -144,6 +144,21 @@ jobs:
           name: book
           path: book/book
 
+  desktop-files:
+    name: desktop file and metadata
+    # AppStream 1.0 (Ubuntu 24.04) understands the metainfo's <developer id>.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validation tools
+        run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          desktop-file-utils appstream
+      - name: Validate
+        run: |
+          desktop-file-validate packaging/linux/io.github.mhussainahmad.ruro.Studio.desktop
+          appstreamcli validate --no-net packaging/linux/io.github.mhussainahmad.ruro.Studio.metainfo.xml
+
   package:
     name: debian package
     # Release builds of the studio take a while; skip them on pull requests.
@@ -157,13 +172,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Packaging tools
-        run: >
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          dpkg-dev desktop-file-utils appstream
-      - name: Validate desktop file and metadata
-        run: |
-          desktop-file-validate packaging/linux/io.github.mhussainahmad.ruro.Studio.desktop
-          appstreamcli validate --no-net packaging/linux/io.github.mhussainahmad.ruro.Studio.metainfo.xml
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev
       - name: Build .deb
         run: scripts/package-deb.sh
       - name: Inspect package

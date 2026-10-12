@@ -189,9 +189,8 @@ impl ScanBuilder {
         if s.start && self.started.is_none() || finished.is_some() {
             self.started = Some(now);
         }
-        if self.started.is_none() {
-            return None; // wait for the first full revolution
-        }
+        // Wait for the start of the first full revolution.
+        self.started?;
         self.samples += 1;
         let r = s.distance_mm / 1000.0;
         if s.quality >= self.min_quality && r >= self.range_min && r <= self.range_max {

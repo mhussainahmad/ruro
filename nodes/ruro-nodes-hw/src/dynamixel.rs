@@ -253,10 +253,18 @@ pub fn parse_status(buf: &[u8]) -> Result<(Status, usize), ParseError> {
 #[derive(Debug)]
 pub enum BusError {
     Io(std::io::Error),
-    Timeout { id: u8 },
+    Timeout {
+        id: u8,
+    },
     /// A servo answered with an error number.
-    Servo { id: u8, error: u8 },
-    UnexpectedId { expected: u8, got: u8 },
+    Servo {
+        id: u8,
+        error: u8,
+    },
+    UnexpectedId {
+        expected: u8,
+        got: u8,
+    },
 }
 
 impl std::fmt::Display for BusError {
@@ -449,7 +457,9 @@ impl Node for Dynamixel {
         }
         let bus = self.bus.as_mut().unwrap();
         for &id in &self.servo_ids {
-            let (model, fw) = bus.ping(id).with_context(|| format!("pinging servo {id}"))?;
+            let (model, fw) = bus
+                .ping(id)
+                .with_context(|| format!("pinging servo {id}"))?;
             info!("dynamixel {id}: model {model}, firmware {fw}");
             if self.manage_torque {
                 bus.write(id, x_series::TORQUE_ENABLE, &[1])?;
@@ -539,7 +549,10 @@ impl VirtualServos {
 
     /// Handles one instruction packet and returns the status bytes to send back.
     pub fn handle(&mut self, packet: &[u8]) -> Vec<u8> {
-        if packet.len() < 10 || crc16(&packet[..packet.len() - 2]) != u16::from_le_bytes([packet[packet.len() - 2], packet[packet.len() - 1]]) {
+        if packet.len() < 10
+            || crc16(&packet[..packet.len() - 2])
+                != u16::from_le_bytes([packet[packet.len() - 2], packet[packet.len() - 1]])
+        {
             return Vec::new();
         }
         let id = packet[4];
@@ -629,7 +642,11 @@ mod tests {
             hex("ff ff fd 00 01 06 00 03 40 00 01 db 66")
         );
         assert_eq!(
-            sync_write(116, 4, &[(1, &150u32.to_le_bytes()), (2, &170u32.to_le_bytes())]),
+            sync_write(
+                116,
+                4,
+                &[(1, &150u32.to_le_bytes()), (2, &170u32.to_le_bytes())]
+            ),
             hex("ff ff fd 00 fe 11 00 83 74 00 04 00 01 96 00 00 00 02 aa 00 00 00 82 87")
         );
         assert_eq!(
@@ -644,12 +661,13 @@ mod tests {
         let (s, _) = parse_status(&hex("ff ff fd 00 01 07 00 55 00 06 04 26 65 5d")).unwrap();
         assert_eq!((s.id, s.error), (1, 0));
         assert_eq!(s.params, [0x06, 0x04, 0x26]); // model 1030, firmware 38
-        let (s, _) =
-            parse_status(&hex("ff ff fd 00 01 08 00 55 00 a6 00 00 00 8c c0")).unwrap();
+        let (s, _) = parse_status(&hex("ff ff fd 00 01 08 00 55 00 a6 00 00 00 8c c0")).unwrap();
         assert_eq!(i32::from_le_bytes(s.params.try_into().unwrap()), 166);
-        let (s, _) =
-            parse_status(&hex("ff ff fd 00 02 08 00 55 00 1f 08 00 00 ba be")).unwrap();
-        assert_eq!((s.id, i32::from_le_bytes(s.params.try_into().unwrap())), (2, 2079));
+        let (s, _) = parse_status(&hex("ff ff fd 00 02 08 00 55 00 1f 08 00 00 ba be")).unwrap();
+        assert_eq!(
+            (s.id, i32::from_le_bytes(s.params.try_into().unwrap())),
+            (2, 2079)
+        );
         let (s, _) = parse_status(&hex("ff ff fd 00 01 04 00 55 00 a1 0c")).unwrap();
         assert!(s.params.is_empty());
     }
@@ -664,10 +682,7 @@ mod tests {
     fn header_sequences_are_stuffed() {
         // Expected bytes from the SDK's addStuffing + updateCRC.
         let p = write(1, 116, &[0xFF, 0xFF, 0xFD, 0x00]);
-        assert_eq!(
-            p,
-            hex("ff ff fd 00 01 0a 00 03 74 00 ff ff fd fd 00 21 e7")
-        );
+        assert_eq!(p, hex("ff ff fd 00 01 0a 00 03 74 00 ff ff fd fd 00 21 e7"));
         assert_eq!(
             unstuff(&p[7..p.len() - 2]),
             [0x03, 0x74, 0x00, 0xFF, 0xFF, 0xFD, 0x00]
@@ -679,7 +694,10 @@ mod tests {
     #[test]
     fn status_parse_handles_noise_and_fragments() {
         let pkt = VirtualServos::status(1, &[0xA6, 0x01, 0x00, 0x00]);
-        assert_eq!(&pkt[..13], &hex("ff ff fd 00 01 08 00 55 00 a6 01 00 00")[..]);
+        assert_eq!(
+            &pkt[..13],
+            &hex("ff ff fd 00 01 08 00 55 00 a6 01 00 00")[..]
+        );
         assert_eq!(&pkt[13..], &0x409bu16.to_le_bytes());
 
         let mut buf = vec![0x00, 0x13, 0xFF];
@@ -741,7 +759,9 @@ mod tests {
         ];
         let refs: Vec<(u8, &[u8])> = items.iter().map(|(i, d)| (*i, d.as_slice())).collect();
         bus.sync_write(x_series::GOAL_POSITION, 4, &refs).unwrap();
-        let r = bus.sync_read(x_series::PRESENT_POSITION, 4, &[1, 2, 3]).unwrap();
+        let r = bus
+            .sync_read(x_series::PRESENT_POSITION, 4, &[1, 2, 3])
+            .unwrap();
         let pos: Vec<i32> = r
             .iter()
             .map(|b| i32::from_le_bytes(b[..4].try_into().unwrap()))

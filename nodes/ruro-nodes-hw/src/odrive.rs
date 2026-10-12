@@ -267,11 +267,17 @@ impl VirtualODrive {
             let with_cs = line.contains('*');
             let Ok(body) = unframe(&line) else { continue };
             let w: Vec<&str> = body.split_whitespace().collect();
-            let axis = |i: usize| w.get(i).and_then(|a| a.parse::<usize>().ok()).filter(|a| *a < 2);
+            let axis = |i: usize| {
+                w.get(i)
+                    .and_then(|a| a.parse::<usize>().ok())
+                    .filter(|a| *a < 2)
+            };
             let num = |i: usize| w.get(i).and_then(|a| a.parse::<f64>().ok());
             let reply = match w.as_slice() {
                 ["r", "vbus_voltage"] => Some("24.000000".to_owned()),
-                ["f", ..] => axis(1).map(|a| format!("{:.6} {:.6}", self.axes[a].0, self.axes[a].1)),
+                ["f", ..] => {
+                    axis(1).map(|a| format!("{:.6} {:.6}", self.axes[a].0, self.axes[a].1))
+                }
                 ["p", ..] => {
                     if let (Some(a), Some(p)) = (axis(1), num(2)) {
                         self.axes[a].0 = p;
@@ -355,7 +361,10 @@ mod tests {
     fn feedback_parses_with_and_without_checksum() {
         assert_eq!(parse_feedback("1.25 -0.5\r\n").unwrap(), (1.25, -0.5));
         let cs = checksum("1.25 -0.5 ");
-        assert_eq!(parse_feedback(&format!("1.25 -0.5 *{cs}")).unwrap(), (1.25, -0.5));
+        assert_eq!(
+            parse_feedback(&format!("1.25 -0.5 *{cs}")).unwrap(),
+            (1.25, -0.5)
+        );
         assert!(parse_feedback("invalid").is_err());
     }
 
@@ -365,7 +374,10 @@ mod tests {
             let mut dev = VirtualODrive::default();
             let mut c = Client::new(MockTransport::with_responder(move |b| dev.handle(b)));
             c.checksums = checksums;
-            assert_eq!(unframe(&c.query("r vbus_voltage").unwrap()).unwrap(), "24.000000");
+            assert_eq!(
+                unframe(&c.query("r vbus_voltage").unwrap()).unwrap(),
+                "24.000000"
+            );
             c.command("p 0 2.5 0 0").unwrap();
             c.command("v 1 -1.0 0").unwrap();
             assert_eq!(c.feedback(0).unwrap(), (2.5, 0.0));

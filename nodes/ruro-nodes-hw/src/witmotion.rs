@@ -25,16 +25,29 @@ pub mod kind {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Frame {
     /// m/s², and temperature in °C.
-    Accel { xyz: [f64; 3], temperature: f64 },
+    Accel {
+        xyz: [f64; 3],
+        temperature: f64,
+    },
     /// rad/s.
-    Gyro { xyz: [f64; 3] },
+    Gyro {
+        xyz: [f64; 3],
+    },
     /// Roll, pitch, yaw in radians.
-    Angle { rpy: [f64; 3] },
+    Angle {
+        rpy: [f64; 3],
+    },
     /// Raw magnetometer counts.
-    Mag { xyz: [i16; 3] },
+    Mag {
+        xyz: [i16; 3],
+    },
     /// (w, x, y, z).
-    Quaternion { wxyz: [f64; 4] },
-    Other { kind: u8 },
+    Quaternion {
+        wxyz: [f64; 4],
+    },
+    Other {
+        kind: u8,
+    },
 }
 
 fn words(d: &[u8]) -> [i16; 4] {
@@ -213,7 +226,8 @@ impl Node for WitMotionImu {
         let n = port.recv(&mut buf, Duration::from_millis(2))?;
         let mut ready = Vec::new();
         let assembler = &mut self.assembler;
-        self.decoder.push(&buf[..n], |f| ready.extend(assembler.apply(f)));
+        self.decoder
+            .push(&buf[..n], |f| ready.extend(assembler.apply(f)));
         // Publish only the newest sample of this step; older ones are stale.
         if let Some(mut imu) = ready.pop() {
             imu.header = Header::new(self.frame_id.clone(), ruro::msg::now_ns());
@@ -294,7 +308,10 @@ mod tests {
             .orientation;
         assert_eq!((q.w, q.x, q.y, q.z), (0.5, 0.0, 0.0, 0.5));
         // Angle frames no longer override the orientation.
-        assert!(a.apply(decode(&encode(kind::ANGLE, [0, 0, 0, 0])).unwrap()).is_none());
+        assert!(
+            a.apply(decode(&encode(kind::ANGLE, [0, 0, 0, 0])).unwrap())
+                .is_none()
+        );
     }
 
     #[test]

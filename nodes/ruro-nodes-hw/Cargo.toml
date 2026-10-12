@@ -10,11 +10,13 @@ authors.workspace = true
 
 [dependencies]
 ruro = { workspace = true }
+serde = { workspace = true }
 libc = { workspace = true }
 serialport = { workspace = true }
 zune-jpeg = { workspace = true }
 
 [dev-dependencies]
+jpeg-encoder = "0.7"
 ruro-graph = { workspace = true }
 ruro-host = { workspace = true }
 serde_json = { workspace = true }

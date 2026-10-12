@@ -8,8 +8,8 @@
 //! status:      FF FF | ID | LEN | ERR  | PARAMS... | CHK
 //! ```
 //!
-//! `LEN` is the number of parameters plus two and `CHK = !(ID + LEN + INST/ERR
-//! + PARAMS)`. STS servos store multi-byte values little-endian; signed
+//! `LEN` is the number of parameters plus two and the checksum is the bitwise
+//! complement of the byte sum of ID, LEN, INST/ERR and PARAMS. STS servos store multi-byte values little-endian; signed
 //! registers use sign-magnitude with a register-specific sign bit.
 
 use std::f64::consts::TAU;
@@ -309,7 +309,12 @@ impl<T: Transport> Bus<T> {
         self.receive(id).map(|_| ())
     }
 
-    pub fn sync_read(&mut self, address: u8, len: u8, ids: &[u8]) -> Result<Vec<Vec<u8>>, BusError> {
+    pub fn sync_read(
+        &mut self,
+        address: u8,
+        len: u8,
+        ids: &[u8],
+    ) -> Result<Vec<Vec<u8>>, BusError> {
         self.send(sync_read(address, len, ids))?;
         ids.iter()
             .map(|&id| {
@@ -322,7 +327,12 @@ impl<T: Transport> Bus<T> {
             .collect()
     }
 
-    pub fn sync_write(&mut self, address: u8, len: u8, items: &[(u8, &[u8])]) -> Result<(), BusError> {
+    pub fn sync_write(
+        &mut self,
+        address: u8,
+        len: u8,
+        items: &[(u8, &[u8])],
+    ) -> Result<(), BusError> {
         // No replies; a half-duplex echo is discarded by the next `send`.
         self.transport.send(&sync_write(address, len, items))?;
         Ok(())
@@ -361,11 +371,18 @@ impl VirtualServos {
     }
 
     fn table(&mut self, id: u8) -> Option<&mut [u8; 128]> {
-        self.servos.iter_mut().find(|(s, _)| *s == id).map(|(_, t)| t)
+        self.servos
+            .iter_mut()
+            .find(|(s, _)| *s == id)
+            .map(|(_, t)| t)
     }
 
     pub fn handle(&mut self, packet: &[u8]) -> Vec<u8> {
-        let mut out = if self.echo { packet.to_vec() } else { Vec::new() };
+        let mut out = if self.echo {
+            packet.to_vec()
+        } else {
+            Vec::new()
+        };
         let Ok((p, _)) = parse_status(packet) else {
             return out;
         };
@@ -505,7 +522,8 @@ impl Node for So100Arm {
         }
         let bus = self.bus.as_mut().unwrap();
         for &id in &self.servo_ids {
-            bus.ping(id).with_context(|| format!("pinging servo {id}"))?;
+            bus.ping(id)
+                .with_context(|| format!("pinging servo {id}"))?;
         }
         if self.manage_torque {
             // Hold the current pose: goal = present before enabling torque.
@@ -532,7 +550,9 @@ impl Node for So100Arm {
             let pos = decode_signed(u16::from_le_bytes([r[0], r[1]]), 15);
             let vel = decode_signed(u16::from_le_bytes([r[2], r[3]]), 15);
             let load = decode_signed(u16::from_le_bytes([r[4], r[5]]), 10);
-            state.position.push(ticks_to_rad(pos, self.zero[i], self.dir[i]));
+            state
+                .position
+                .push(ticks_to_rad(pos, self.zero[i], self.dir[i]));
             state
                 .velocity
                 .push(self.dir[i] * vel as f64 * TAU / sts::RESOLUTION);
@@ -675,7 +695,14 @@ mod tests {
             bus.write(1, sts::GOAL_POSITION, &1000u16.to_le_bytes())
                 .unwrap();
             let r = bus.sync_read(sts::PRESENT_POSITION, 2, &[1, 2]).unwrap();
-            assert_eq!(r, [1000u16.to_le_bytes().to_vec(), 2048u16.to_le_bytes().to_vec()], "echo={echo}");
+            assert_eq!(
+                r,
+                [
+                    1000u16.to_le_bytes().to_vec(),
+                    2048u16.to_le_bytes().to_vec()
+                ],
+                "echo={echo}"
+            );
             assert!(matches!(bus.ping(9), Err(BusError::Timeout { id: 9 })));
         }
     }

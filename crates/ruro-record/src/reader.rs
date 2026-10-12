@@ -179,8 +179,20 @@ pub fn merge(inputs: &[PathBuf], output: &Path, compress: bool) -> Result<Info> 
     let mut ids: HashMap<(usize, u16), u16> = HashMap::new();
     let mut heads: Vec<Option<RecordedMessage>> = Vec::new();
     let mut heap = BinaryHeap::new();
+    // A segment cut short (its process was killed) ends at its first bad record.
+    let next = |i: usize, s: &mut dyn Iterator<Item = Result<RecordedMessage>>| match s.next() {
+        Some(Ok(m)) => Some(m),
+        Some(Err(e)) => {
+            tracing::warn!(
+                "{}: {e:#}; using the messages before it",
+                inputs[i].display()
+            );
+            None
+        }
+        None => None,
+    };
     for (i, s) in streams.iter_mut().enumerate() {
-        let head = s.next().transpose()?;
+        let head = next(i, s);
         if let Some(m) = &head {
             heap.push(Reverse((m.log_time, i)));
         }
@@ -197,9 +209,9 @@ pub fn merge(inputs: &[PathBuf], output: &Path, compress: bool) -> Result<Info> 
             }
         };
         writer.write(id, m.seq as u64, m.log_time, &m.data)?;
-        if let Some(next) = streams[i].next().transpose()? {
-            heap.push(Reverse((next.log_time, i)));
-            heads[i] = Some(next);
+        if let Some(m) = next(i, &mut streams[i]) {
+            heap.push(Reverse((m.log_time, i)));
+            heads[i] = Some(m);
         }
     }
     writer.finish()?;

@@ -518,16 +518,42 @@ pub fn request(
     payload: &str,
     timeout: std::time::Duration,
 ) -> Result<String> {
+    request_bytes(session, keys, op, payload.as_bytes().to_vec(), timeout)
+}
+
+/// Like [`request`], with a binary payload.
+pub fn request_bytes(
+    session: &zenoh::Session,
+    keys: &Keys,
+    op: Ctl,
+    payload: Vec<u8>,
+    timeout: std::time::Duration,
+) -> Result<String> {
+    request_key(session, &keys.ctl(op), payload, timeout).map_err(|e| {
+        if e.to_string().starts_with("no reply") {
+            anyhow!("no reply from daemon `{}` (is it running?)", keys.daemon())
+        } else {
+            e
+        }
+    })
+}
+
+/// Sends a request to any queryable that answers with a [`CtlReply`]
+/// (daemons and hosts) and waits for the reply.
+pub fn request_key(
+    session: &zenoh::Session,
+    key: &str,
+    payload: Vec<u8>,
+    timeout: std::time::Duration,
+) -> Result<String> {
     use zenoh::Wait;
     let replies = session
-        .get(keys.ctl(op))
-        .payload(payload.as_bytes().to_vec())
+        .get(key)
+        .payload(payload)
         .timeout(timeout)
         .wait()
         .map_err(|e| anyhow!("request failed: {e}"))?;
-    let reply = replies
-        .recv()
-        .map_err(|_| anyhow!("no reply from daemon `{}` (is it running?)", keys.daemon()))?;
+    let reply = replies.recv().map_err(|_| anyhow!("no reply from {key}"))?;
     let sample = reply
         .result()
         .map_err(|e| anyhow!("daemon error: {:?}", e.payload().to_bytes()))?;

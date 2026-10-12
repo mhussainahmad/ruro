@@ -1,6 +1,9 @@
 //! `ruro` — command-line interface.
 
+mod fleet;
 mod output;
+mod recording;
+mod soak;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,9 +11,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use ruro_graph::{Graph, PortRef, Registry};
-use ruro_proto::{Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, SetParam, TapFrame};
+use ruro_proto::{Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, Security, SetParam, TapFrame};
 use zenoh::Wait;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -30,8 +33,40 @@ struct Cli {
     /// Daemon name (discovered automatically if omitted).
     #[arg(long, global = true, env = "RURO_DAEMON")]
     daemon: Option<String>,
+    #[command(flatten)]
+    security: SecurityArgs,
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+/// TLS and token options, shared by clients and the daemon.
+#[derive(Args, Clone, Default)]
+struct SecurityArgs {
+    /// Certificate (PEM): the daemon's for `ruro daemon`, a client
+    /// certificate for mutual TLS otherwise.
+    #[arg(long, global = true, env = "RURO_TLS_CERT")]
+    tls_cert: Option<PathBuf>,
+    /// Private key (PEM) of `--tls-cert`.
+    #[arg(long, global = true, env = "RURO_TLS_KEY")]
+    tls_key: Option<PathBuf>,
+    /// CA certificate (PEM) that signed the other side's certificate.
+    #[arg(long, global = true, env = "RURO_TLS_CA")]
+    tls_ca: Option<PathBuf>,
+    /// Shared access token. A daemon started with one only accepts clients
+    /// (and peer daemons) that present the same token.
+    #[arg(long, global = true, env = "RURO_TOKEN", hide_env_values = true)]
+    token: Option<String>,
+}
+
+impl SecurityArgs {
+    fn security(&self) -> Security {
+        Security {
+            cert: self.tls_cert.clone(),
+            key: self.tls_key.clone(),
+            ca: self.tls_ca.clone(),
+            token: self.token.clone().filter(|t| !t.is_empty()),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -43,21 +78,42 @@ enum Cmd {
         /// Name other tools use to address this daemon (default: hostname).
         #[arg(long)]
         name: Option<String>,
-        /// Endpoint to listen on. Use tcp/0.0.0.0:7447 to accept remote studios.
+        /// Endpoint to listen on. Use tcp/0.0.0.0:7447 (or tls/0.0.0.0:7447
+        /// with --tls-cert/--tls-key) to accept remote studios.
         #[arg(long, default_value = "tcp/127.0.0.1:7447")]
         listen: String,
         /// Host binary used to run graph groups.
         #[arg(long)]
         host: Option<PathBuf>,
+        /// Another daemon to connect to, e.g. tcp/robot2:7447. Repeatable.
+        #[arg(long = "peer")]
+        peers: Vec<String>,
+        /// Seconds without metrics after which a host is restarted.
+        #[arg(long, default_value_t = 5.0)]
+        heartbeat_timeout: f64,
     },
-    /// Deploy a graph to the daemon and return.
-    Deploy { graph: PathBuf },
+    /// Deploy a graph to the daemon and return. With --host-binary, first
+    /// upload a host binary that groups can request with `host: <name>`.
+    Deploy {
+        graph: Option<PathBuf>,
+        /// Daemon to deploy to (same as --daemon).
+        #[arg(long)]
+        to: Option<String>,
+        /// Host binary to upload.
+        #[arg(long)]
+        host_binary: Option<PathBuf>,
+        /// Name to store the binary under (default: its file name).
+        #[arg(long, requires = "host_binary")]
+        host_name: Option<String>,
+    },
     /// Stop the running graph.
     Stop,
     /// Validate a graph against the available node types.
     Check { graph: PathBuf },
     /// Show the daemon, its groups and live node metrics.
     Status,
+    /// List every daemon reachable through the connected one.
+    Fleet,
     /// List available node types.
     Nodes {
         /// Show ports and parameters.
@@ -76,6 +132,46 @@ enum Cmd {
     Kill { group: String },
     /// Stream logs from the running graph.
     Logs,
+    /// Engage the emergency stop: actuator nodes command a safe state.
+    Estop {
+        /// Release the emergency stop instead.
+        #[arg(long)]
+        release: bool,
+    },
+    /// Record every output of the running graph into an MCAP file.
+    Record {
+        /// File to write (on the daemon's machine).
+        file: Option<PathBuf>,
+        /// Stop the current recording and write the file.
+        #[arg(long, conflicts_with = "file")]
+        stop: bool,
+    },
+    /// Replay a recording into the running graph: the recorded nodes stop
+    /// and their recorded outputs feed the rest of the graph.
+    Play {
+        file: PathBuf,
+        /// Playback speed; 1 is real time.
+        #[arg(long, default_value_t = 1.0)]
+        rate: f64,
+        /// Deploy this graph first.
+        #[arg(long)]
+        graph: Option<PathBuf>,
+    },
+    /// Control a running replay.
+    Playback {
+        #[command(subcommand)]
+        cmd: recording::PlaybackCmd,
+    },
+    /// Show the channels, message counts and duration of a recording.
+    Info { file: PathBuf },
+    /// ROS 2 bag tools.
+    Bag {
+        #[command(subcommand)]
+        cmd: recording::BagCmd,
+    },
+    /// Run a graph for a while and check memory, latency and drops.
+    #[command(hide = true)]
+    Soak(soak::SoakArgs),
     /// Open the desktop studio.
     Studio {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -99,16 +195,53 @@ fn main() {
     }
 }
 
+/// A connection to one daemon.
+pub struct Client {
+    pub session: zenoh::Session,
+    pub keys: Keys,
+}
+
+impl Client {
+    pub fn request(&self, op: Ctl, payload: &str) -> Result<String> {
+        ruro_proto::request(&self.session, &self.keys, op, payload, TIMEOUT)
+    }
+
+    pub fn status(&self) -> Result<DaemonStatus> {
+        let sub = self
+            .session
+            .declare_subscriber(self.keys.status())
+            .wait()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let sample = sub
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .context("daemon sent no status")?;
+        ruro_proto::decode(&sample.payload().to_bytes())
+    }
+}
+
 fn run(cli: Cli) -> Result<()> {
-    let client = || -> Result<(zenoh::Session, Keys)> {
-        let session = ruro_proto::connect(&cli.connect).context("start one with `ruro daemon`")?;
-        let keys = ruro_proto::discover(&session, cli.daemon.as_deref(), DISCOVERY)?;
-        Ok((session, keys))
+    let security = cli.security.security();
+    let connect = |name: Option<&str>| -> Result<Client> {
+        let session = ruro_proto::connect_with(&cli.connect, &security)
+            .context("start one with `ruro daemon`")?;
+        let keys = ruro_proto::discover(&session, name.or(cli.daemon.as_deref()), DISCOVERY)?;
+        Ok(Client { session, keys })
     };
+    let client = || connect(None);
     match cli.cmd {
-        Cmd::Daemon { name, listen, host } => {
+        Cmd::Daemon {
+            name,
+            listen,
+            host,
+            peers,
+            heartbeat_timeout,
+        } => {
             let mut config = ruro_daemon::Config::new();
             config.listen = listen;
+            config.peers = peers;
+            config.security = security.clone();
+            config.heartbeat_timeout = Duration::from_secs_f64(heartbeat_timeout.max(0.5));
             if let Some(n) = name {
                 config.name = n;
             }
@@ -120,24 +253,34 @@ fn run(cli: Cli) -> Result<()> {
             daemon.shutdown();
             Ok(())
         }
-        Cmd::Run { graph } => run_graph(&cli.connect, cli.daemon.as_deref(), &graph),
-        Cmd::Deploy { graph } => {
-            let (session, keys) = client()?;
-            println!("{}", deploy(&session, &keys, &graph)?);
+        Cmd::Run { graph } => run_graph(&cli.connect, cli.daemon.as_deref(), &security, &graph),
+        Cmd::Deploy {
+            graph,
+            to,
+            host_binary,
+            host_name,
+        } => {
+            if graph.is_none() && host_binary.is_none() {
+                bail!("nothing to deploy: give a graph, --host-binary, or both");
+            }
+            let c = connect(to.as_deref())?;
+            if let Some(bin) = host_binary {
+                println!("{}", fleet::upload_host(&c, &bin, host_name.as_deref())?);
+            }
+            if let Some(graph) = graph {
+                println!("{}", deploy(&c, &graph)?);
+            }
             Ok(())
         }
         Cmd::Stop => {
-            let (session, keys) = client()?;
-            println!(
-                "{}",
-                ruro_proto::request(&session, &keys, Ctl::Stop, "", TIMEOUT)?
-            );
+            println!("{}", client()?.request(Ctl::Stop, "")?);
             Ok(())
         }
         Cmd::Check { graph: path } => {
             let graph =
                 Graph::load(&path).with_context(|| format!("loading {}", path.display()))?;
-            let registry = local_or_remote_registry(&cli.connect, cli.daemon.as_deref())?;
+            let registry =
+                local_or_remote_registry(&cli.connect, cli.daemon.as_deref(), &security)?;
             let issues = ruro_graph::validate(&graph, &registry);
             if issues.is_empty() {
                 let groups = graph.groups();
@@ -157,20 +300,24 @@ fn run(cli: Cli) -> Result<()> {
                 bail!("{} issue(s) in {}", issues.len(), path.display());
             }
         }
-        Cmd::Status => {
-            let (session, keys) = client()?;
-            status(&session, &keys)
+        Cmd::Status => status(&client()?),
+        Cmd::Fleet => {
+            let session = ruro_proto::connect_with(&cli.connect, &security)
+                .context("start one with `ruro daemon`")?;
+            fleet::fleet(&session)
         }
         Cmd::Nodes { verbose } => {
-            let registry = local_or_remote_registry(&cli.connect, cli.daemon.as_deref())?;
+            let registry =
+                local_or_remote_registry(&cli.connect, cli.daemon.as_deref(), &security)?;
             output::print_registry(&registry, verbose);
             Ok(())
         }
         Cmd::Echo { port } => {
-            let (session, keys) = client()?;
+            let c = client()?;
             let port: PortRef = port.parse()?;
-            let _sub = session
-                .declare_subscriber(keys.tap(&port.node, &port.port))
+            let _sub = c
+                .session
+                .declare_subscriber(c.keys.tap(&port.node, &port.port))
                 .callback(|sample| {
                     if let Ok(frame) = ruro_proto::decode::<TapFrame>(&sample.payload().to_bytes())
                     {
@@ -183,7 +330,7 @@ fn run(cli: Cli) -> Result<()> {
             wait_for_ctrl_c()
         }
         Cmd::Param { node, name, value } => {
-            let (session, keys) = client()?;
+            let c = client()?;
             // Accept bare words as strings: `ruro param cam mode fast`.
             let json = serde_json::from_str::<serde_json::Value>(&value)
                 .unwrap_or(serde_json::Value::String(value))
@@ -192,8 +339,8 @@ fn run(cli: Cli) -> Result<()> {
                 name: name.clone(),
                 value: json.clone(),
             };
-            session
-                .put(keys.param(&node), ruro_proto::encode(&msg))
+            c.session
+                .put(c.keys.param(&node), ruro_proto::encode(&msg))
                 .wait()
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             // Give the publication a moment to leave before the session closes.
@@ -202,18 +349,31 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Kill { group } => {
-            let (session, keys) = client()?;
-            println!(
-                "{}",
-                ruro_proto::request(&session, &keys, Ctl::Kill, &group, TIMEOUT)?
-            );
+            println!("{}", client()?.request(Ctl::Kill, &group)?);
             Ok(())
         }
         Cmd::Logs => {
-            let (session, keys) = client()?;
-            stream_logs(&session, &keys)?;
+            let c = client()?;
+            stream_logs(&c.session, &c.keys)?;
             wait_for_ctrl_c()
         }
+        Cmd::Estop { release } => {
+            let payload = if release { "release" } else { "engage" };
+            println!("{}", client()?.request(Ctl::Estop, payload)?);
+            Ok(())
+        }
+        Cmd::Record { file, stop } => recording::record(&client()?, file, stop),
+        Cmd::Play { file, rate, graph } => {
+            let c = client()?;
+            if let Some(g) = graph {
+                println!("{}", deploy(&c, &g)?);
+            }
+            recording::play(&c, &file, rate)
+        }
+        Cmd::Playback { cmd } => recording::control(&client()?, cmd),
+        Cmd::Info { file } => recording::info(&file),
+        Cmd::Bag { cmd } => recording::bag(cmd),
+        Cmd::Soak(args) => soak::soak(&cli.connect, cli.daemon.as_deref(), &security, args),
         Cmd::Studio { args } => {
             let exe = std::env::current_exe()?.with_file_name("ruro-studio");
             let exe = if exe.exists() {
@@ -227,34 +387,51 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn deploy(session: &zenoh::Session, keys: &Keys, path: &PathBuf) -> Result<String> {
+fn deploy(c: &Client, path: &PathBuf) -> Result<String> {
     let yaml =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    ruro_proto::request(session, keys, Ctl::Deploy, &yaml, TIMEOUT)
+    c.request(Ctl::Deploy, &yaml)
 }
 
-/// `ruro run`: deploy to a reachable daemon, or start one in this process.
-fn run_graph(endpoint: &str, name: Option<&str>, path: &PathBuf) -> Result<()> {
-    let (daemon, session) = match ruro_proto::connect(endpoint) {
+/// Connects to the daemon at `endpoint`, starting one in this process if
+/// none is reachable.
+pub fn connect_or_start(
+    endpoint: &str,
+    name: Option<&str>,
+    security: &Security,
+) -> Result<(Option<ruro_daemon::Daemon>, Client)> {
+    let (daemon, session) = match ruro_proto::connect_with(endpoint, security) {
         Ok(session) => (None, session),
         Err(_) => {
             let mut config = ruro_daemon::Config::new();
             config.listen = endpoint.to_owned();
+            config.security = security.clone();
             if let Some(n) = name {
                 config.name = n.to_owned();
             }
             let daemon = ruro_daemon::Daemon::start(config)?;
-            (Some(daemon), ruro_proto::connect(endpoint)?)
+            (Some(daemon), ruro_proto::connect_with(endpoint, security)?)
         }
     };
     let keys = ruro_proto::discover(&session, name, DISCOVERY)?;
-    println!("{}", deploy(&session, &keys, path)?);
+    Ok((daemon, Client { session, keys }))
+}
+
+/// `ruro run`: deploy to a reachable daemon, or start one in this process.
+fn run_graph(
+    endpoint: &str,
+    name: Option<&str>,
+    security: &Security,
+    path: &PathBuf,
+) -> Result<()> {
+    let (daemon, c) = connect_or_start(endpoint, name, security)?;
+    println!("{}", deploy(&c, path)?);
     if daemon.is_none() {
         // Host output goes to the remote daemon's terminal; mirror it here.
-        stream_logs(&session, &keys)?;
+        stream_logs(&c.session, &c.keys)?;
     }
     wait_for_ctrl_c()?;
-    let _ = ruro_proto::request(&session, &keys, Ctl::Stop, "", TIMEOUT);
+    let _ = c.request(Ctl::Stop, "");
     if let Some(d) = daemon {
         d.shutdown();
     }
@@ -274,20 +451,13 @@ fn stream_logs(session: &zenoh::Session, keys: &Keys) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-fn status(session: &zenoh::Session, keys: &Keys) -> Result<()> {
-    let status_sub = session
-        .declare_subscriber(keys.status())
+/// Latest metrics of every running group of the daemon.
+pub fn group_metrics(c: &Client, status: &DaemonStatus) -> Result<Vec<GroupMetrics>> {
+    let metrics_sub = c
+        .session
+        .declare_subscriber(c.keys.all_metrics())
         .wait()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let metrics_sub = session
-        .declare_subscriber(keys.all_metrics())
-        .wait()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let sample = status_sub
-        .recv_timeout(Duration::from_secs(2))
-        .map_err(|e| anyhow::anyhow!("{e}"))?
-        .context("daemon sent no status")?;
-    let status: DaemonStatus = ruro_proto::decode(&sample.payload().to_bytes())?;
     let expected = status.groups.iter().filter(|g| g.pid.is_some()).count();
     let mut metrics: Vec<GroupMetrics> = Vec::new();
     let deadline = std::time::Instant::now() + Duration::from_millis(1200);
@@ -299,12 +469,22 @@ fn status(session: &zenoh::Session, keys: &Keys) -> Result<()> {
             metrics.push(m);
         }
     }
+    Ok(metrics)
+}
+
+fn status(c: &Client) -> Result<()> {
+    let status = c.status()?;
+    let metrics = group_metrics(c, &status)?;
     output::print_status(&status, &metrics);
     Ok(())
 }
 
-fn local_or_remote_registry(endpoint: &str, name: Option<&str>) -> Result<Registry> {
-    if let Ok(session) = ruro_proto::connect(endpoint)
+fn local_or_remote_registry(
+    endpoint: &str,
+    name: Option<&str>,
+    security: &Security,
+) -> Result<Registry> {
+    if let Ok(session) = ruro_proto::connect_with(endpoint, security)
         && let Ok(keys) = ruro_proto::discover(&session, name, DISCOVERY)
     {
         let body = ruro_proto::request(&session, &keys, Ctl::Registry, "", TIMEOUT)?;
@@ -313,14 +493,21 @@ fn local_or_remote_registry(endpoint: &str, name: Option<&str>) -> Result<Regist
     ruro_daemon::load_registry(&ruro_daemon::default_host_binary())
 }
 
-fn wait_for_ctrl_c() -> Result<()> {
-    let stop = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGINT, stop.clone())?;
-    signal_hook::flag::register(signal_hook::consts::SIGTERM, stop.clone())?;
+/// Blocks until SIGINT or SIGTERM.
+pub fn wait_for_ctrl_c() -> Result<()> {
+    let stop = ctrl_c_flag()?;
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(50));
     }
     Ok(())
+}
+
+/// A flag set by SIGINT or SIGTERM.
+pub fn ctrl_c_flag() -> Result<Arc<AtomicBool>> {
+    let stop = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGINT, stop.clone())?;
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, stop.clone())?;
+    Ok(stop)
 }
 
 fn exec(exe: &PathBuf, args: &[String]) -> std::io::Error {

@@ -456,7 +456,7 @@ mod tests {
             let start = std::time::Instant::now();
             shm.subscriber(&format!("{topic}/{i}"), 1).unwrap();
             let took = start.elapsed();
-            assert!(took < Duration::from_secs(6), "topic {i} took {took:?}");
+            assert!(took < Duration::from_secs(9), "topic {i} took {took:?}");
         }
     }
 

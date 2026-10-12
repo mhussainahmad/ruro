@@ -4840,10 +4840,12 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "ort",
+ "parking_lot",
  "parquet",
  "ruro",
  "ruro-graph",
  "ruro-host",
+ "serde",
  "serde_json",
 ]
 

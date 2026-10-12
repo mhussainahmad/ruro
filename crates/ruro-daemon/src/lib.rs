@@ -86,10 +86,18 @@ pub fn default_host_binary() -> PathBuf {
 
 /// Asks a host binary for the node types it links.
 pub fn load_registry(host: &Path) -> Result<Registry> {
-    let out = std::process::Command::new(host)
-        .arg("describe")
-        .output()
-        .with_context(|| format!("running `{} describe`", host.display()))?;
+    let mut attempts = 0;
+    let out = loop {
+        match std::process::Command::new(host).arg("describe").output() {
+            // A binary just written (an upload, a test's stand-in) is busy
+            // while a process forked meanwhile still has it open.
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && attempts < 50 => {
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            r => break r.with_context(|| format!("running `{} describe`", host.display()))?,
+        }
+    };
     if !out.status.success() {
         bail!(
             "`{} describe` failed: {}",
@@ -455,11 +463,22 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             })
         }
         "registry" => {
+            let host = text();
+            let host = host.trim();
+            if !host.is_empty() {
+                // A custom host groups can select, such as an uploaded one.
+                let path = st.sup.lock().resolve_host(Some(host))?;
+                return Ok(serde_json::to_string(&load_registry(&path)?)?);
+            }
             // Re-read so newly built node types show up without a restart.
             if let Ok(r) = load_registry(&st.host) {
                 *st.registry.lock() = r;
             }
             Ok(serde_json::to_string(&*st.registry.lock())?)
+        }
+        "validate" => {
+            let graph = pinned(st, &text())?;
+            Ok(serde_json::to_string(&check(st, &graph)?)?)
         }
         "graph" => Ok(match st.sup.lock().graph() {
             Some(_) => st.deployed.lock().clone().unwrap_or_default(),
@@ -503,68 +522,12 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
 /// Validates `yaml`, sends the groups of other machines to their daemons and
 /// starts the local ones.
 fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
-    let mut graph = Graph::from_yaml(yaml)?.flatten()?;
-    // Pin every group to a machine, so each daemon knows exactly what it runs.
-    for group in graph.groups().into_keys() {
-        graph
-            .groups
-            .entry(group)
-            .or_default()
-            .machine
-            .get_or_insert_with(|| st.name.clone());
-    }
-    let machines: BTreeSet<String> = graph
-        .groups
-        .values()
-        .filter_map(|c| c.machine.clone())
-        .filter(|m| *m != st.name)
-        .collect();
-
-    // Node types: this daemon's hosts plus whatever the peers offer.
-    let local = st.registry.lock().clone();
-    let custom_hosts: BTreeSet<String> = graph
-        .groups
-        .values()
-        .filter(|c| c.machine.as_deref() == Some(st.name.as_str()))
-        .filter_map(|c| c.host.clone())
-        .collect();
-    let mut hosts = HashMap::new();
-    for h in custom_hosts {
-        let path = st.sup.lock().resolve_host(Some(&h))?;
-        hosts.insert(h, load_registry(&path)?);
-    }
-    let mut peers = HashMap::new();
-    for m in &machines {
-        let body = st.peer_request(m, Ctl::Registry, "")?;
-        let r: Registry = serde_json::from_str(&body).context("peer registry")?;
-        peers.insert(m.clone(), r);
-    }
-    let registry = Registry::new(
-        local
-            .iter()
-            .chain(hosts.values().flat_map(Registry::iter))
-            .chain(peers.values().flat_map(Registry::iter))
-            .cloned(),
-    );
-    let mut issues: Vec<String> = ruro_graph::validate(&graph, &registry)
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    issues.extend(runtime_issues(&graph, &registry));
-    // The types a group's host links. Peers only report their default host.
-    let offered = |group: &str| {
-        let config = graph.group_config(group);
-        match (config.machine.as_deref(), config.host.as_deref()) {
-            (Some(m), None) if m != st.name => peers.get(m),
-            (Some(m), Some(_)) if m != st.name => None,
-            (_, Some(h)) => hosts.get(h),
-            (_, None) => Some(&local),
-        }
-    };
-    issues.extend(placement_issues(&graph, &registry, offered));
+    let graph = pinned(st, yaml)?;
+    let issues = check(st, &graph)?;
     if !issues.is_empty() {
         bail!("graph is invalid:\n  {}", issues.join("\n  "));
     }
+    let machines = peer_machines(st, &graph);
 
     session::stop_playback(st);
     st.sup.lock().stop_all();
@@ -593,6 +556,90 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
     })
 }
 
+/// Parses and flattens a graph and pins every group to a machine (this
+/// daemon unless it names one), so each daemon knows exactly what it runs.
+fn pinned(st: &State, yaml: &str) -> Result<Graph> {
+    let mut graph = Graph::from_yaml(yaml)?.flatten()?;
+    for group in graph.groups().into_keys() {
+        graph
+            .groups
+            .entry(group)
+            .or_default()
+            .machine
+            .get_or_insert_with(|| st.name.clone());
+    }
+    Ok(graph)
+}
+
+/// The other machines a pinned graph runs groups on.
+fn peer_machines(st: &State, graph: &Graph) -> BTreeSet<String> {
+    graph
+        .groups
+        .values()
+        .filter_map(|c| c.machine.clone())
+        .filter(|m| *m != st.name)
+        .collect()
+}
+
+/// The node types of the host that runs a group: `(machine, host)`, where
+/// `host` is `None` for the machine's default host.
+type HostKey = (String, Option<String>);
+
+/// Everything that would keep a pinned graph from running: invalid nodes
+/// and wires, nodes placed on hosts that lack their type, and the runtime's
+/// conventions. Asks peers for the node types of the hosts they would use.
+fn check(st: &State, graph: &Graph) -> Result<Vec<String>> {
+    let hosts: BTreeSet<HostKey> = graph
+        .groups()
+        .into_keys()
+        .map(|g| {
+            let c = graph.group_config(&g);
+            (c.machine.unwrap_or_else(|| st.name.clone()), c.host)
+        })
+        .collect();
+    let mut registries: HashMap<HostKey, Registry> = HashMap::new();
+    let mut issues = Vec::new();
+    for key in hosts {
+        let (machine, host) = &key;
+        let registry = if *machine == st.name {
+            match host {
+                None => Ok(st.registry.lock().clone()),
+                Some(h) => st
+                    .sup
+                    .lock()
+                    .resolve_host(Some(h))
+                    .and_then(|p| load_registry(&p)),
+            }
+        } else {
+            st.peer_request(machine, Ctl::Registry, host.as_deref().unwrap_or_default())
+                .and_then(|body| serde_json::from_str(&body).context("peer registry"))
+        };
+        match registry {
+            Ok(r) => {
+                registries.insert(key, r);
+            }
+            Err(e) if host.is_none() => return Err(e),
+            Err(e) => issues.push(format!(
+                "host `{}` on `{machine}`: {e:#}",
+                host.as_deref().unwrap_or_default()
+            )),
+        }
+    }
+    // Every type any of the hosts offers; whether a node's own host offers
+    // it is checked by placement.
+    let all = Registry::new(registries.values().flat_map(Registry::iter).cloned());
+    let offered = |group: &str| {
+        let c = graph.group_config(group);
+        registries.get(&(c.machine.unwrap_or_else(|| st.name.clone()), c.host))
+    };
+    let found = ruro_graph::validate(graph, &all)
+        .into_iter()
+        .chain(ruro_graph::runtime_issues(graph, &all))
+        .chain(ruro_graph::placement_issues(graph, &all, offered));
+    issues.extend(found.map(|i| i.to_string()));
+    Ok(issues)
+}
+
 /// Stops the groups this daemon forwarded to `peers`, except on the
 /// machines in `keep`. A peer that has since been given a graph by another
 /// daemon keeps it.
@@ -602,113 +649,5 @@ fn stop_peers(st: &State, peers: BTreeSet<String>, keep: &BTreeSet<String>) {
         if let Err(e) = st.peer_request(p, Ctl::Stop, &from) {
             tracing::warn!("{e:#}");
         }
-    }
-}
-
-/// Nodes placed in a group whose host does not link their type, which
-/// would fail to start there. `offered` gives a group's host types, or
-/// `None` when they are not known here.
-fn placement_issues<'a>(
-    graph: &Graph,
-    registry: &Registry,
-    offered: impl Fn(&str) -> Option<&'a Registry>,
-) -> Vec<String> {
-    let mut issues = Vec::new();
-    for (id, node) in &graph.nodes {
-        // Unknown everywhere: already reported by validation.
-        if registry.get(&node.kind).is_none() {
-            continue;
-        }
-        let group = node.group();
-        if offered(group).is_some_and(|r| r.get(&node.kind).is_none()) {
-            issues.push(format!(
-                "node `{id}`: type `{}` is not linked into the host of group `{group}`",
-                node.kind
-            ));
-        }
-    }
-    issues
-}
-
-/// Checks that need the runtime's conventions rather than node descriptors.
-fn runtime_issues(graph: &Graph, registry: &Registry) -> Vec<String> {
-    let mut issues = Vec::new();
-    if graph.clock == ruro_graph::ClockSource::Sim {
-        let clocks = graph
-            .nodes
-            .values()
-            .filter_map(|n| registry.get(&n.kind))
-            .flat_map(|d| d.outputs.iter())
-            .filter(|p| p.ty == "std/Clock")
-            .count();
-        if clocks != 1 {
-            issues.push(format!(
-                "`clock: sim` needs exactly one std/Clock output, found {clocks}"
-            ));
-        }
-    }
-    let groups = graph.groups();
-    for (name, config) in &graph.groups {
-        let Some(rt) = &config.realtime else { continue };
-        for node in rt.deadlines_us.keys() {
-            if !groups.get(name).is_some_and(|ns| ns.contains(node)) {
-                issues.push(format!(
-                    "group `{name}`: deadline for `{node}`, which is not in the group"
-                ));
-            }
-        }
-        if let Some(p) = rt.priority
-            && !(1..=99).contains(&p)
-        {
-            issues.push(format!("group `{name}`: priority {p} is outside 1-99"));
-        }
-        if let Some(r) = rt.rate
-            && !(r.is_finite() && r > 0.0 && r <= 100_000.0)
-        {
-            issues.push(format!(
-                "group `{name}`: rate {r} Hz is out of range (0, 100000]"
-            ));
-        }
-    }
-    issues
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn nodes_must_run_in_a_group_whose_host_links_their_type() {
-        let desc = |kind: &str| ruro_graph::NodeDescriptor {
-            kind: kind.into(),
-            ..Default::default()
-        };
-        let std_host = Registry::new([desc("std/sine")]);
-        let custom_host = Registry::new([desc("std/sine"), desc("my/scale")]);
-        let all = Registry::new([desc("std/sine"), desc("my/scale")]);
-        let g = Graph::from_yaml(
-            "name: x\ngroups:\n  custom: { host: my-host }\n  far: { machine: robot, host: other }\nnodes:\n  a: { type: std/sine, group: custom }\n  b: { type: my/scale }\n  c: { type: my/scale, group: custom }\n  d: { type: my/scale, group: far }\n",
-        )
-        .unwrap();
-        let offered = |group: &str| match group {
-            "custom" => Some(&custom_host),
-            "far" => None,
-            _ => Some(&std_host),
-        };
-        let issues = placement_issues(&g, &all, offered);
-        assert_eq!(issues.len(), 1, "{issues:?}");
-        assert!(issues[0].contains("`b`") && issues[0].contains("`main`"));
-    }
-
-    #[test]
-    fn runtime_checks() {
-        let registry = Registry::new([]);
-        let g = Graph::from_yaml(
-            "name: x\nclock: sim\ngroups:\n  a:\n    realtime: { priority: 120, rate: -1, deadlines_us: { ghost: 5 } }\nnodes:\n  n: { type: t/x, group: a }\n",
-        )
-        .unwrap();
-        let issues = runtime_issues(&g, &registry);
-        assert_eq!(issues.len(), 4, "{issues:?}");
-        assert!(issues[0].contains("std/Clock"));
     }
 }

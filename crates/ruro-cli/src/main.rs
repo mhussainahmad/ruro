@@ -1,5 +1,6 @@
 //! `ruro` — command-line interface.
 
+mod check;
 mod fleet;
 mod output;
 mod recording;
@@ -311,28 +312,8 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Check { graph: path } => {
-            let graph =
-                Graph::load(&path).with_context(|| format!("loading {}", path.display()))?;
-            let registry =
-                local_or_remote_registry(&cli.connect, cli.daemon.as_deref(), &security)?;
-            let issues = ruro_graph::validate_in(&graph, &registry, &base_dir(&path));
-            if issues.is_empty() {
-                let groups = graph.groups();
-                println!(
-                    "{}: ok ({} nodes, {} wires, {} process group{})",
-                    path.display(),
-                    graph.nodes.len(),
-                    graph.wires.len(),
-                    groups.len(),
-                    if groups.len() == 1 { "" } else { "s" }
-                );
-                Ok(())
-            } else {
-                for i in &issues {
-                    eprintln!("  {i}");
-                }
-                bail!("{} issue(s) in {}", issues.len(), path.display());
-            }
+            let daemon = daemon_session(&cli.connect, cli.daemon.as_deref(), &security)?;
+            check::check(&path, daemon.as_ref().map(|(s, k)| (s, k)))
         }
         Cmd::Status => status(&client()?),
         Cmd::Fleet => {
@@ -610,13 +591,35 @@ fn local_or_remote_registry(
     name: Option<&str>,
     security: &Security,
 ) -> Result<Registry> {
-    if let Ok(session) = ruro_proto::connect_with(endpoint, security)
-        && let Ok(keys) = ruro_proto::discover(&session, name, DISCOVERY)
-    {
+    if let Some((session, keys)) = daemon_session(endpoint, name, security)? {
         let body = ruro_proto::request(&session, &keys, Ctl::Registry, "", TIMEOUT)?;
         return Ok(serde_json::from_str(&body)?);
     }
     ruro_daemon::load_registry(&ruro_daemon::default_host_binary())
+}
+
+/// A session with the daemon, or `None` if no daemon is running there.
+/// A daemon that refuses the session is an error.
+fn daemon_session(
+    endpoint: &str,
+    name: Option<&str>,
+    security: &Security,
+) -> Result<Option<(zenoh::Session, Keys)>> {
+    let session = match ruro_proto::connect_with(endpoint, security) {
+        Ok(s) => s,
+        Err(e)
+            if ruro_proto::ConnectError::failure_of(&e)
+                == Some(ruro_proto::ConnectFailure::NoDaemon) =>
+        {
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    match ruro_proto::discover(&session, name, DISCOVERY) {
+        Ok(keys) => Ok(Some((session, keys))),
+        Err(e) if name.is_some() => Err(e),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Blocks until SIGINT or SIGTERM.

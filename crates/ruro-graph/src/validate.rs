@@ -20,6 +20,24 @@ pub struct Issue {
     pub message: String,
 }
 
+/// Start of the message of an issue about a node type no registry knows.
+const UNKNOWN_TYPE: &str = "unknown node type";
+
+impl Issue {
+    /// An issue about the graph as a whole.
+    pub fn graph(message: impl Into<String>) -> Self {
+        Self {
+            node: None,
+            message: message.into(),
+        }
+    }
+
+    /// Whether the issue is a node whose type is in no registry.
+    pub fn is_unknown_type(&self) -> bool {
+        self.node.is_some() && self.message.starts_with(UNKNOWN_TYPE)
+    }
+}
+
 impl fmt::Display for Issue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.node {
@@ -107,7 +125,7 @@ pub fn validate_in(graph: &Graph, registry: &Registry, base: &Path) -> Vec<Issue
         }
         let Some(desc) = desc(id, &inst.kind) else {
             if !inst.is_composite() {
-                push(Some(id), format!("unknown node type `{}`", inst.kind));
+                push(Some(id), format!("{UNKNOWN_TYPE} `{}`", inst.kind));
             }
             continue;
         };

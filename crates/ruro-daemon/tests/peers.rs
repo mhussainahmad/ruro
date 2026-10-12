@@ -449,3 +449,83 @@ fn releases_lift_the_stops_of_their_own_origin_wherever_they_went() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A host like [`fake_host`] whose node types exchange `t/Msg`, built with
+/// the definition `hash`, plus `extra` node types of its own.
+fn typed_host(dir: &Path, name: &str, hash: &str, extra: &str) -> PathBuf {
+    let path = dir.join(name);
+    let node = |kind: &str| {
+        format!(
+            r#""{kind}":{{"kind":"{kind}","default_rate":1,"inputs":[{{"name":"in","ty":"t/Msg"}}],"outputs":[{{"name":"out","ty":"t/Msg"}}]}}"#
+        )
+    };
+    let mut nodes = vec![node("t/x")];
+    nodes.extend(extra.split_whitespace().map(node));
+    let registry = format!(
+        r#"{{"nodes":{{{}}},"schema_hashes":{{"t/Msg":"{hash}"}}}}"#,
+        nodes.join(",")
+    );
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = describe ]; then echo '{registry}'; exit 0; fi\nexec sleep 30\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[test]
+fn deploys_check_the_hosts_each_group_runs_on() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-schemas-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = typed_host(&dir, "host-a", "aaaaaaaaaaaaaaaa", "");
+    let other = typed_host(&dir, "host-b", "bbbbbbbbbbbbbbbb", "t/special");
+    let (robot_port, laptop_port) = (free_port(), free_port());
+    let tag = std::process::id();
+    let (robot, laptop) = (format!("srobot{tag}"), format!("slaptop{tag}"));
+    let robot_daemon = daemon(&robot, robot_port, Vec::new(), &host);
+    let laptop_daemon = daemon(
+        &laptop,
+        laptop_port,
+        vec![format!("tcp/127.0.0.1:{robot_port}")],
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{laptop_port}")).unwrap();
+    let request = |op, payload: &str| {
+        ruro_proto::request(
+            &session,
+            &Keys::new(&laptop),
+            op,
+            payload,
+            Duration::from_secs(10),
+        )
+    };
+    let graph = |kind: &str| {
+        format!(
+            "name: schemas\ngroups:\n  far: {{ machine: {robot}, host: {} }}\nnodes:\n  a: {{ type: t/x }}\n  b: {{ type: {kind}, group: far }}\nwires: [a.out -> b.in]\n",
+            other.display()
+        )
+    };
+
+    // A type only that host offers is known, through the robot.
+    let reply = request(Ctl::Validate, &graph("t/special")).unwrap();
+    let issues: Vec<String> = serde_json::from_str(&reply).unwrap();
+    assert!(issues.iter().all(|i| !i.contains("unknown")), "{issues:?}");
+    let registry = ruro_proto::request(
+        &session,
+        &Keys::new(&robot),
+        Ctl::Registry,
+        &other.display().to_string(),
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    assert!(registry.contains("t/special"), "{registry}");
+
+    drop((robot_daemon, laptop_daemon));
+    for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

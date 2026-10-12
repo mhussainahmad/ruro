@@ -110,7 +110,8 @@ pub enum Ctl {
     /// daemons to their peers) to stop the graph only if that daemon
     /// forwarded it.
     Stop,
-    /// Reply: JSON [`ruro_graph::Registry`].
+    /// Reply: JSON [`ruro_graph::Registry`] of the daemon's default host, or
+    /// with a host name as payload, of that host (e.g. an uploaded one).
     Registry,
     /// Reply: YAML of the running graph (empty if none).
     Graph,
@@ -130,6 +131,10 @@ pub enum Ctl {
     DeployGroups,
     /// Payload: postcard [`UploadChunk`]. Stores a host binary.
     Upload,
+    /// Payload: graph YAML. Reply: JSON list of the reasons the daemon would
+    /// refuse to deploy it (empty if none), checked against the hosts each
+    /// group would run on, here and on peers.
+    Validate,
 }
 
 impl Ctl {
@@ -146,6 +151,7 @@ impl Ctl {
             Ctl::Estop => "estop",
             Ctl::DeployGroups => "deploy-groups",
             Ctl::Upload => "upload",
+            Ctl::Validate => "validate",
         }
     }
 }

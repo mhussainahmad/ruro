@@ -126,6 +126,8 @@ enum Cmd {
     Param {
         node: String,
         name: String,
+        /// JSON, or a plain string. Negative numbers need no `--`.
+        #[arg(allow_hyphen_values = true)]
         value: String,
     },
     /// Kill a group process to exercise supervision.
@@ -541,6 +543,12 @@ fn exec(exe: &PathBuf, args: &[String]) -> std::io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parameters_can_be_set_to_negative_values() {
+        let cli = Cli::try_parse_from(["ruro", "param", "pid", "kp", "-1.5"]).unwrap();
+        assert!(matches!(cli.cmd, Cmd::Param { value, .. } if value == "-1.5"));
+    }
 
     #[test]
     fn deploys_send_graphs_with_file_subgraphs_expanded() {

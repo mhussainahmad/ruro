@@ -4,6 +4,7 @@
 //! comes back through a channel and is turned into a command.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
@@ -20,6 +21,7 @@ pub struct Dialogs {
     ctx: egui::Context,
     /// A dialog is open; another request waits for it.
     pub busy: bool,
+    opened: Option<Instant>,
 }
 
 impl Dialogs {
@@ -30,6 +32,7 @@ impl Dialogs {
             rx,
             ctx,
             busy: false,
+            opened: None,
         }
     }
 
@@ -39,6 +42,7 @@ impl Dialogs {
             return;
         }
         self.busy = true;
+        self.opened = Some(Instant::now());
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
         let spawned = std::thread::Builder::new()
@@ -67,9 +71,26 @@ impl Dialogs {
     }
 
     /// The answer to the open dialog, once the user has picked (or cancelled).
-    pub fn poll(&mut self) -> Option<(Purpose, Option<PathBuf>)> {
-        let r = self.rx.try_recv().ok()?;
+    pub fn poll(&mut self) -> Option<Answer> {
+        let (purpose, path) = self.rx.try_recv().ok()?;
         self.busy = false;
-        Some(r)
+        let elapsed = self.opened.take().map_or(Duration::MAX, |t| t.elapsed());
+        Some(match path {
+            Some(p) => Answer::Picked(purpose, p),
+            // No portal answers on some desktops; the dialog then "returns"
+            // before anyone could have cancelled it.
+            None if elapsed < UNAVAILABLE_WITHIN => Answer::Unavailable(purpose),
+            None => Answer::Cancelled,
+        })
     }
+}
+
+/// Faster than any person can dismiss a dialog.
+const UNAVAILABLE_WITHIN: Duration = Duration::from_millis(250);
+
+pub enum Answer {
+    Picked(Purpose, PathBuf),
+    Cancelled,
+    /// The desktop could not show a dialog.
+    Unavailable(Purpose),
 }

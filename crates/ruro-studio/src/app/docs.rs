@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use ruro_graph::Graph;
 
 use super::{Severity, Studio, file_name};
-use crate::dialogs::Purpose;
+use crate::dialogs::{Answer, Purpose};
 use crate::diff::Compare;
 use crate::model::Doc;
 use crate::palette::{Palette, PaletteMode};
@@ -165,13 +165,19 @@ impl Studio {
     }
 
     pub(crate) fn poll_dialogs(&mut self) {
-        if let Some((purpose, path)) = self.dialogs.poll() {
-            let Some(path) = path else { return };
-            self.push(match purpose {
+        match self.dialogs.poll() {
+            Some(Answer::Picked(purpose, path)) => self.push(match purpose {
                 Purpose::Open => super::Cmd::Open(path),
                 Purpose::SaveAs => super::Cmd::SaveAs(path),
                 Purpose::Compare => super::Cmd::CompareWith(path),
-            });
+            }),
+            // Without a desktop portal, use the built-in picker from now on.
+            Some(Answer::Unavailable(purpose)) => {
+                tracing::info!("no desktop file dialog available; using the built-in picker");
+                self.native_dialogs = false;
+                self.open_dialog(purpose);
+            }
+            Some(Answer::Cancelled) | None => {}
         }
     }
 

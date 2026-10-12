@@ -311,7 +311,7 @@ fn jog_commands(h: &mut Harness) -> Vec<Vec<f64>> {
 }
 
 #[test]
-fn joint_jog_sends_nothing_while_stopped_and_restarts_from_the_measured_state() {
+fn joint_jog_holds_the_measured_position_while_stopped() {
     ruro_nodes_hw::link();
     let mut h = Harness::new("hw/joint-jog", json!({ "axes": "0,1", "speed": 1.0 })).unwrap();
     let state = |p: [f64; 2]| JointState {
@@ -327,13 +327,23 @@ fn joint_jog_sends_nothing_while_stopped_and_restarts_from_the_measured_state() 
     assert!(c.last().unwrap()[0] > 0.0, "jogging: {c:?}");
 
     h.set_estop(true);
+    h.push("joy", joy(1.0)).unwrap();
+    h.step().unwrap();
+    assert!(
+        jog_commands(&mut h).is_empty(),
+        "the pre-stop target is not sent; nothing until a joint state arrives"
+    );
     for _ in 0..3 {
         h.push("joy", joy(1.0)).unwrap();
         h.push("state", state([0.3, 0.0])).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
         h.step().unwrap();
     }
-    assert!(jog_commands(&mut h).is_empty(), "no commands while stopped");
+    assert_eq!(
+        jog_commands(&mut h),
+        [[0.3, 0.0]; 3],
+        "holds the measured position while stopped"
+    );
 
     // The stick was still deflected when the stop was released.
     h.push("joy", joy(1.0)).unwrap();

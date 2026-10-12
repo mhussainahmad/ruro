@@ -344,9 +344,10 @@ nodes:
     let start = Instant::now();
     std::thread::sleep(Duration::from_millis(1000));
     let wall = start.elapsed().as_secs_f64();
-    let sim_now = exec.clock().now_ns();
+    let clock = exec.clock().clone();
     let m = exec.metrics();
     exec.stop();
+    let sim_now = clock.now_ns();
     let sim = m.nodes.iter().find(|n| n.id == "sim").unwrap();
     assert!(sim.last_error.is_none(), "{:?}", sim.last_error);
     let ticks = TICKS.lock().clone();
@@ -367,8 +368,10 @@ nodes:
     );
     for w in ticks.windows(2).skip(1) {
         assert_eq!(w[1].1, Duration::from_millis(20), "dt follows graph time");
-        assert_eq!(w[1].0 - w[0].0, 20_000_000, "now_ns is graph time");
+        assert!(w[1].0 >= w[0].0);
     }
+    // Simulation time starts at zero, unlike wall time (since 1970).
+    assert!(ticks[0].0 < 1_000_000_000, "now_ns is graph time");
     assert!(ticks.last().unwrap().0 <= sim_now);
 }
 

@@ -8,10 +8,11 @@ use crate::io::parse_list;
 /// position target at up to `speed` rad/s. The targets start from the first
 /// joint state received, so the arm does not jump when teleoperation begins.
 ///
-/// E-stop: no commands are sent while stopped (the drivers hold the arm), and
-/// stick input is ignored. The targets are dropped, so after the release they
-/// start again from the next joint state received, where the arm actually is,
-/// and only stick input sent after the release moves it.
+/// E-stop: stick input is ignored and the targets follow the measured joint
+/// state, so the commands sent while stopped hold the arm where it is (and
+/// nothing is sent until a joint state arrives). After the release jogging
+/// continues from where the arm actually is, moved only by stick input sent
+/// after the release.
 #[derive(Node)]
 #[node(kind = "hw/joint-jog", rate = 50)]
 pub struct JointJog {
@@ -84,10 +85,9 @@ impl Node for JointJog {
             // Stick input queued while stopped is stale.
             while self.joy.recv().is_some() {}
             self.stick.clear();
-            self.target = None;
             self.held = ctx.estopped();
-            if self.held {
-                return Ok(());
+            if let Some(s) = self.state.latest() {
+                self.target = Some(s.position.clone());
             }
         } else if let Some(j) = self.joy.latest() {
             self.stick.clone_from(&j.axes);

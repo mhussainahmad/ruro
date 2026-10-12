@@ -324,8 +324,10 @@ bridge!(
     estop = Twist::default(),
     "E-stop: a zero twist is published as soon as the stop engages, and \
      again for every input received while stopped, in place of the input. \
-     After the release only input received after the release is forwarded \
-     (input queued during the stop is discarded)."
+     After the release, input queued during the stop is discarded together \
+     with the first message after the release (the node steps when input \
+     arrives, so that is when it notices the release); forwarding resumes \
+     with the next message."
 );
 bridge!(
     "ros2/sub-pose-stamped",

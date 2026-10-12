@@ -1,7 +1,16 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::path::Path;
 
-use crate::{Graph, Registry, is_valid_ident};
+use crate::{Graph, GraphError, NodeDescriptor, Registry, composite_descriptor, is_valid_ident};
+
+/// The message of a composite error, without the node prefix the issue already carries.
+fn composite_message(e: GraphError) -> String {
+    match e {
+        GraphError::Composite { message, .. } => message,
+        other => other.to_string(),
+    }
+}
 
 /// A problem found while validating a graph. Every issue blocks deployment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,9 +29,57 @@ impl fmt::Display for Issue {
     }
 }
 
-/// Checks a graph against the node types in `registry`.
+/// Checks a graph against the node types in `registry`. Subgraph files of
+/// composite nodes are resolved relative to the current directory.
 pub fn validate(graph: &Graph, registry: &Registry) -> Vec<Issue> {
+    validate_in(graph, registry, Path::new("."))
+}
+
+/// Checks a graph whose subgraph files are relative to `base`.
+pub fn validate_in(graph: &Graph, registry: &Registry, base: &Path) -> Vec<Issue> {
     let mut issues = Vec::new();
+    // Composite nodes present the descriptor of their subgraph's interface.
+    let mut composites: HashMap<&str, NodeDescriptor> = HashMap::new();
+    for (id, inst) in graph.nodes.iter().filter(|(_, n)| n.is_composite()) {
+        match composite_descriptor(id, inst, registry, base) {
+            Ok(d) => {
+                composites.insert(id.as_str(), d);
+            }
+            Err(e) => issues.push(Issue {
+                node: Some(id.clone()),
+                message: composite_message(e),
+            }),
+        }
+        if let Ok(sub) = crate::composite::subgraph(id, inst, base) {
+            for inner in validate_in(&sub.graph, registry, &sub.base) {
+                issues.push(Issue {
+                    node: Some(id.clone()),
+                    message: match inner.node {
+                        Some(n) => format!("{n}: {}", inner.message),
+                        None => inner.message,
+                    },
+                });
+            }
+        }
+    }
+    if graph.has_composites()
+        && issues.is_empty()
+        && let Err(e) = graph.flatten_in(base)
+    {
+        issues.push(match e {
+            GraphError::Composite { node, message } => Issue {
+                node: Some(node),
+                message,
+            },
+            other => Issue {
+                node: None,
+                message: other.to_string(),
+            },
+        });
+    }
+    let desc = |id: &str, kind: &str| -> Option<&NodeDescriptor> {
+        composites.get(id).or_else(|| registry.get(kind))
+    };
     let mut push = |node: Option<&str>, message: String| {
         issues.push(Issue {
             node: node.map(str::to_owned),
@@ -48,8 +105,10 @@ pub fn validate(graph: &Graph, registry: &Registry) -> Vec<Issue> {
                 format!("group `{}` must match [A-Za-z0-9_-]+", inst.group()),
             );
         }
-        let Some(desc) = registry.get(&inst.kind) else {
-            push(Some(id), format!("unknown node type `{}`", inst.kind));
+        let Some(desc) = desc(id, &inst.kind) else {
+            if !inst.is_composite() {
+                push(Some(id), format!("unknown node type `{}`", inst.kind));
+            }
             continue;
         };
         if let Some(rate) = inst.rate
@@ -60,7 +119,10 @@ pub fn validate(graph: &Graph, registry: &Registry) -> Vec<Issue> {
                 format!("rate {rate} Hz is out of range (0, 100000]"),
             );
         }
-        if desc.inputs.is_empty() && inst.rate.or(desc.default_rate).is_none() {
+        if !inst.is_composite()
+            && desc.inputs.is_empty()
+            && inst.rate.or(desc.default_rate).is_none()
+        {
             push(Some(id), "source node needs a `rate`".into());
         }
         for (name, value) in &inst.params {
@@ -98,12 +160,12 @@ pub fn validate(graph: &Graph, registry: &Registry) -> Vec<Issue> {
         let from_ty = graph
             .nodes
             .get(&wire.from.node)
-            .and_then(|n| registry.get(&n.kind))
+            .and_then(|n| desc(&wire.from.node, &n.kind))
             .map(|d| d.output(&wire.from.port).map(|p| p.ty.as_str()));
         let to_ty = graph
             .nodes
             .get(&wire.to.node)
-            .and_then(|n| registry.get(&n.kind))
+            .and_then(|n| desc(&wire.to.node, &n.kind))
             .map(|d| d.input(&wire.to.port).map(|p| p.ty.as_str()));
         if !graph.nodes.contains_key(&wire.from.node) {
             push(
@@ -126,7 +188,7 @@ pub fn validate(graph: &Graph, registry: &Registry) -> Vec<Issue> {
                 Some(&wire.to.node),
                 format!("no input port `{}`", wire.to.port),
             ),
-            (Some(Some(a)), Some(Some(b))) if a != b => {
+            (Some(Some(a)), Some(Some(b))) if a != b && !a.is_empty() && !b.is_empty() => {
                 push(None, format!("wire `{wire}` connects {a} to {b}"));
             }
             _ => {}
@@ -161,6 +223,7 @@ mod tests {
                     max: Some(10.0),
                     doc: String::new(),
                 }],
+                source: None,
             },
             NodeDescriptor {
                 kind: "t/sink".into(),
@@ -169,6 +232,7 @@ mod tests {
                 inputs: vec![port("in", "std/Scalar")],
                 outputs: vec![],
                 params: vec![],
+                source: None,
             },
         ])
     }

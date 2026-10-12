@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Static description of a node type: its ports and parameters.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NodeDescriptor {
     /// Type name, e.g. `std/blur`.
     pub kind: String,
@@ -19,6 +19,10 @@ pub struct NodeDescriptor {
     pub outputs: Vec<PortDesc>,
     #[serde(default)]
     pub params: Vec<ParamDesc>,
+    /// Where the node is implemented, as `path:line`, if known. Tools use it
+    /// to open the node's source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 impl NodeDescriptor {

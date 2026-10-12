@@ -48,8 +48,12 @@ graph that uses node types available only on a peer fails `check` but deploys.
 
 What does not span machines yet:
 
-- `ruro estop` reaches the groups of the daemon it is sent to; send it to every daemon.
 - Recording and replay cover the groups of the daemon you talk to.
+
+The emergency stop does span machines: engaged at the daemon you deployed to, it is passed
+on to every machine of the graph (see [Emergency stop](runtime.md#emergency-stop)). The
+studio shows the live metrics of nodes on every machine of the graph, and watches and tunes
+them on the daemon that runs them.
 
 ## Custom host binaries
 

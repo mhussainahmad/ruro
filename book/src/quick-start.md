@@ -4,7 +4,7 @@ This walk-through uses the example graphs in `examples/` and the standard nodes,
 no hardware. It assumes you built from source
 (`cargo build --release -p ruro-cli -p ruro-host -p ruro-studio`) and run the commands from
 the repository root. With the Debian package installed, drop the `./target/release/` prefix
-and use the examples in `/usr/share/doc/ruro/examples/`.
+and use the examples in `/usr/share/ruro/examples/`.
 
 ## In the studio
 

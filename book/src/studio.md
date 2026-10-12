@@ -16,6 +16,9 @@ ruro-studio [graph.yaml ...]
 |---|---|
 | `--connect <ENDPOINT>` | Daemon endpoint, e.g. `tcp/192.168.1.20:7447` for a robot. Also `RURO_CONNECT`. Default `tcp/127.0.0.1:7447`. |
 | `--daemon <NAME>` | Daemon name, when several share a router. Also `RURO_DAEMON`. Discovered automatically if omitted. |
+| `--tls-ca <FILE>` | CA certificate that signed the daemon's certificate, for `tls/` endpoints. Also `RURO_TLS_CA`. |
+| `--tls-cert <FILE>`, `--tls-key <FILE>` | Client certificate and key, for daemons that require one (mutual TLS). Also `RURO_TLS_CERT`, `RURO_TLS_KEY`. |
+| `--token <TOKEN>` | Access token of daemons started with `--token`. Also `RURO_TOKEN`. |
 | `--no-spawn` | Do not start a local daemon when none is running. |
 | `--no-native-dialogs` | Use the built-in file picker instead of the desktop's Open and Save dialogs. |
 | `--fresh` | Do not reopen the graphs that were open when the studio last closed. |
@@ -38,7 +41,8 @@ types. Python node types appear only when the daemon runs the Python host (see
 The window follows the layout of a code editor:
 
 - **Title bar**: the File, Edit, View and Run menus, the command center (click it or press
-  <kbd>Ctrl</kbd>+<kbd>K</kbd>), and on the right the record, Stop and Run buttons.
+  <kbd>Ctrl</kbd>+<kbd>K</kbd>), and on the right the record, Stop and Run buttons and the
+  red **E-STOP** button (see [Emergency stop](#emergency-stop)).
 - **Activity bar** on the far left switches the sidebar between the **Node Library**,
   **Outline**, **Processes**, **Fleet**, **Changes** and **ROS 2 Topics** views. The
   sun/moon button at its bottom switches between the dark and light themes.
@@ -55,10 +59,16 @@ The window follows the layout of a code editor:
 With no nodes on the canvas, a start page offers new graphs, templates, recent files,
 examples and the main shortcuts.
 
-**File → Open Example** lists the graphs in an `examples/` directory: the one in the current
-directory, or the first one found next to or up to five levels above the studio's
-executable. That covers a source checkout, the AppImage and the Flatpak; the Debian package
-installs the examples in `/usr/share/doc/ruro/examples/`, which you open with **Open…**.
+**File → Open Example** and the start page list the graphs of the first of these
+directories that has any:
+
+1. `examples/` in the current directory (a source checkout);
+2. `examples/` next to or up to five levels above the studio's executable (`target/release`
+   in a checkout, the AppImage and the Flatpak);
+3. `ruro/examples/` under the executable's prefix (`<prefix>/share`) and under each
+   directory of `$XDG_DATA_DIRS` (default `/usr/local/share:/usr/share`). The Debian
+   package and the Docker image install the examples in `/usr/share/ruro/examples/`;
+4. `doc/ruro/examples/` under the same directories, where earlier packages put them.
 
 ![The start page](images/studio-welcome.png)
 
@@ -143,6 +153,12 @@ double-click to frame everything.
 
 ![Point cloud and transform tree in the 3D view](images/studio-3d.png)
 
+Graphs whose groups run on [other machines](multi-machine.md) are shown whole: the studio
+follows the metrics and logs of the peer daemons running the graph's groups (the daemons
+named as a group's `machine` that report running the same graph), so nodes on the robot
+show live rates too. Watching an output or tuning a parameter of such a node goes to the
+daemon that runs it.
+
 The **Output** panel shows logs from every process, with a filter. **Timing** ranks running
 nodes by step time. The **Processes** view lists process groups with their PIDs, restarts and
 last exit, and can kill a process to test supervision.
@@ -150,7 +166,8 @@ last exit, and can kill a process to test supervision.
 ## Recording and replay
 
 While a graph runs, the record button in the title bar asks for a file name (by default
-`<graph>-<date>-<time>.mcap`) and records every output of the running graph to that MCAP
+`<graph>-<date>-<time>.mcap`) and records the outputs of the groups running on the connected
+daemon to that MCAP
 file on the daemon (the path is on the daemon's machine, which may be the robot). While
 recording, the status bar shows a pulsing **REC** with the elapsed time; click it, or the
 button, to stop.
@@ -162,8 +179,24 @@ replay. See [Record and replay](record-replay.md) for what replay does to the gr
 
 ![Recording, with a replay timeline](images/studio-replay.png)
 
-The studio has no emergency-stop control; use `ruro estop` (see
-[Runtime features](runtime.md#emergency-stop)).
+## Emergency stop
+
+The red **E-STOP** button at the right end of the title bar engages the
+[emergency stop](runtime.md#emergency-stop) on the connected daemon, which passes it on to
+the daemons running the rest of the graph: every node goes to its safe state. It is enabled
+whenever the studio is connected, whatever is running, and so is <kbd>F12</kbd>, which works
+even while you type in a text field. **Run → Engage Emergency Stop** and the command
+palette do the same.
+
+While the stop is engaged, a red banner across the editor and **E-STOP ENGAGED** in the
+status bar say so. Release it with the banner's **Release e-stop** button, by clicking the
+status bar item, with **Run → Release Emergency Stop** or with *Release Emergency Stop* in
+the command palette. Releasing is deliberately not on a single key. A notification reports
+what the daemon did, including peers it could not reach.
+
+![The emergency stop engaged](images/studio-estop.png)
+
+It is a software stop, like `ruro estop`: keep a hardware emergency stop within reach.
 
 ## Fleet
 
@@ -205,6 +238,13 @@ sizes and visibility, collapsed sections, recent files and the graphs that were 
 graphs are written to `$XDG_STATE_HOME/ruro/autosave/` every 20 seconds and when the studio
 closes; after a crash or when closing with unsaved work, the next start offers to restore them.
 
+## Desktop integration
+
+The studio's window uses the application id `io.github.mhussainahmad.ruro.Studio` (its
+Wayland app id and X11 window class). The desktop file, icons and AppStream metadata in
+`packaging/` carry the same name, as the Debian package, AppImage and Flatpak install them,
+so desktops show the studio's icon and a single dock entry for its window.
+
 ## Themes
 
 The studio has a dark and a light theme. Switch with the button at the bottom of the activity
@@ -218,6 +258,7 @@ bar, View → Theme, or the command palette. The choice is remembered.
 |---|---|
 | Command palette | <kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> |
 | Run / apply changes | <kbd>Ctrl</kbd>+<kbd>Enter</kbd> |
+| Engage the emergency stop | <kbd>F12</kbd> |
 | New, open, quick open | <kbd>Ctrl</kbd>+<kbd>N</kbd>, <kbd>Ctrl</kbd>+<kbd>O</kbd>, <kbd>Ctrl</kbd>+<kbd>P</kbd> |
 | Save, save as | <kbd>Ctrl</kbd>+<kbd>S</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> |
 | Close tab, next tab | <kbd>Ctrl</kbd>+<kbd>W</kbd>, <kbd>Ctrl</kbd>+<kbd>Tab</kbd> |

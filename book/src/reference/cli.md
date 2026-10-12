@@ -47,7 +47,7 @@ Other environment variables:
 | [`kill`](#ruro-kill) | Kill a group process to exercise supervision. |
 | [`logs`](#ruro-logs) | Stream logs from the running graph. |
 | [`estop`](#ruro-estop) | Engage or release the emergency stop. |
-| [`record`](#ruro-record) | Record every output of the running graph into an MCAP file. |
+| [`record`](#ruro-record) | Record the outputs of the groups running on the daemon into an MCAP file. |
 | [`play`](#ruro-play) | Replay a recording into the running graph. |
 | [`playback`](#ruro-playback) | Control a running replay. |
 | [`info`](#ruro-info) | Show the channels, message counts and duration of a recording. |
@@ -197,10 +197,12 @@ Streams new log lines from every process of the running graph until
 ### ruro estop
 
 ```text
-ruro estop [--release]
+ruro estop [--release [--all]]
 ```
 
-Engages the emergency stop (or releases it). See
+Engages the emergency stop on the daemon and the machines running the rest of its graph.
+`--release` releases the stop engaged at this daemon, there and on those machines; with
+`--all` it also lifts stops that other daemons engaged here. See
 [Emergency stop](../runtime.md#emergency-stop).
 
 ### ruro record
@@ -210,8 +212,8 @@ ruro record <FILE>
 ruro record --stop
 ```
 
-Starts recording every output of the running graph into an MCAP file on the daemon's
-machine, or stops the recording and writes the file. See
+Starts recording every output of the groups running on the daemon (not groups on other
+machines of a multi-machine graph) into an MCAP file on the daemon's machine, or stops the recording and writes the file. See
 [Record and replay](../record-replay.md).
 
 ### ruro play

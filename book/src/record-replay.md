@@ -10,7 +10,7 @@ compare two versions of a node on the same input.
 ## Recording
 
 ```sh
-ruro record /data/run1.mcap      # every output of the running graph
+ruro record /data/run1.mcap      # every output of the groups running here
 ruro record --stop               # merge and write the file
 ruro info /data/run1.mcap        # channels, counts, duration
 ```
@@ -34,6 +34,9 @@ log time is the send stamp. Each host writes its own segment (under the daemon's
 directory) and the daemon merges them, so recording never moves messages between processes.
 
 - A graph must be running, and the file's directory must exist.
+- Only the groups running on the daemon you talk to are recorded. For a graph that spans
+  [machines](multi-machine.md), the groups on other machines are not in the file; start a
+  recording on each of their daemons as well.
 - The path is on the daemon's machine. `ruro record` makes a relative path absolute against
   the directory you run it in, so use absolute paths when the daemon is remote.
 - `ruro stop`, or deploying another graph, also ends the recording.

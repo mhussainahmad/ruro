@@ -57,15 +57,18 @@ the clock over shared memory (or the network), so every process follows the same
   output. `ruro check` does not.
 
 The MuJoCo node (`sim/mujoco`) publishes its simulation time as a `std/Clock`; see
-`examples/arm-sim.yaml`. Composite nodes and `clock: sim` do not mix yet: flattening a graph that contains a composite drops the
-`clock` setting, so such a graph runs on wall time.
+`examples/arm-sim.yaml`. Flattening composite nodes keeps the graph's `clock` setting.
 
 ## Emergency stop
 
 ```sh
-ruro estop            # engage
-ruro estop --release
+ruro estop                  # engage
+ruro estop --release        # release the stop engaged at this daemon
+ruro estop --release --all  # also lift stops engaged at other daemons
 ```
+
+The studio has an **E-STOP** button and <kbd>F12</kbd> for the same (see
+[Studio](studio.md#emergency-stop)).
 
 The daemon latches the state and republishes it twice a second, so hosts that start or
 restart while it is engaged come up stopped. When it engages, every node's `on_estop` hook
@@ -109,9 +112,12 @@ Limits to be aware of:
 
 - **It is a software stop.** It is no substitute for a hardware emergency stop, and the
   hardware drivers have not yet been tested on the physical devices.
-- **It is per daemon.** `ruro estop` reaches the groups of the daemon it is sent to, not
-  groups that run on [other machines](multi-machine.md). Send it to each daemon.
-- The studio has no e-stop control.
+- **It travels down a graph, not up.** A stop engaged at a daemon is passed on to the
+  daemons running the rest of its graph on [other machines](multi-machine.md), and
+  releasing it there releases it on them. A stop engaged directly on one of those machines
+  stays on that machine: `ruro status` and the studio show which machines of the graph are
+  stopped. Each stop is latched under the daemon it was engaged at, and a release lifts
+  only that daemon's own stop; `--release --all` lifts every stop latched at a daemon.
 
 ## Hung processes
 

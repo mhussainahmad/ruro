@@ -21,14 +21,15 @@ the `ruro` CLI.
 - **Observability.** Per-node rate, latency, CPU, input age, drops, errors and timer jitter;
   live views of any output as an image, plot, value or 3D scene.
 - **Studio.** A native egui editor: tabs, undo/redo, subgraphs, comparing versions, live
-  parameter tuning, recording and replay timeline, fleet view, ROS 2 topic browser, light
-  and dark themes, plugins.
+  parameter tuning, recording and replay timeline, an emergency-stop button (<kbd>F12</kbd>),
+  fleet view with live metrics from every machine of a graph, ROS 2 topic browser, light and
+  dark themes, plugins.
 - **Real-time tier.** `SCHED_FIFO` priority, CPU pinning, memory locking, deterministic
   single-thread groups and per-node deadlines; simulated graph time; a software e-stop.
-- **Record and replay.** MCAP recordings of every output, replay into a running graph, and
-  import of ROS 2 bags.
+- **Record and replay.** MCAP recordings of every output of the groups on a daemon, replay
+  into a running graph, and import of ROS 2 bags.
 - **Multi-machine.** Daemons connect as peers; one graph can span several computers, with
-  TLS, mutual TLS and token authentication.
+  an emergency stop that reaches all of them, TLS, mutual TLS and token authentication.
 - **Node SDKs.** Rust (`#[derive(Node)]`, `ruro new`, `ruro build`) and Python (with
   NumPy views of images and hot reload).
 - **ROS 2 bridge.** Publish and subscribe ROS 2 topics over rmw_zenoh, without a ROS
@@ -52,6 +53,17 @@ verified against the real thing:
 - **multi-machine graphs** have been tested with two daemons on one machine.
 
 The book's [project status](book/src/status.md) page has the details and the known gaps.
+
+## What's next
+
+- ROS 2 services and actions (the bridge does topics only)
+- Zero-copy GPU buffers for images and tensors
+- Updating daemons over the air
+- Verifying real-time behaviour on a PREEMPT_RT kernel
+- Validating the hardware drivers on the physical devices
+- Gazebo and Isaac Sim examples (through the ROS 2 bridge)
+- Recording multi-machine graphs into one file
+- A first release: crates on crates.io, the Python package on PyPI, prebuilt packages
 
 ## Quick start
 

@@ -16,8 +16,8 @@ optional ML features):
   record and replay, graphs spanning two daemons (on one machine), host binary uploads, TLS,
   mutual TLS and tokens.
 - **Node SDK:** derives, schemas and compatibility checks, `ruro new` packages.
-- **Studio:** headless UI tests of editing, tabs, undo, subgraphs, comparing, recovery and
-  more. Its screenshots are rendered from the same tests.
+- **Studio:** headless UI tests of editing, tabs, undo, subgraphs, comparing, recovery,
+  the emergency stop, nodes on peer daemons and more. Its screenshots are rendered from the same tests.
 - **Python nodes:** the `ruro` package's tests, and a daemon running Python and Rust nodes
   in one graph.
 - **ROS 2 bridge:** encoding, type hashes (checked against ROS 2 Jazzy's) and publishing and
@@ -46,10 +46,9 @@ optional ML features):
 
 ## Known gaps
 
-- `ruro estop` only reaches the daemon it is sent to, and Python nodes have no e-stop
-  hook.
-- The studio cannot connect to daemons protected with TLS or a token.
-- Flattening composite nodes drops `clock: sim`.
+- Python nodes have no e-stop hook. A stop engaged directly on a peer machine does not
+  travel back to the daemon that deployed the graph.
+- Recording and replay cover only the groups of the daemon you talk to.
 - The daemon does not compare message schema hashes at deployment.
 - `ruro param` does not check parameter ranges.
 - ROS 2: topics only (no services or actions), volatile durability only, Jazzy-style type

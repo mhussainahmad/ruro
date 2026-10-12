@@ -43,7 +43,8 @@ First version, 0.1.0. Nothing has been released yet.
   logs, live output previews and parameter changes. Peers (`--peer`) for graphs that span
   machines, host binary uploads (`ruro deploy --host-binary`), TLS, mutual TLS and token
   authentication.
-- **Record and replay.** MCAP recordings of every output (`ruro record`), replay into a
+- **Record and replay.** MCAP recordings of every output of the groups running on a daemon
+  (`ruro record`), replay into a
   running graph with pause, seek and speed (`ruro play`, `ruro playback`), `ruro info`, and
   `ruro bag import` for ROS 2 bags in MCAP storage.
 - **CLI.** `ruro run`, `daemon`, `deploy`, `stop`, `check`, `status`, `fleet`, `nodes`,
@@ -87,21 +88,25 @@ First version, 0.1.0. Nothing has been released yet.
     files, example graphs, persisted layout and settings, and autosave with recovery.
   - 3D view for point clouds, laser scans, poses and transform trees.
   - Recording and a replay timeline.
-  - Fleet view of daemons on the network, and machine placement for process groups.
+  - An emergency-stop button in the title bar (and <kbd>F12</kbd>), with a banner and a
+    release while the stop is engaged on the connected daemon or a machine of its graph.
+  - Fleet view of daemons on the network, and machine placement for process groups. Nodes
+    of a graph that run on peer daemons show live metrics and can be watched and tuned.
   - ROS 2 topic browser that adds bridge nodes.
   - Open a node's source in an editor.
   - Dark and light themes.
   - Visualizer and panel plugins, registered at link time.
 - **Packaging and documentation.** Debian package and AppImage scripts, Flatpak manifest,
   Docker image, systemd units, cross-compilation setup for 64-bit ARM, CI, and a user guide
-  built with mdBook.
+  built with mdBook. The desktop file, icons and AppStream metadata are named after the
+  studio's app id, `io.github.mhussainahmad.ruro.Studio`, which its window also uses. The
+  Debian package installs the example graphs in `/usr/share/ruro/examples`.
 
 ### Known limitations
 
-- The studio cannot connect to daemons that require TLS or a token.
-- `ruro estop`, recording and replay act on the daemon they are sent to, not on peer
-  daemons running other parts of a graph.
+- Recording and replay act on the daemon they are sent to, not on peer daemons running
+  other parts of a graph. An emergency stop engaged directly on a peer does not travel back
+  to the daemon that deployed the graph.
 - Python nodes have no emergency-stop hook.
-- Flattening composite nodes drops `clock: sim`.
 
 [Unreleased]: https://github.com/mhussainahmad/ruro/commits/main

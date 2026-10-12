@@ -94,10 +94,12 @@ sudo apt install ./target/package/ruro_*_amd64.deb
 The package installs:
 
 - `/usr/bin/ruro`, `/usr/bin/ruro-host`, `/usr/bin/ruro-studio`;
-- a desktop entry and icons, so ruro studio appears in your application menu;
+- a desktop entry and icons (`io.github.mhussainahmad.ruro.Studio`, the studio's app id), so
+  ruro studio appears in your application menu;
 - a system service `ruro-daemon.service` and a user service of the same name, both disabled
   (see [Deploying on robots](deployment.md));
-- the example graphs in `/usr/share/doc/ruro/examples/`.
+- the example graphs in `/usr/share/ruro/examples/` (also reachable as
+  `/usr/share/doc/ruro/examples/`), which the studio lists under **File → Open Example**.
 
 It also creates a `ruro` system user for the system service. It does not include the Python
 host, which would tie the package to one Python version, or the optional node features. The

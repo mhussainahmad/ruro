@@ -98,6 +98,36 @@ pub fn load_registry(host: &Path) -> Result<Registry> {
     serde_json::from_slice(&out.stdout).context("parsing node registry")
 }
 
+/// E-stop requests forwarded from the daemon that deployed the graph to the
+/// peers running parts of it. Peers do not forward them further.
+const FORWARDED_ENGAGE: &str = "engage-forwarded";
+const FORWARDED_RELEASE: &str = "release-forwarded";
+
+/// Who engaged the emergency stop: someone at this daemon, or the daemon
+/// whose graph this one runs part of. A release forwarded from there does
+/// not lift a stop engaged here.
+#[derive(Debug, Default)]
+pub(crate) struct EstopBy {
+    here: bool,
+    forwarded: bool,
+}
+
+impl EstopBy {
+    fn apply(&mut self, engage: bool, forwarded: bool) {
+        match (engage, forwarded) {
+            (true, false) => self.here = true,
+            (true, true) => self.forwarded = true,
+            // A release at this daemon lifts every stop.
+            (false, false) => *self = Self::default(),
+            (false, true) => self.forwarded = false,
+        }
+    }
+
+    fn engaged(&self) -> bool {
+        self.here || self.forwarded
+    }
+}
+
 /// Everything the daemon's threads share.
 pub(crate) struct State {
     pub name: String,
@@ -106,7 +136,9 @@ pub(crate) struct State {
     pub sup: Mutex<Supervisor>,
     pub host: PathBuf,
     pub registry: Mutex<Registry>,
+    /// Whether the emergency stop is engaged, by anyone.
     pub estop: AtomicBool,
+    pub estop_by: Mutex<EstopBy>,
     pub recording: Mutex<Option<RecordSession>>,
     pub playback: Mutex<Option<Playback>>,
     /// Daemons running groups of the graph deployed here.
@@ -198,6 +230,7 @@ impl Daemon {
             host: config.host.clone(),
             registry: Mutex::new(registry),
             estop: AtomicBool::new(false),
+            estop_by: Mutex::new(EstopBy::default()),
             recording: Mutex::new(None),
             playback: Mutex::new(None),
             peers: Mutex::new(BTreeSet::new()),
@@ -368,6 +401,8 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
         "deploy" => deploy(st, &text()),
         "deploy-groups" => {
             let graph = Graph::from_yaml(&text())?;
+            // Part of another daemon's graph now: none of its own to forward to.
+            st.peers.lock().clear();
             session::stop_playback(st);
             st.sup.lock().stop_all();
             session::finish_recording(st, false)?;
@@ -421,23 +456,53 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             session::playback(st, cmd)
         }
         "estop" => {
-            let engage = match text().trim() {
-                "engage" | "" => true,
-                "release" => false,
+            let (engage, forwarded) = match text().trim() {
+                "engage" | "" => (true, false),
+                "release" => (false, false),
+                FORWARDED_ENGAGE => (true, true),
+                FORWARDED_RELEASE => (false, true),
                 other => bail!("expected `engage` or `release`, got `{other}`"),
             };
-            st.estop.store(engage, Ordering::Relaxed);
-            st.sup.lock().host_state.estopped = engage;
+            let engaged = {
+                let mut by = st.estop_by.lock();
+                by.apply(engage, forwarded);
+                by.engaged()
+            };
+            st.estop.store(engaged, Ordering::Relaxed);
+            st.sup.lock().host_state.estopped = engaged;
             st.publish_estop();
             tracing::warn!(
                 "emergency stop {}",
-                if engage { "engaged" } else { "released" }
+                if engaged { "engaged" } else { "released" }
             );
-            Ok(if engage {
-                "e-stop engaged".into()
+            let done = match (engage, engaged) {
+                (true, _) => "e-stop engaged",
+                (false, false) => "e-stop released",
+                (false, true) => "e-stop stays engaged: it was engaged here",
+            };
+            if forwarded {
+                return Ok(done.into());
+            }
+            // The machines running the rest of the graph follow, without
+            // passing it further.
+            let peers: Vec<String> = st.peers.lock().iter().cloned().collect();
+            let op = if engage {
+                FORWARDED_ENGAGE
             } else {
-                "e-stop released".into()
-            })
+                FORWARDED_RELEASE
+            };
+            let replies: Vec<String> = peers
+                .iter()
+                .map(|p| match st.peer_request(p, Ctl::Estop, op) {
+                    Ok(reply) => Ok(format!("{p}: {reply}")),
+                    Err(e) => Err(format!("{e:#}")),
+                })
+                .collect::<Result<_, _>>()
+                .map_err(|e| anyhow!("{done} here, but not on {e}"))?;
+            Ok(std::iter::once(done.to_owned())
+                .chain(replies)
+                .collect::<Vec<_>>()
+                .join("; "))
         }
         "upload" => {
             let chunk: ruro_proto::UploadChunk = ruro_proto::decode(payload)?;
@@ -525,6 +590,10 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
     }
     let normalized = graph.to_yaml()?;
     for m in &machines {
+        // A peer's hosts start stopped when the stop is engaged here.
+        if st.estop.load(Ordering::Relaxed) {
+            st.peer_request(m, Ctl::Estop, FORWARDED_ENGAGE)?;
+        }
         st.peer_request(m, Ctl::DeployGroups, &normalized)?;
         st.peers.lock().insert(m.clone());
     }
@@ -633,6 +702,21 @@ mod tests {
         let issues = placement_issues(&g, &all, offered);
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert!(issues[0].contains("`b`") && issues[0].contains("`main`"));
+    }
+
+    #[test]
+    fn a_forwarded_release_leaves_a_local_stop_engaged() {
+        let mut by = EstopBy::default();
+        by.apply(true, false);
+        by.apply(true, true);
+        by.apply(false, true);
+        assert!(by.engaged());
+        by.apply(true, true);
+        by.apply(false, false);
+        assert!(!by.engaged(), "a local release lifts both");
+        by.apply(true, true);
+        by.apply(false, true);
+        assert!(!by.engaged());
     }
 
     #[test]

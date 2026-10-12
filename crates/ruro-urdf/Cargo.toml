@@ -1,0 +1,13 @@
+[package]
+name = "ruro-urdf"
+description = "URDF and MJCF robot description parsing and forward kinematics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+roxmltree = { workspace = true }
+thiserror = { workspace = true }

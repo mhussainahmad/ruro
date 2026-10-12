@@ -1,0 +1,20 @@
+[package]
+name = "ruro-nodes-hw"
+description = "Hardware driver nodes for ruro: cameras, serial, CAN, GPIO, I2C, gamepads, servos, IMUs and lidars"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro = { workspace = true }
+libc = { workspace = true }
+serialport = { workspace = true }
+zune-jpeg = { workspace = true }
+
+[dev-dependencies]
+ruro-graph = { workspace = true }
+ruro-host = { workspace = true }
+serde_json = { workspace = true }

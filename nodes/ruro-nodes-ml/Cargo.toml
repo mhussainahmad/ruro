@@ -1,0 +1,29 @@
+[package]
+name = "ruro-nodes-ml"
+description = "Machine learning and perception nodes for ruro: ONNX inference, YOLO decoding, policies and LeRobot recording"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+# ONNX Runtime inference (`ml/onnx`, `ml/policy`). Downloads a CPU build of
+# ONNX Runtime at build time.
+onnx = ["dep:ort"]
+# LeRobot dataset recording (`ml/lerobot-recorder`), writes Parquet.
+lerobot = ["dep:arrow-array", "dep:arrow-schema", "dep:parquet"]
+
+[dependencies]
+ruro = { workspace = true }
+serde_json = { workspace = true }
+ort = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
+parquet = { workspace = true, optional = true }
+
+[dev-dependencies]
+ruro-graph = { workspace = true }
+ruro-host = { workspace = true }

@@ -1,0 +1,23 @@
+[package]
+name = "ruro-nodes-sim"
+description = "Simulation nodes for ruro: MuJoCo and URDF/MJCF kinematics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+# `sim/mujoco`: loads libmujoco at run time (see RURO_MUJOCO_LIB).
+mujoco = ["dep:libloading"]
+
+[dependencies]
+ruro = { workspace = true }
+ruro-urdf = { workspace = true }
+libloading = { workspace = true, optional = true }
+
+[dev-dependencies]
+ruro-graph = { workspace = true }
+ruro-host = { workspace = true }

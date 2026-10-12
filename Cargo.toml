@@ -21,6 +21,10 @@ ruro-proto = { path = "crates/ruro-proto" }
 ruro-host = { path = "crates/ruro-host" }
 ruro-daemon = { path = "crates/ruro-daemon" }
 ruro-nodes-std = { path = "nodes/ruro-nodes-std" }
+ruro-nodes-hw = { path = "nodes/ruro-nodes-hw" }
+ruro-nodes-sim = { path = "nodes/ruro-nodes-sim" }
+ruro-nodes-ml = { path = "nodes/ruro-nodes-ml" }
+ruro-urdf = { path = "crates/ruro-urdf" }
 
 anyhow = "1"
 thiserror = "2"
@@ -47,6 +51,14 @@ egui_plot = "0.37"
 criterion = "0.7"
 indexmap = { version = "2", features = ["serde"] }
 signal-hook = "0.3"
+serialport = { version = "4.7", default-features = false }
+zune-jpeg = "0.5.15"
+roxmltree = "0.21"
+libloading = "0.8"
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls", "api-24"] }
+arrow-array = "57"
+arrow-schema = "57"
+parquet = { version = "57", default-features = false, features = ["arrow", "snap"] }
 
 [profile.release]
 lto = "thin"

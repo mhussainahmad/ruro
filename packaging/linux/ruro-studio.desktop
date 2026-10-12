@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=ruro studio
+GenericName=Robotics Dataflow Editor
+Comment=Design, run and inspect robotics dataflow graphs
+Exec=ruro-studio %f
+TryExec=ruro-studio
+Icon=ruro-studio
+Terminal=false
+Categories=Development;Engineering;
+Keywords=robotics;robot;dataflow;graph;node;editor;
+StartupNotify=true
+StartupWMClass=ruro-studio

@@ -1,0 +1,12 @@
+# Cross-compiling for 64-bit ARM (Raspberry Pi 4/5, Jetson, most robot computers):
+#
+#   sudo apt-get install gcc-aarch64-linux-gnu
+#   rustup target add aarch64-unknown-linux-gnu
+#   cargo build --release --target aarch64-unknown-linux-gnu -p ruro-cli -p ruro-host
+#
+# or, without installing a cross toolchain, with `cross` (see Cross.toml):
+#
+#   cross build --release --target aarch64-unknown-linux-gnu -p ruro-cli -p ruro-host
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

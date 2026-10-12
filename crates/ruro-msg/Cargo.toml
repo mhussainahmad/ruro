@@ -1,6 +1,11 @@
 [package]
 name = "ruro-msg"
 description = "Message trait and standard message types for ruro"
+keywords = ["robotics", "messages", "serialization", "dataflow"]
+categories = ["science::robotics", "encoding"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-msg"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

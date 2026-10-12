@@ -1,6 +1,11 @@
 [package]
 name = "ruro-node"
 description = "Node API: ports, parameters, registry"
+keywords = ["robotics", "dataflow", "node", "zero-copy"]
+categories = ["science::robotics", "concurrency"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-node"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

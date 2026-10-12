@@ -18,6 +18,8 @@ pub enum GraphError {
     Yaml(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("composite node `{node}`: {message}")]
+    Composite { node: String, message: String },
 }
 
 /// A complete dataflow graph.
@@ -28,6 +30,13 @@ pub struct Graph {
     /// entry use the defaults.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub groups: IndexMap<String, GroupConfig>,
+    /// Ports this graph exposes when used as a composite node: exposed input
+    /// name to the inner input port(s) it feeds.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub inputs: IndexMap<String, PortList>,
+    /// Exposed output name to the inner output port it carries.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub outputs: IndexMap<String, PortRef>,
     #[serde(default)]
     pub nodes: IndexMap<String, NodeInstance>,
     #[serde(default)]
@@ -81,6 +90,9 @@ pub struct NodeInstance {
     pub params: BTreeMap<String, serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart: Option<RestartPolicy>,
+    /// Inline subgraph of a `type: composite` node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<Box<Graph>>,
     /// Editor position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pos: Option<[f32; 2]>,
@@ -143,6 +155,47 @@ impl FromStr for PortRef {
             return Err(GraphError::BadPortRef(s.into()));
         }
         Ok(Self::new(node, port))
+    }
+}
+
+impl Serialize for PortRef {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for PortRef {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        String::deserialize(d)?.parse().map_err(D::Error::custom)
+    }
+}
+
+/// One or more ports, written as `node.port` or a list of them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PortList(pub Vec<PortRef>);
+
+impl Serialize for PortList {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self.0.as_slice() {
+            [one] => one.serialize(s),
+            many => many.serialize(s),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PortList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            One(PortRef),
+            Many(Vec<PortRef>),
+        }
+        Ok(match Repr::deserialize(d)? {
+            Repr::One(p) => PortList(vec![p]),
+            Repr::Many(v) => PortList(v),
+        })
     }
 }
 
@@ -227,12 +280,6 @@ impl<'de> Deserialize<'de> for Wire {
 }
 
 impl Graph {
-    /// Expands composite nodes into plain nodes and wires. Graphs without
-    /// composites are returned unchanged. Deployment always runs the flattened graph.
-    pub fn flatten(&self) -> Result<Graph, GraphError> {
-        Ok(self.clone())
-    }
-
     /// Settings of `group`, or the defaults.
     pub fn group_config(&self, group: &str) -> GroupConfig {
         self.groups.get(group).cloned().unwrap_or_default()

@@ -44,17 +44,17 @@ pub fn icon_button_sized(
     let enabled = ui.is_enabled();
     if enabled && (resp.hovered() || active) {
         let fill = if resp.is_pointer_button_down_on() {
-            PRESSED
+            PRESSED()
         } else {
-            HOVER
+            HOVER()
         };
         ui.painter()
             .rect_filled(rect, CornerRadius::same(RADIUS), fill);
     }
     let color = match (enabled, active || resp.hovered()) {
-        (false, _) => TEXT_FAINT,
-        (true, true) => TEXT_STRONG,
-        (true, false) => TEXT_DIM,
+        (false, _) => TEXT_FAINT(),
+        (true, true) => TEXT_STRONG(),
+        (true, false) => TEXT_DIM(),
     };
     paint_icon(ui, rect, glyph, size, color);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tooltip));
@@ -89,33 +89,25 @@ pub fn button(ui: &mut Ui, glyph: Option<&str>, label: &str, kind: ButtonKind) -
     let enabled = ui.is_enabled();
     let hovered = enabled && resp.hovered();
     let (fill, stroke, text) = match (kind, enabled) {
-        (_, false) => (
-            Color32::from_rgb(0x2a, 0x2a, 0x2a),
-            Stroke::NONE,
-            TEXT_FAINT,
-        ),
+        (_, false) => (CONTROL_DISABLED(), Stroke::NONE, TEXT_FAINT()),
         (ButtonKind::Primary, _) => (
-            if hovered { ACCENT_HOVER } else { ACCENT },
+            if hovered { ACCENT_HOVER() } else { ACCENT() },
             Stroke::NONE,
             Color32::WHITE,
         ),
         (ButtonKind::Secondary, _) => (
-            if hovered {
-                Color32::from_rgb(0x3c, 0x3c, 0x3c)
-            } else {
-                Color32::from_rgb(0x31, 0x31, 0x31)
-            },
-            Stroke::new(1.0, BORDER_STRONG),
-            TEXT_STRONG,
+            if hovered { CONTROL_HOVER() } else { CONTROL() },
+            Stroke::new(1.0, BORDER_STRONG()),
+            TEXT_STRONG(),
         ),
         (ButtonKind::Danger, _) => (
             if hovered {
-                ERR.gamma_multiply(0.3)
+                ERR().gamma_multiply(0.3)
             } else {
                 Color32::TRANSPARENT
             },
-            Stroke::new(1.0, ERR.gamma_multiply(0.6)),
-            ERR,
+            Stroke::new(1.0, ERR().gamma_multiply(0.6)),
+            ERR(),
         ),
     };
     let p = ui.painter();
@@ -168,7 +160,7 @@ pub fn section_header(ui: &mut Ui, title: &str, open: Option<&mut bool>) -> Resp
             Rect::from_center_size(pos2(x + 8.0, rect.center().y), Vec2::splat(14.0)),
             glyph,
             13.0,
-            TEXT_DIM,
+            TEXT_DIM(),
         );
         x += 18.0;
     }
@@ -177,7 +169,7 @@ pub fn section_header(ui: &mut Ui, title: &str, open: Option<&mut bool>) -> Resp
         Align2::LEFT_CENTER,
         title.to_uppercase(),
         font_semibold(10.5),
-        TEXT_DIM,
+        TEXT_DIM(),
     );
     resp
 }
@@ -194,13 +186,9 @@ pub fn list_row(
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
     let p = ui.painter();
     if selected {
-        p.rect_filled(
-            rect,
-            CornerRadius::ZERO,
-            Color32::from_rgb(0x37, 0x37, 0x3d),
-        );
+        p.rect_filled(rect, CornerRadius::ZERO, LIST_SELECTED());
     } else if resp.hovered() {
-        p.rect_filled(rect, CornerRadius::ZERO, HOVER);
+        p.rect_filled(rect, CornerRadius::ZERO, HOVER());
     }
     paint_icon(
         ui,
@@ -214,7 +202,7 @@ pub fn list_row(
         Align2::LEFT_CENTER,
         label,
         font(13.0),
-        if selected { TEXT_STRONG } else { TEXT },
+        if selected { TEXT_STRONG() } else { TEXT() },
     );
     if !trailing.is_empty() {
         p.text(
@@ -222,7 +210,7 @@ pub fn list_row(
             Align2::RIGHT_CENTER,
             trailing,
             font(11.5),
-            TEXT_FAINT,
+            TEXT_FAINT(),
         );
     }
     resp.widget_info(|| {
@@ -241,7 +229,7 @@ pub fn prop_row<R>(ui: &mut Ui, label: &str, hint: &str, add: impl FnOnce(&mut U
             Align2::LEFT_CENTER,
             label,
             font(12.5),
-            TEXT_DIM,
+            TEXT_DIM(),
         );
         if !hint.is_empty() {
             resp.on_hover_text(hint);
@@ -262,25 +250,25 @@ pub fn dot(ui: &mut Ui, color: Color32, radius: f32) -> Response {
 pub fn kbd(ui: &mut Ui, keys: &str) {
     let galley = ui
         .painter()
-        .layout_no_wrap(keys.to_owned(), font(11.0), TEXT_DIM);
+        .layout_no_wrap(keys.to_owned(), font(11.0), TEXT_DIM());
     let size = galley.size() + vec2(10.0, 4.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter().rect(
         rect,
         CornerRadius::same(RADIUS_SM),
-        Color32::from_rgb(0x2b, 0x2b, 0x2b),
-        Stroke::new(1.0, BORDER_STRONG),
+        CARD_HEADER(),
+        Stroke::new(1.0, BORDER_STRONG()),
         egui::StrokeKind::Inside,
     );
     ui.painter()
-        .galley(rect.center() - galley.size() / 2.0, galley, TEXT_DIM);
+        .galley(rect.center() - galley.size() / 2.0, galley, TEXT_DIM());
 }
 
 /// A search/text field with a leading icon, drawn as one bordered control.
 pub fn search_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> Response {
     let frame = egui::Frame::new()
-        .fill(FIELD)
-        .stroke(Stroke::new(1.0, BORDER_STRONG))
+        .fill(FIELD())
+        .stroke(Stroke::new(1.0, BORDER_STRONG()))
         .corner_radius(CornerRadius::same(RADIUS_SM + 1))
         .inner_margin(egui::Margin::symmetric(6, 2));
     frame
@@ -288,11 +276,11 @@ pub fn search_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> R
             ui.set_width(width - 14.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                icon(ui, icons::SEARCH, 13.0, TEXT_FAINT);
+                icon(ui, icons::SEARCH, 13.0, TEXT_FAINT());
                 ui.add(
                     egui::TextEdit::singleline(text)
                         .frame(egui::Frame::NONE)
-                        .hint_text(RichText::new(hint).color(TEXT_FAINT))
+                        .hint_text(RichText::new(hint).color(TEXT_FAINT()))
                         .desired_width(f32::INFINITY)
                         .margin(Vec2::ZERO),
                 )
@@ -304,26 +292,36 @@ pub fn search_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> R
 
 /// A plain single-line text field in the house style.
 pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str) -> Response {
-    ui.add(
+    let resp = ui.add(
         egui::TextEdit::singleline(text)
-            .hint_text(RichText::new(hint).color(TEXT_FAINT))
+            .hint_text(RichText::new(hint).color(TEXT_FAINT()))
             .desired_width(f32::INFINITY)
-            .background_color(FIELD)
+            .background_color(FIELD())
             .margin(vec2(6.0, 3.0)),
-    )
+    );
+    // On a light background a white field needs an outline to read as one.
+    if is_light() && !resp.has_focus() {
+        ui.painter().rect_stroke(
+            resp.rect,
+            CornerRadius::same(RADIUS_SM),
+            Stroke::new(1.0, BORDER_STRONG()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    resp
 }
 
 /// A horizontal hairline across the available width.
 pub fn hairline(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     ui.painter()
-        .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, BORDER));
+        .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, BORDER()));
 }
 
 /// Draws a border line on one edge of the current panel.
 pub fn edge(ui: &Ui, side: Side) {
     let r = ui.max_rect();
-    let stroke = Stroke::new(1.0, BORDER);
+    let stroke = Stroke::new(1.0, BORDER());
     let p = ui.painter();
     match side {
         Side::Top => p.hline(r.x_range(), r.top() + 0.5, stroke),
@@ -355,6 +353,64 @@ pub fn fmt_us(us: f64) -> String {
     } else {
         format!("{us:.0} µs")
     }
+}
+
+/// Keeps the end of `s`, which is the informative part of a path.
+pub fn truncate_start(s: &str, n: usize) -> String {
+    let count = s.chars().count();
+    if count <= n {
+        s.to_owned()
+    } else {
+        format!("…{}", s.chars().skip(count + 1 - n).collect::<String>())
+    }
+}
+
+/// A red recording dot.
+pub fn record_dot(ui: &mut Ui, radius: f32, color: Color32) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(radius * 2.0 + 6.0), Sense::hover());
+    ui.painter().circle_filled(rect.center(), radius, color);
+    resp
+}
+
+/// The title bar's record button: a red dot, or a red square while recording.
+pub fn record_button(ui: &mut Ui, recording: bool, tooltip: &str) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 26.0), Sense::click());
+    let enabled = ui.is_enabled();
+    let p = ui.painter();
+    let (fill, stroke) = if recording {
+        (
+            ERR().gamma_multiply(0.16),
+            Stroke::new(1.0, ERR().gamma_multiply(0.7)),
+        )
+    } else if enabled && resp.hovered() {
+        (CONTROL_HOVER(), Stroke::new(1.0, BORDER_STRONG()))
+    } else {
+        (Color32::TRANSPARENT, Stroke::new(1.0, BORDER_STRONG()))
+    };
+    p.rect(
+        rect,
+        CornerRadius::same(RADIUS_SM + 1),
+        fill,
+        stroke,
+        egui::StrokeKind::Inside,
+    );
+    let color = if enabled { ERR() } else { TEXT_FAINT() };
+    if recording {
+        p.rect_filled(
+            Rect::from_center_size(rect.center(), Vec2::splat(9.0)),
+            CornerRadius::same(2),
+            color,
+        );
+    } else {
+        p.circle_filled(rect.center(), 5.0, color);
+    }
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tooltip));
+    let resp = if enabled {
+        resp.on_hover_cursor(CursorIcon::PointingHand)
+    } else {
+        resp
+    };
+    resp.on_hover_text(tooltip)
 }
 
 pub fn truncate(s: &str, n: usize) -> String {

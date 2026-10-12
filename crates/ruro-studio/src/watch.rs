@@ -1,62 +1,40 @@
-//! Live views of watched output ports.
+//! Live views of watched output ports. Each tile hosts a [`Visualizer`]
+//! chosen from the registered ones for the port's type and data.
 
-use std::collections::VecDeque;
 use std::time::Instant;
 
-use egui::{
-    Color32, ColorImage, CornerRadius, Frame, Margin, RichText, Stroke, TextureHandle,
-    TextureOptions, Ui,
-};
-use egui_plot::{Legend, Line, Plot, PlotPoints};
-use ruro_proto::{Preview, TapFrame};
+use egui::{CornerRadius, Frame, Margin, RichText, Stroke, Ui};
+use ruro_proto::TapFrame;
 
 use crate::icons;
+use crate::plugin::{self, PreviewKind, Visualizer, VisualizerKind, WatchInfo};
 use crate::theme::*;
 use crate::widgets;
 
-/// Seconds of history kept for plotted values.
-const HISTORY_S: f64 = 20.0;
-
-/// Colours for additional series in one plot, after the port's own colour.
-const SERIES: [Color32; 5] = [
-    Color32::from_rgb(0xd7, 0xba, 0x7d),
-    Color32::from_rgb(0x4e, 0xc9, 0xb0),
-    Color32::from_rgb(0xc5, 0x86, 0xc0),
-    Color32::from_rgb(0xce, 0x91, 0x78),
-    Color32::from_rgb(0xb5, 0xce, 0xa8),
-];
-
 pub struct Watch {
+    /// Node and port as shown in the open graph.
     pub node: String,
     pub port: String,
     pub ty: String,
-    data: Data,
+    /// The running port it streams from (differs inside composites).
+    pub tap: (String, String),
+    view: Option<(&'static VisualizerKind, Box<dyn Visualizer>)>,
+    /// Shape of the last preview.
+    kind: Option<PreviewKind>,
     frames: u64,
     last: Option<Instant>,
     rate: f64,
 }
 
-enum Data {
-    Waiting,
-    Image {
-        tex: TextureHandle,
-        size: [usize; 2],
-    },
-    Series {
-        start: Instant,
-        names: Vec<String>,
-        points: Vec<VecDeque<[f64; 2]>>,
-    },
-    Text(String),
-}
-
 impl Watch {
-    pub fn new(node: String, port: String, ty: String) -> Self {
+    pub fn new(node: String, port: String, ty: String, tap: (String, String)) -> Self {
         Self {
             node,
             port,
             ty,
-            data: Data::Waiting,
+            tap,
+            view: None,
+            kind: None,
             frames: 0,
             last: None,
             rate: 0.0,
@@ -65,6 +43,32 @@ impl Watch {
 
     pub fn key(&self) -> (String, String) {
         (self.node.clone(), self.port.clone())
+    }
+
+    /// Id of the visualizer in use, if data has arrived.
+    #[cfg(test)]
+    pub fn visualizer(&self) -> Option<&'static str> {
+        self.view.as_ref().map(|(k, _)| k.id)
+    }
+
+    fn info(&self) -> WatchInfo<'_> {
+        WatchInfo {
+            node: &self.node,
+            port: &self.port,
+            ty: &self.ty,
+        }
+    }
+
+    /// Switches to the visualizer `kind`.
+    pub fn use_visualizer(&mut self, kind: &'static VisualizerKind) {
+        let v = (kind.create)(&self.info());
+        self.view = Some((kind, v));
+    }
+
+    pub fn theme_changed(&mut self) {
+        if let Some((_, v)) = &mut self.view {
+            v.theme_changed();
+        }
     }
 
     pub fn push(&mut self, ctx: &egui::Context, frame: TapFrame) {
@@ -79,73 +83,31 @@ impl Watch {
         }
         self.last = Some(now);
         self.frames += 1;
-        match frame.preview {
-            Preview::Image {
-                width,
-                height,
-                rgba,
-            } => {
-                let size = [width as usize, height as usize];
-                if rgba.len() != size[0] * size[1] * 4 {
-                    return;
-                }
-                let image = ColorImage::from_rgba_unmultiplied(size, &rgba);
-                match &mut self.data {
-                    Data::Image { tex, size: s } => {
-                        tex.set(image, TextureOptions::LINEAR);
-                        *s = size;
-                    }
-                    _ => {
-                        let name = format!("tap-{}-{}", self.node, self.port);
-                        let tex = ctx.load_texture(name, image, TextureOptions::LINEAR);
-                        self.data = Data::Image { tex, size };
-                    }
-                }
-            }
-            Preview::Values(values) => {
-                let same = matches!(&self.data, Data::Series { names, .. }
-                    if names.len() == values.len() && names.iter().zip(&values).all(|(a, (b, _))| a == b));
-                if !same {
-                    self.data = Data::Series {
-                        start: now,
-                        names: values.iter().map(|(n, _)| n.clone()).collect(),
-                        points: vec![VecDeque::new(); values.len()],
-                    };
-                }
-                if let Data::Series { start, points, .. } = &mut self.data {
-                    let t = (now - *start).as_secs_f64();
-                    for (series, (_, v)) in points.iter_mut().zip(values) {
-                        series.push_back([t, v]);
-                        while series.front().is_some_and(|p| p[0] < t - HISTORY_S) {
-                            series.pop_front();
-                        }
-                    }
-                }
-            }
-            Preview::Text(t) => self.data = Data::Text(t),
-            // 3D previews get a dedicated view; until then, summarise them.
-            Preview::Points { frame, points } => {
-                self.data = Data::Text(format!("{} points in frame `{frame}`", points.len()))
-            }
-            Preview::Frames(frames) => {
-                let lines: Vec<String> = frames
-                    .iter()
-                    .map(|f| {
-                        let [x, y, z] = f.translation;
-                        format!("{:<16} x {x:>8.3}  y {y:>8.3}  z {z:>8.3}", f.name)
-                    })
-                    .collect();
-                self.data = Data::Text(lines.join("\n"))
-            }
+        let kind = PreviewKind::of(&frame.preview);
+        let usable = self
+            .view
+            .as_ref()
+            .is_some_and(|(k, _)| (k.score)(&self.ty, kind) > 0);
+        if !usable && let Some(best) = plugin::candidates(&self.ty, kind).first() {
+            self.use_visualizer(best);
+        }
+        self.kind = Some(kind);
+        if let Some((_, v)) = &mut self.view {
+            v.push(ctx, &frame.preview);
         }
     }
 
+    /// Preferred tile width at the given height.
+    pub fn width(&self, height: f32) -> f32 {
+        self.view.as_ref().map_or(320.0, |(_, v)| v.width(height))
+    }
+
     /// Draws the tile. Returns true if the user closed it.
-    pub fn show(&self, ui: &mut Ui, size: egui::Vec2) -> bool {
+    pub fn show(&mut self, ui: &mut Ui, size: egui::Vec2) -> bool {
         let mut close = false;
         Frame::new()
-            .fill(EDITOR)
-            .stroke(Stroke::new(1.0, BORDER_STRONG))
+            .fill(EDITOR())
+            .stroke(Stroke::new(1.0, BORDER_STRONG()))
             .corner_radius(CornerRadius::same(RADIUS + 1))
             .inner_margin(Margin::same(0))
             .show(ui, |ui| {
@@ -163,9 +125,20 @@ impl Watch {
         close
     }
 
-    fn header(&self, ui: &mut Ui, close: &mut bool) {
+    fn header(&mut self, ui: &mut Ui, close: &mut bool) {
+        let candidates = self
+            .kind
+            .map(|k| plugin::candidates(&self.ty, k))
+            .unwrap_or_default();
+        let mut switch = None;
         Frame::new()
-            .fill(CARD)
+            .fill(CARD())
+            .corner_radius(CornerRadius {
+                nw: RADIUS + 1,
+                ne: RADIUS + 1,
+                sw: 0,
+                se: 0,
+            })
             .inner_margin(Margin::symmetric(10, 0))
             .show(ui, |ui| {
                 ui.set_height(30.0);
@@ -175,10 +148,11 @@ impl Watch {
                     ui.label(
                         RichText::new(format!("{}.{}", self.node, self.port))
                             .font(font_mono(12.0))
-                            .color(TEXT_STRONG),
+                            .color(TEXT_STRONG()),
                     );
-                    ui.label(RichText::new(&self.ty).font(font(11.0)).color(TEXT_FAINT));
+                    ui.label(RichText::new(&self.ty).font(font(11.0)).color(TEXT_FAINT()));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
                         if widgets::icon_button_sized(
                             ui,
                             icons::X,
@@ -191,97 +165,60 @@ impl Watch {
                         {
                             *close = true;
                         }
+                        if candidates.len() > 1
+                            && let Some((current, _)) = &self.view
+                        {
+                            let resp = widgets::icon_button_sized(
+                                ui,
+                                current.icon,
+                                &format!("{} — change view", current.title),
+                                20.0,
+                                12.5,
+                                false,
+                            );
+                            egui::Popup::menu(&resp).show(|ui| {
+                                ui.set_min_width(160.0);
+                                for k in &candidates {
+                                    if widgets::list_row(
+                                        ui,
+                                        k.icon,
+                                        TEXT_DIM(),
+                                        k.title,
+                                        "",
+                                        k.id == current.id,
+                                    )
+                                    .clicked()
+                                    {
+                                        switch = Some(*k);
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
                         if self.frames > 0 {
+                            ui.add_space(4.0);
                             ui.label(
                                 RichText::new(format!("{:.0} fps", self.rate))
                                     .font(font_mono(11.0))
-                                    .color(TEXT_DIM),
+                                    .color(TEXT_DIM()),
                             );
                         }
                     });
                 });
             });
-    }
-
-    fn body(&self, ui: &mut Ui) {
-        let avail = ui.available_size();
-        match &self.data {
-            Data::Waiting => {
-                ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("Waiting for data…").color(TEXT_FAINT));
-                });
-            }
-            Data::Image { tex, size } => {
-                let aspect = size[0] as f32 / size[1].max(1) as f32;
-                let h = avail.y.min(avail.x / aspect);
-                ui.vertical_centered(|ui| {
-                    ui.add(
-                        egui::Image::new(tex)
-                            .fit_to_exact_size(egui::vec2(h * aspect, h))
-                            .corner_radius(3),
-                    );
-                });
-            }
-            Data::Series { names, points, .. } => {
-                let color = |i: usize| {
-                    if i == 0 {
-                        type_color(&self.ty)
-                    } else {
-                        SERIES[(i - 1) % SERIES.len()]
-                    }
-                };
-                ui.horizontal(|ui| {
-                    for (i, (n, p)) in names.iter().zip(points).take(4).enumerate() {
-                        if let Some(v) = p.back() {
-                            widgets::dot(ui, color(i), 3.0);
-                            ui.label(RichText::new(n).font(font(11.5)).color(TEXT_DIM));
-                            ui.label(
-                                RichText::new(format!("{:.4}", v[1]))
-                                    .font(font_mono(12.0))
-                                    .color(TEXT_STRONG),
-                            );
-                            ui.add_space(8.0);
-                        }
-                    }
-                });
-                ui.add_space(4.0);
-                let mut plot = Plot::new(format!("plot-{}-{}", self.node, self.port))
-                    .show_axes([false, true])
-                    .show_background(false)
-                    .allow_scroll(false)
-                    .allow_drag(false)
-                    .allow_zoom(false)
-                    .allow_boxed_zoom(false)
-                    .height(ui.available_height());
-                if names.len() > 1 {
-                    plot = plot.legend(Legend::default());
-                }
-                plot.show(ui, |plot| {
-                    for (i, (name, series)) in names.iter().zip(points).enumerate() {
-                        let pts: Vec<[f64; 2]> = series.iter().copied().collect();
-                        plot.line(
-                            Line::new(name.clone(), PlotPoints::new(pts))
-                                .width(1.6)
-                                .color(color(i)),
-                        );
-                    }
-                });
-            }
-            Data::Text(t) => {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.label(RichText::new(t).font(font_mono(12.0)));
-                });
-            }
+        if let Some(k) = switch {
+            self.use_visualizer(k);
         }
     }
-}
 
-#[cfg(test)]
-impl Watch {
-    /// Moves the series origin back so the next samples land `secs` later.
-    pub fn shift_history_for_test(&mut self, secs: f64) {
-        if let Data::Series { start, .. } = &mut self.data {
-            *start -= std::time::Duration::from_secs_f64(secs);
+    fn body(&mut self, ui: &mut Ui) {
+        match &mut self.view {
+            Some((_, v)) => v.show(ui),
+            None => {
+                ui.centered_and_justified(|ui| {
+                    ui.label(RichText::new("Waiting for data…").color(TEXT_FAINT()));
+                });
+            }
         }
     }
 }

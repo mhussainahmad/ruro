@@ -1,0 +1,46 @@
+# Starting point for sensor fusion: two sensors in isolated processes, each
+# conditioned by its own subgraph, ready to feed a fusion node. Swap the
+# simulated sources for drivers and add your estimator where the streams meet.
+name: sensor-fusion
+nodes:
+  imu:
+    type: std/sine
+    group: imu
+    rate: 200
+    params: { frequency: 1.0, amplitude: 0.8 }
+    pos: [0, 0]
+  wheel_odom:
+    type: std/sine
+    group: odometry
+    rate: 50
+    params: { frequency: 1.0, amplitude: 1.0, offset: 0.05 }
+    pos: [0, 220]
+  conditioning:
+    type: composite
+    pos: [380, 80]
+    graph:
+      name: conditioning
+      inputs:
+        imu: imu_scale.input
+        odom: odom_scale.input
+      outputs:
+        imu: imu_scale.output
+        odom: odom_scale.output
+      nodes:
+        imu_scale:
+          type: std/gain
+          params: { k: 1.0 }
+          pos: [0, 0]
+        odom_scale:
+          type: std/gain
+          params: { k: 0.9 }
+          pos: [0, 160]
+  error:
+    type: std/pid
+    params: { kp: 1.0, ki: 0.0, kd: 0.0 }
+    pos: [760, 100]
+wires:
+  - imu.value -> conditioning.imu
+  - wheel_odom.value -> conditioning.odom
+  - conditioning.imu -> error.setpoint
+  - conditioning.odom -> error.measured

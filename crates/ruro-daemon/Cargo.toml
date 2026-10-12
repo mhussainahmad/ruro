@@ -1,6 +1,11 @@
 [package]
 name = "ruro-daemon"
 description = "Per-machine supervisor that deploys and monitors ruro graphs"
+keywords = ["robotics", "dataflow", "supervisor", "daemon", "zenoh"]
+categories = ["science::robotics", "network-programming"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-daemon"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,11 @@
 [package]
 name = "ruro-graph"
 description = "Graph specification, node descriptors and validation for ruro"
+keywords = ["robotics", "dataflow", "graph", "yaml"]
+categories = ["science::robotics", "config"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-graph"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

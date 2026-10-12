@@ -1,6 +1,11 @@
 [package]
 name = "ruro-proto"
 description = "Control-plane protocol shared by ruro daemon, hosts and clients"
+keywords = ["robotics", "zenoh", "protocol", "dataflow"]
+categories = ["science::robotics", "network-programming"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-proto"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,10 @@
 [package]
 name = "ruro-studio"
 description = "Native desktop editor for ruro graphs"
+keywords = ["robotics", "dataflow", "editor", "gui", "egui"]
+categories = ["science::robotics", "gui"]
+readme.workspace = true
+homepage.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,11 +12,18 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "ruro-studio"
 path = "src/main.rs"
 
 [dependencies]
+inventory = { workspace = true }
+serde = { workspace = true }
+# Native file dialogs through the XDG desktop portal (no GTK).
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 ruro-msg = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-proto = { workspace = true }

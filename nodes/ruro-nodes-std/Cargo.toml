@@ -1,6 +1,11 @@
 [package]
 name = "ruro-nodes-std"
 description = "Standard library of ruro nodes"
+keywords = ["robotics", "dataflow", "nodes", "simulation"]
+categories = ["science::robotics"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-nodes-std"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

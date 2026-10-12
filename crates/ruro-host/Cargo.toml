@@ -1,6 +1,11 @@
 [package]
 name = "ruro-host"
 description = "Process that executes a group of ruro nodes"
+keywords = ["robotics", "dataflow", "runtime"]
+categories = ["science::robotics", "command-line-utilities"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-host"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

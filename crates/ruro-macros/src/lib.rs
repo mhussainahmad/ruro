@@ -286,6 +286,9 @@ fn expand_node(input: DeriveInput) -> syn::Result<TokenStream2> {
                     inputs: ::std::vec![#(#inputs),*],
                     outputs: ::std::vec![#(#outputs),*],
                     params: ::std::vec![#(#params),*],
+                    source: ::core::option::Option::Some(::std::string::String::from(
+                        ::core::concat!(::core::file!(), ":", ::core::line!()),
+                    )),
                 }
             }
 

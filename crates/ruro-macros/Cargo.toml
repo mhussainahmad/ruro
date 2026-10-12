@@ -1,6 +1,11 @@
 [package]
 name = "ruro-macros"
 description = "Derive macros for ruro messages and nodes"
+keywords = ["robotics", "derive", "dataflow"]
+categories = ["science::robotics", "development-tools::procedural-macro-helpers"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-macros"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

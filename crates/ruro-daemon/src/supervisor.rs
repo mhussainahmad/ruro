@@ -1,9 +1,15 @@
 //! Starts, watches and restarts host processes, one per graph group.
 
+use std::collections::VecDeque;
+use std::io::{BufRead, Write};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+use parking_lot::Mutex;
 
 use anyhow::{Context, Result, bail};
 use ruro_graph::{Graph, RestartPolicy};
@@ -17,6 +23,104 @@ const BACKOFF_MAX: Duration = Duration::from_secs(5);
 pub const STARTUP_GRACE: Duration = Duration::from_secs(30);
 /// Grace period between SIGTERM and SIGKILL.
 const STOP_GRACE: Duration = Duration::from_secs(2);
+/// Lines of a host's stderr kept to explain its exit.
+const STDERR_TAIL: usize = 20;
+/// How long an exit waits for the rest of the host's stderr.
+const STDERR_DRAIN: Duration = Duration::from_millis(300);
+/// Longest error message taken from a host's stderr.
+const REASON_MAX: usize = 400;
+
+/// The end of a host's stderr. A thread copies the host's stderr to the
+/// daemon's and keeps the last lines, so an exit can say why.
+struct StderrTail {
+    lines: Arc<Mutex<VecDeque<String>>>,
+    /// Disconnected once the host's stderr is closed.
+    closed: mpsc::Receiver<()>,
+}
+
+impl StderrTail {
+    fn follow(group: &str, stderr: ChildStderr) -> Self {
+        let lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL)));
+        let (tx, closed) = mpsc::channel::<()>();
+        let tail = lines.clone();
+        let spawned = std::thread::Builder::new()
+            .name(format!("ruro-stderr:{group}"))
+            .spawn(move || {
+                let _tx = tx;
+                let mut reader = std::io::BufReader::new(stderr);
+                let mut buf = Vec::new();
+                while matches!(reader.read_until(b'\n', &mut buf), Ok(n) if n > 0) {
+                    let _ = std::io::stderr().lock().write_all(&buf);
+                    let line = String::from_utf8_lossy(&buf).trim_end().to_owned();
+                    buf.clear();
+                    let mut tail = tail.lock();
+                    if tail.len() == STDERR_TAIL {
+                        tail.pop_front();
+                    }
+                    tail.push_back(line);
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("cannot follow the output of group `{group}`: {e}");
+        }
+        Self { lines, closed }
+    }
+
+    /// The host's last error message, once its stderr is closed (or a
+    /// short while has passed).
+    fn reason(&self, host: &Path) -> Option<String> {
+        let _ = self.closed.recv_timeout(STDERR_DRAIN);
+        last_error(host, &self.lines.lock())
+    }
+}
+
+/// The line of a host's stderr that most likely says why it exited: the
+/// last one that is not routine logging or panic boilerplate, without the
+/// program name the host prefixes fatal errors with.
+fn last_error(host: &Path, lines: &VecDeque<String>) -> Option<String> {
+    let program = host.file_name()?.to_string_lossy().into_owned();
+    let routine = [" INFO ", " DEBUG ", " TRACE "];
+    let line = lines.iter().rev().map(|l| strip_ansi(l)).find(|l| {
+        let l = l.trim();
+        !l.is_empty()
+            && !routine.iter().any(|r| l.contains(r))
+            && !l.starts_with("note: run with `RUST_BACKTRACE")
+            && !l.starts_with("stack backtrace")
+    })?;
+    let line = line.trim();
+    let line = line
+        .strip_prefix(&format!("{program}: "))
+        .unwrap_or(line)
+        .to_owned();
+    Some(match line.char_indices().nth(REASON_MAX) {
+        Some((i, _)) => format!("{}…", &line[..i]),
+        None => line,
+    })
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // CSI sequences end with a letter.
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// A group whose host exited unexpectedly, and why.
+pub struct Exit {
+    pub group: String,
+    pub description: String,
+}
 
 struct Group {
     name: String,
@@ -24,6 +128,7 @@ struct Group {
     policy: RestartPolicy,
     host: PathBuf,
     child: Option<Child>,
+    stderr: Option<StderrTail>,
     state: GroupState,
     restarts: u32,
     /// Consecutive quick failures, used for exponential backoff.
@@ -139,6 +244,7 @@ impl Supervisor {
                 policy,
                 host,
                 child: None,
+                stderr: None,
                 state: GroupState::Stopped,
                 restarts: 0,
                 streak: 0,
@@ -174,9 +280,14 @@ impl Supervisor {
         ])
         .arg("--graph")
         .arg(&self.graph_file)
-        .stdin(Stdio::null());
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped());
         if let Some(token) = &self.token {
             cmd.env(TOKEN_ENV, token);
+        }
+        // The host's stderr goes through the daemon's: keep its colours.
+        if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+            cmd.env("RURO_LOG_COLOR", "1");
         }
         if self.host_state.estopped {
             cmd.arg("--estopped");
@@ -209,10 +320,14 @@ impl Supervisor {
                 Ok(())
             });
         }
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .with_context(|| format!("starting {} for group `{}`", g.host.display(), g.name))?;
         tracing::info!("group `{}` started (pid {})", g.name, child.id());
+        g.stderr = child
+            .stderr
+            .take()
+            .map(|stderr| StderrTail::follow(&g.name, stderr));
         g.child = Some(child);
         g.state = GroupState::Running;
         g.started = Instant::now();
@@ -271,23 +386,39 @@ impl Supervisor {
     }
 
     /// Reaps exited children and performs due restarts. Call periodically.
-    pub fn poll(&mut self) {
+    /// Reaps exited hosts and restarts groups whose backoff has passed.
+    /// Returns the groups that exited unexpectedly.
+    pub fn poll(&mut self) -> Vec<Exit> {
         let now = Instant::now();
         let mut to_spawn = Vec::new();
+        let mut exits = Vec::new();
         for (i, g) in self.groups.iter_mut().enumerate() {
             if let Some(child) = &mut g.child {
                 let Ok(Some(status)) = child.try_wait() else {
                     continue;
                 };
                 g.child = None;
+                let reason = g.stderr.take().and_then(|t| t.reason(&g.host));
                 let (failed, desc) = match g.heartbeat_lost.take() {
                     Some(silent) => (
                         true,
                         format!("no heartbeat for {:.1} s", silent.as_secs_f64()),
                     ),
-                    None => (!status.success(), describe_exit(status)),
+                    None => {
+                        let desc = describe_exit(status);
+                        // Killed hosts left no last word; their last line is
+                        // whatever they logged before.
+                        match reason.filter(|_| status.code().is_some_and(|c| c != 0)) {
+                            Some(r) => (true, format!("{desc}: {r}")),
+                            None => (!status.success(), desc),
+                        }
+                    }
                 };
                 tracing::warn!("group `{}` exited: {desc}", g.name);
+                exits.push(Exit {
+                    group: g.name.clone(),
+                    description: desc.clone(),
+                });
                 g.last_exit = Some(desc);
                 let restart = match g.policy {
                     RestartPolicy::Never => false,
@@ -324,9 +455,14 @@ impl Supervisor {
                 tracing::error!("{e:#}");
                 g.state = GroupState::Failed;
                 g.last_exit = Some(format!("{e:#}"));
+                exits.push(Exit {
+                    group: g.name.clone(),
+                    description: format!("{e:#}"),
+                });
             }
             self.groups[i] = g;
         }
+        exits
     }
 
     /// Sends SIGKILL to a group, as a crash would.
@@ -434,6 +570,7 @@ fn placeholder() -> Group {
         policy: RestartPolicy::Never,
         host: PathBuf::new(),
         child: None,
+        stderr: None,
         state: GroupState::Stopped,
         restarts: 0,
         streak: 0,
@@ -464,6 +601,35 @@ mod tests {
             group_policy(&g, &["c".into(), "d".into()]),
             RestartPolicy::Never
         );
+    }
+
+    #[test]
+    fn exits_are_explained_by_the_last_error_line() {
+        let host = Path::new("/opt/bin/ruro-host");
+        let lines = |ls: &[&str]| ls.iter().map(|l| l.to_string()).collect::<VecDeque<_>>();
+        assert_eq!(
+            last_error(
+                host,
+                &lines(&[
+                    "\x1b[2m12:00:00\x1b[0m \x1b[32m WARN\x1b[0m slow start",
+                    "ruro-host: failed to open topic `ruro/x`: DoesNotExist",
+                    "2026-10-11T12:00:00Z  INFO main group `main` stopping",
+                    "",
+                ])
+            )
+            .as_deref(),
+            Some("failed to open topic `ruro/x`: DoesNotExist")
+        );
+        let panic = lines(&[
+            "thread 'main' panicked at src/main.rs:3:5:",
+            "boom",
+            "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+        ]);
+        assert_eq!(last_error(host, &panic).as_deref(), Some("boom"));
+        assert_eq!(last_error(host, &lines(&[])), None);
+        let long = "x".repeat(1000);
+        let cut = last_error(host, &lines(&[&long])).unwrap();
+        assert_eq!(cut.chars().count(), REASON_MAX + 1);
     }
 
     #[test]

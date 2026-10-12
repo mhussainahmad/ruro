@@ -322,7 +322,23 @@ impl Daemon {
                             sup.heartbeat(&group, pid);
                         }
                         sup.check_heartbeats(heartbeat_timeout);
-                        sup.poll();
+                        let exits = sup.poll();
+                        drop(sup);
+                        // Next to the group's own logs, so tools that follow
+                        // them see why it stopped.
+                        for exit in exits {
+                            let line = ruro_proto::LogLine {
+                                ts_ns: ruro_msg::now_ns(),
+                                level: ruro_proto::Level::Error,
+                                group: exit.group.clone(),
+                                node: None,
+                                message: format!("exited: {}", exit.description),
+                            };
+                            let _ = st
+                                .session
+                                .put(st.keys.log(&exit.group), ruro_proto::encode(&line))
+                                .wait();
+                        }
                     }
                     session::reap_playback(&st);
                     if last_status.elapsed() >= Duration::from_millis(500) {

@@ -1,4 +1,4 @@
-//! Several daemons on one machine, with a stand-in host binary.
+//! Daemons on one machine, with stand-in host binaries.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -541,5 +541,50 @@ fn deploys_check_the_hosts_each_group_runs_on() {
     for name in [&robot, &laptop] {
         let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_host_that_fails_to_start_says_why() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-fail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = dir.join("failing-host");
+    std::fs::write(
+        &host,
+        "#!/bin/sh\nif [ \"$1\" = describe ]; then echo '{\"nodes\":{\"t/x\":{\"kind\":\"t/x\"}}}'; exit 0; fi\n\
+         echo 'starting' >&2\necho 'failing-host: failed to open topic `ruro/x`: DoesNotExist' >&2\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&host, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let port = free_port();
+    let name = format!("failing{}", std::process::id());
+    let d = daemon(&name, port, Vec::new(), &host);
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{port}")).unwrap();
+    let logs = session
+        .declare_subscriber(Keys::new(&name).all_logs())
+        .wait()
+        .unwrap();
+    ruro_proto::request(
+        &session,
+        &Keys::new(&name),
+        Ctl::Deploy,
+        "name: f\nnodes:\n  a: { type: t/x, rate: 1 }\n",
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    wait_status(&session, &name, |s| {
+        s.groups.first().and_then(|g| g.last_exit.as_deref())
+            == Some("exit code 1: failed to open topic `ruro/x`: DoesNotExist")
+    });
+    let sample = logs
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap()
+        .expect("the exit is logged");
+    let line: ruro_proto::LogLine = ruro_proto::decode(&sample.payload().to_bytes()).unwrap();
+    assert_eq!(line.level, ruro_proto::Level::Error);
+    assert!(line.message.contains("failed to open topic"), "{line:?}");
+
+    drop(d);
+    let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
     let _ = std::fs::remove_dir_all(&dir);
 }

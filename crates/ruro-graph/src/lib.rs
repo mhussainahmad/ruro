@@ -12,7 +12,7 @@ mod validate;
 
 pub use composite::{COMPOSITE, GRAPH_PREFIX, composite_descriptor, is_composite_kind};
 pub use descriptor::{NodeDescriptor, ParamDesc, ParamKind, PortDesc, Registry};
-pub use placement::{placement_issues, runtime_issues};
+pub use placement::{placement_issues, runtime_issues, schema_issues};
 pub use spec::{
     ClockSource, DEFAULT_GROUP, Graph, GraphError, GroupConfig, NodeInstance, PortList, PortRef,
     Realtime, RestartPolicy, Wire,

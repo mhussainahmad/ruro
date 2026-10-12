@@ -586,7 +586,8 @@ fn peer_machines(st: &State, graph: &Graph) -> BTreeSet<String> {
 type HostKey = (String, Option<String>);
 
 /// Everything that would keep a pinned graph from running: invalid nodes
-/// and wires, nodes placed on hosts that lack their type, and the runtime's
+/// and wires, nodes placed on hosts that lack their type, wires between
+/// hosts built with different message definitions, and the runtime's
 /// conventions. Asks peers for the node types of the hosts they would use.
 fn check(st: &State, graph: &Graph) -> Result<Vec<String>> {
     let hosts: BTreeSet<HostKey> = graph
@@ -635,7 +636,8 @@ fn check(st: &State, graph: &Graph) -> Result<Vec<String>> {
     let found = ruro_graph::validate(graph, &all)
         .into_iter()
         .chain(ruro_graph::runtime_issues(graph, &all))
-        .chain(ruro_graph::placement_issues(graph, &all, offered));
+        .chain(ruro_graph::placement_issues(graph, &all, offered))
+        .chain(ruro_graph::schema_issues(graph, offered));
     issues.extend(found.map(|i| i.to_string()));
     Ok(issues)
 }

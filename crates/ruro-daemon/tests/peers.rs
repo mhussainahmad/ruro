@@ -509,6 +509,20 @@ fn deploys_check_the_hosts_each_group_runs_on() {
         )
     };
 
+    // The robot's custom host was built with another definition of t/Msg.
+    let issues: Vec<String> =
+        serde_json::from_str(&request(Ctl::Validate, &graph("t/x")).unwrap()).unwrap();
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert!(
+        issues[0].contains("a.out -> b.in") && issues[0].contains("t/Msg"),
+        "{issues:?}"
+    );
+    let err = request(Ctl::Deploy, &graph("t/x")).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("different definitions"),
+        "{err:#}"
+    );
+
     // A type only that host offers is known, through the robot.
     let reply = request(Ctl::Validate, &graph("t/special")).unwrap();
     let issues: Vec<String> = serde_json::from_str(&reply).unwrap();

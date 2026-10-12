@@ -94,6 +94,7 @@ pub fn offline(flat: &Graph, local: &Registry) -> Findings {
         .into_iter()
         .chain(ruro_graph::runtime_issues(flat, local))
         .chain(ruro_graph::placement_issues(flat, local, offered))
+        .chain(ruro_graph::schema_issues(flat, offered))
         .collect();
     for issue in issues {
         let trusted = issue.is_unknown_type()

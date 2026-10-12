@@ -6,6 +6,8 @@ use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{Attribute, Data, DeriveInput, Expr, Fields, LitStr, Type, parse_macro_input};
 
+mod schema;
+
 /// Implements `Message` for a serde type using the compact postcard encoding.
 ///
 /// ```ignore
@@ -13,6 +15,11 @@ use syn::{Attribute, Data, DeriveInput, Expr, Fields, LitStr, Type, parse_macro_
 /// #[message(name = "my_pkg/Detection")]
 /// struct Detection { x: f32, y: f32, score: f32 }
 /// ```
+///
+/// The message's schema (field names and types, used by `ruro schema` and for
+/// compatibility checks) is derived too. Field types without a known layout
+/// show up as opaque; add `#[message(name = "...", opaque)]` to skip the
+/// schema entirely.
 #[proc_macro_derive(Message, attributes(message))]
 pub fn derive_message(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -29,13 +36,17 @@ fn expand_message(input: DeriveInput) -> syn::Result<TokenStream2> {
         ));
     }
     let mut name: Option<LitStr> = None;
+    let mut opaque = false;
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("message")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("name") {
                 name = Some(meta.value()?.parse()?);
                 Ok(())
+            } else if meta.path.is_ident("opaque") {
+                opaque = true;
+                Ok(())
             } else {
-                Err(meta.error("expected `name = \"pkg/Type\"`"))
+                Err(meta.error("expected `name = \"pkg/Type\"` or `opaque`"))
             }
         })?;
     }
@@ -43,9 +54,32 @@ fn expand_message(input: DeriveInput) -> syn::Result<TokenStream2> {
         syn::Error::new(Span::call_site(), "missing #[message(name = \"pkg/Type\")]")
     })?;
     let ident = &input.ident;
+    if opaque {
+        return Ok(quote! {
+            ::ruro::msg::impl_postcard_message!(#ident, #name);
+        });
+    }
+    let describe = schema::expand_describe(&input)?;
     Ok(quote! {
-        ::ruro::msg::impl_postcard_message!(#ident, #name);
+        #describe
+        ::ruro::msg::impl_postcard_message!(#ident, #name, schema);
     })
+}
+
+/// Implements `Describe`, which reports a type's wire layout for schema
+/// export. `#[derive(Message)]` does this for messages; derive it on structs
+/// and enums nested inside messages so their layout is known too.
+///
+/// ```ignore
+/// #[derive(Describe, Serialize, Deserialize)]
+/// struct BoundingBox { x: f32, y: f32, w: f32, h: f32 }
+/// ```
+#[proc_macro_derive(Describe)]
+pub fn derive_describe(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    schema::expand_describe(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 /// Generates the node descriptor, constructor and parameter setter, and

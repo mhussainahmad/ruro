@@ -916,7 +916,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4301,6 +4301,7 @@ dependencies = [
  "ruro-graph",
  "ruro-msg",
  "ruro-proto",
+ "ruro-schema",
  "serde_json",
  "signal-hook",
  "tracing",
@@ -4369,9 +4370,11 @@ dependencies = [
 name = "ruro-msg"
 version = "0.1.0"
 dependencies = [
+ "inventory",
  "postcard",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.21",
 ]
 
@@ -4408,6 +4411,17 @@ dependencies = [
  "serde",
  "serde_json",
  "zenoh",
+]
+
+[[package]]
+name = "ruro-schema"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ruro-msg",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4730,6 +4744,17 @@ name = "sha1_smol"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
 
 [[package]]
 name = "sha2-const-stable"

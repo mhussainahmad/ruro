@@ -81,6 +81,8 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Print message schemas, check compatibility, generate bindings.
+    Schema(ruro_schema::cli::SchemaArgs),
 }
 
 fn main() {
@@ -224,6 +226,7 @@ fn run(cli: Cli) -> Result<()> {
             let err = exec(&exe, &args);
             bail!("failed to start {}: {err}", exe.display())
         }
+        Cmd::Schema(args) => ruro_schema::cli::run(args),
     }
 }
 

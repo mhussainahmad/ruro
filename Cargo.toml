@@ -21,6 +21,7 @@ ruro-proto = { path = "crates/ruro-proto" }
 ruro-host = { path = "crates/ruro-host" }
 ruro-daemon = { path = "crates/ruro-daemon" }
 ruro-nodes-std = { path = "nodes/ruro-nodes-std" }
+ruro-schema = { path = "crates/ruro-schema" }
 
 anyhow = "1"
 thiserror = "2"
@@ -47,6 +48,7 @@ egui_plot = "0.37"
 criterion = "0.7"
 indexmap = { version = "2", features = ["serde"] }
 signal-hook = "0.3"
+sha2 = "0.10"
 
 [profile.release]
 lto = "thin"

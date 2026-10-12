@@ -32,7 +32,7 @@
 //! ```
 
 pub use ruro_graph as graph;
-pub use ruro_macros::{Message, Node};
+pub use ruro_macros::{Describe, Message, Node};
 pub use ruro_msg as msg;
 pub use ruro_node as node;
 pub use ruro_node::__private::serde_json;
@@ -52,7 +52,7 @@ pub mod prelude {
         LaserScan, Message as _, Odometry, PointCloud, Pose, Quat, Scalar, Text, Transform,
         Transforms, Twist, Vec3,
     };
-    pub use crate::{Ctx, Input, Message, Node, Output, Result, Sample};
+    pub use crate::{Ctx, Describe, Input, Message, Node, Output, Result, Sample};
     pub use anyhow::{Context as _, anyhow, bail, ensure};
     pub use serde::{Deserialize, Serialize};
     pub use tracing::{debug, error, info, trace, warn};

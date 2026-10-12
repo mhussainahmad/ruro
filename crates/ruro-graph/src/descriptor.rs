@@ -95,6 +95,12 @@ pub struct ParamDesc {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Registry {
     pub nodes: BTreeMap<String, NodeDescriptor>,
+    /// Wire-layout hash of each message type used by a port, keyed by type
+    /// name (e.g. `std/Pose` → `RS1_…`). Types without a known schema are
+    /// absent. Two registries that disagree on a hash were built from
+    /// incompatible definitions of that message.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub schema_hashes: BTreeMap<String, String>,
 }
 
 impl Registry {
@@ -104,7 +110,28 @@ impl Registry {
                 .into_iter()
                 .map(|d| (d.kind.clone(), d))
                 .collect(),
+            schema_hashes: BTreeMap::new(),
         }
+    }
+
+    /// Wire-layout hash of a message type, if known.
+    pub fn schema_hash(&self, ty: &str) -> Option<&str> {
+        self.schema_hashes.get(ty).map(String::as_str)
+    }
+
+    /// Message types whose schema hash differs between `self` and `other`,
+    /// as `(type, ours, theirs)`. Types only one side knows are not reported.
+    pub fn schema_mismatches<'a>(
+        &'a self,
+        other: &'a Registry,
+    ) -> Vec<(&'a str, &'a str, &'a str)> {
+        self.schema_hashes
+            .iter()
+            .filter_map(|(ty, ours)| {
+                let theirs = other.schema_hashes.get(ty)?;
+                (ours != theirs).then_some((ty.as_str(), ours.as_str(), theirs.as_str()))
+            })
+            .collect()
     }
 
     pub fn get(&self, kind: &str) -> Option<&NodeDescriptor> {

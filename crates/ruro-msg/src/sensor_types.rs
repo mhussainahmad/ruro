@@ -30,7 +30,7 @@ pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,
 }
-impl_postcard_message!(Transform, "std/Transform", preview: |t: &Transform| Preview::Frames(vec![t.frame_preview()]));
+impl_postcard_message!(Transform, "std/Transform", preview: |t: &Transform| Preview::Frames(vec![t.frame_preview()]), schema);
 
 impl Transform {
     /// This transform as a frame for 3D previews.
@@ -50,7 +50,7 @@ impl Transform {
 pub struct Transforms(pub Vec<Transform>);
 impl_postcard_message!(Transforms, "std/Transforms", preview: |t: &Transforms| {
     Preview::Frames(t.0.iter().map(Transform::frame_preview).collect())
-});
+}, schema);
 
 /// Inertial measurement. Unknown fields are left at zero with a negative first
 /// covariance entry, following the common convention.
@@ -66,7 +66,7 @@ pub struct Imu {
     pub linear_acceleration: Vec3,
     pub linear_acceleration_covariance: [f64; 9],
 }
-impl_postcard_message!(Imu, "std/Imu");
+impl_postcard_message!(Imu, "std/Imu", schema);
 
 /// One sweep of a planar range finder.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -88,7 +88,7 @@ pub struct LaserScan {
 impl_postcard_message!(LaserScan, "std/LaserScan", preview: |s: &LaserScan| Preview::Points {
     frame: s.header.frame_id.clone(),
     points: crate::subsample_points(s.points()),
-});
+}, schema);
 
 impl LaserScan {
     /// Valid returns as points in the scan plane (z = 0).
@@ -115,7 +115,7 @@ pub struct Odometry {
 }
 impl_postcard_message!(Odometry, "std/Odometry", preview: |o: &Odometry| {
     Preview::Frames(vec![o.pose.frame_preview(&o.child_frame_id, &o.header.frame_id)])
-});
+}, schema);
 
 /// Pinhole camera calibration.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -132,7 +132,7 @@ pub struct CameraInfo {
     /// Row-major 3x4 projection matrix.
     pub p: [f64; 12],
 }
-impl_postcard_message!(CameraInfo, "std/CameraInfo");
+impl_postcard_message!(CameraInfo, "std/CameraInfo", schema);
 
 /// State of a joystick or gamepad.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -142,17 +142,17 @@ pub struct Joy {
     pub axes: Vec<f32>,
     pub buttons: Vec<i32>,
 }
-impl_postcard_message!(Joy, "std/Joy");
+impl_postcard_message!(Joy, "std/Joy", schema);
 
 /// A boolean flag, e.g. an emergency stop.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Flag(pub bool);
-impl_postcard_message!(Flag, "std/Flag");
+impl_postcard_message!(Flag, "std/Flag", schema);
 
 /// Opaque bytes, e.g. raw serial frames.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Bytes(pub Vec<u8>);
-impl_postcard_message!(Bytes, "std/Bytes");
+impl_postcard_message!(Bytes, "std/Bytes", schema);
 
 /// Commanded joint targets. Vectors are index-aligned; empty means "not commanded".
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -162,7 +162,7 @@ pub struct JointCommand {
     pub velocity: Vec<f64>,
     pub effort: Vec<f64>,
 }
-impl_postcard_message!(JointCommand, "std/JointCommand");
+impl_postcard_message!(JointCommand, "std/JointCommand", schema);
 
 #[cfg(test)]
 mod tests {

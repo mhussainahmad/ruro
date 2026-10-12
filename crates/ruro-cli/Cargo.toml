@@ -1,6 +1,10 @@
 [package]
 name = "ruro-cli"
 description = "Command-line interface for ruro"
+keywords = ["robotics", "dataflow", "robot", "cli"]
+categories = ["science::robotics", "command-line-utilities"]
+readme.workspace = true
+homepage.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

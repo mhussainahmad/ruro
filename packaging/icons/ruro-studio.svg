@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ruro studio application icon. The glyph follows the 24-unit "workflow"
+     grid used by the studio's title-bar logo, scaled 12.5x about the centre. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect x="16" y="16" width="480" height="480" rx="108" ry="108" fill="#0078d4"/>
+  <g transform="translate(106 106) scale(12.5)" fill="none" stroke="#ffffff"
+     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="8" height="8" rx="2" ry="2"/>
+    <path d="M7 11v4a2 2 0 0 0 2 2h4"/>
+    <rect x="13" y="13" width="8" height="8" rx="2" ry="2"/>
+  </g>
+</svg>

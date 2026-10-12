@@ -1,0 +1,10 @@
+[book]
+title = "ruro"
+description = "Fast, lightweight robotics dataflow in Rust, with a native visual editor"
+authors = ["Hussain Ahmad"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/mhussainahmad/ruro"
+edit-url-template = "https://github.com/mhussainahmad/ruro/edit/main/book/{path}"

@@ -9,18 +9,20 @@ rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mhussainahmad/ruro"
 authors = ["Hussain Ahmad <emhussain25@gmail.com>"]
+homepage = "https://github.com/mhussainahmad/ruro"
+readme = "README.md"
 
 [workspace.dependencies]
-ruro = { path = "crates/ruro" }
-ruro-msg = { path = "crates/ruro-msg" }
-ruro-macros = { path = "crates/ruro-macros" }
-ruro-node = { path = "crates/ruro-node" }
-ruro-graph = { path = "crates/ruro-graph" }
-ruro-transport = { path = "crates/ruro-transport" }
-ruro-proto = { path = "crates/ruro-proto" }
-ruro-host = { path = "crates/ruro-host" }
-ruro-daemon = { path = "crates/ruro-daemon" }
-ruro-nodes-std = { path = "nodes/ruro-nodes-std" }
+ruro = { version = "0.1.0", path = "crates/ruro" }
+ruro-msg = { version = "0.1.0", path = "crates/ruro-msg" }
+ruro-macros = { version = "0.1.0", path = "crates/ruro-macros" }
+ruro-node = { version = "0.1.0", path = "crates/ruro-node" }
+ruro-graph = { version = "0.1.0", path = "crates/ruro-graph" }
+ruro-transport = { version = "0.1.0", path = "crates/ruro-transport" }
+ruro-proto = { version = "0.1.0", path = "crates/ruro-proto" }
+ruro-host = { version = "0.1.0", path = "crates/ruro-host" }
+ruro-daemon = { version = "0.1.0", path = "crates/ruro-daemon" }
+ruro-nodes-std = { version = "0.1.0", path = "nodes/ruro-nodes-std" }
 
 anyhow = "1"
 thiserror = "2"

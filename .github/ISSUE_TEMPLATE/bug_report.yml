@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in ruro does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. Please search existing issues first.
+        Security vulnerabilities should be reported privately: see SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands you ran and, if possible, a minimal graph file that shows the problem.
+      placeholder: |
+        1. ruro run graph.yaml
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - ruro CLI
+        - daemon
+        - ruro-host / runtime
+        - studio
+        - node SDK (derive macros, ports, messages)
+        - standard nodes
+        - packaging (.deb, AppImage, Flatpak, Docker)
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `ruro --version`, or the commit you built from.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Distribution, architecture, and for studio issues the session type (Wayland or X11) and GPU.
+      placeholder: Ubuntu 24.04, x86_64, Wayland, Intel iGPU
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output, ideally with `RURO_LOG=debug`. This is rendered as code automatically.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?

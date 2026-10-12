@@ -1,0 +1,8 @@
+# Allow-list: only what the image build needs is sent to the daemon.
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
+!nodes/
+!examples/
+**/target

@@ -1,0 +1,30 @@
+# Per-user ruro daemon.
+#
+#   systemctl --user enable --now ruro-daemon
+#
+# Runs the daemon in your session so `ruro` and `ruro-studio` connect to it
+# without starting their own. Override settings with
+# `systemctl --user edit ruro-daemon`, for example:
+#
+#   [Service]
+#   Environment=RURO_LISTEN=tcp/0.0.0.0:7447
+#   Environment=RURO_HOST=%h/my-robot/target/release/my-host
+#
+# Real-time process groups additionally need RLIMIT_RTPRIO and RLIMIT_MEMLOCK
+# for your user (see /etc/security/limits.d/ or the system service).
+
+[Unit]
+Description=ruro robotics dataflow daemon (user)
+Documentation=https://github.com/mhussainahmad/ruro
+
+[Service]
+Type=simple
+Environment=RURO_LISTEN=tcp/127.0.0.1:7447
+ExecStart=/usr/bin/ruro daemon --listen ${RURO_LISTEN}
+KillMode=mixed
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

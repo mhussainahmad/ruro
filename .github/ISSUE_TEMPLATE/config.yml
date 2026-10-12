@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/mhussainahmad/ruro/security/advisories/new
+    about: Please report security issues privately, not as public issues.
+  - name: Documentation
+    url: https://github.com/mhussainahmad/ruro/tree/main/book/src
+    about: The user guide covers installation, writing nodes, the studio and deployment.

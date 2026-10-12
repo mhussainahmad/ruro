@@ -1,6 +1,11 @@
 [package]
 name = "ruro"
 description = "Fast, lightweight robotics dataflow in Rust"
+keywords = ["robotics", "dataflow", "robot", "middleware", "real-time"]
+categories = ["science::robotics", "concurrency"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,0 +1,85 @@
+# Flatpak manifest for ruro studio (with the `ruro` CLI and `ruro-host`, which the
+# studio starts for its local daemon).
+#
+# Build from a checkout of the repository:
+#
+#   # 1. Vendor the crates. Flatpak builds run without network access, so every
+#   #    crate in Cargo.lock has to be listed as a source. Generate that list with
+#   #    flatpak-cargo-generator from https://github.com/flatpak/flatpak-builder-tools:
+#   python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+#
+#   # 2. Build and install for the current user:
+#   flatpak install --user flathub org.freedesktop.Sdk//25.08 \
+#       org.freedesktop.Sdk.Extension.rust-stable//25.08
+#   flatpak-builder --user --install --force-clean build-flatpak \
+#       packaging/flatpak/io.github.mhussainahmad.ruro.Studio.yml
+#
+#   flatpak run io.github.mhussainahmad.ruro.Studio examples/camera.yaml
+#
+# The studio sets its Wayland app id / X11 WM class to `ruro-studio`; the desktop
+# file keeps StartupWMClass=ruro-studio so the window is matched to this entry.
+#
+# The build needs libclang only if bindgen runs for the target (it does not for
+# Linux today); add the SDK's LLVM extension if that changes.
+#
+# Note: inside the sandbox the studio can only start graphs whose nodes are linked
+# into the bundled `ruro-host`. To work with a robot or a custom host, run the
+# daemon outside the sandbox and connect to it (--connect tcp/<robot>:7447).
+
+id: io.github.mhussainahmad.ruro.Studio
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: ruro-studio
+
+finish-args:
+  # Zenoh: connect to daemons on this machine and on robots on the network.
+  - --share=network
+  # X11 shared memory. The daemon and its host processes all run inside the
+  # sandbox and share its /dev/shm, which iceoryx2 uses for cross-process wires.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Open and save graph files anywhere in the home directory.
+  - --filesystem=home
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/ruro/cargo
+    CARGO_NET_OFFLINE: 'true'
+
+modules:
+  - name: ruro
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked -p ruro-cli -p ruro-host -p ruro-studio
+      - install -Dm755 target/release/ruro /app/bin/ruro
+      - install -Dm755 target/release/ruro-host /app/bin/ruro-host
+      - install -Dm755 target/release/ruro-studio /app/bin/ruro-studio
+      # The studio looks for examples/ next to its install prefix.
+      - install -Dm644 -t /app/examples examples/*.yaml
+      - install -Dm644 packaging/linux/ruro-studio.desktop
+        /app/share/applications/io.github.mhussainahmad.ruro.Studio.desktop
+      - desktop-file-edit --set-icon=io.github.mhussainahmad.ruro.Studio
+        /app/share/applications/io.github.mhussainahmad.ruro.Studio.desktop
+      - install -Dm644 packaging/linux/io.github.mhussainahmad.ruro.Studio.metainfo.xml
+        /app/share/metainfo/io.github.mhussainahmad.ruro.Studio.metainfo.xml
+      - install -Dm644 packaging/icons/ruro-studio.svg
+        /app/share/icons/hicolor/scalable/apps/io.github.mhussainahmad.ruro.Studio.svg
+      - for size in 16 32 48 64 128 256 512; do
+          install -Dm644 packaging/icons/hicolor/${size}x${size}/apps/ruro-studio.png
+          /app/share/icons/hicolor/${size}x${size}/apps/io.github.mhussainahmad.ruro.Studio.png;
+        done
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - build-flatpak
+          - .flatpak-builder
+      # Produced by flatpak-cargo-generator (see above); not checked in.
+      - cargo-sources.json

@@ -1,0 +1,73 @@
+# System-wide ruro daemon.
+#
+# Runs one daemon per machine as the dedicated `ruro` system user (the .deb
+# package creates it). The daemon starts one `ruro-host` process per process
+# group of the deployed graph; those processes inherit everything below.
+#
+# Customise with `systemctl edit ruro-daemon` or /etc/default/ruro:
+#
+#   RURO_LISTEN=tcp/0.0.0.0:7447       # accept studio/CLI connections from the network
+#   RURO_HOST=/usr/local/bin/my-host   # host binary that links your own nodes
+#   RURO_LOG=info,zenoh=warn           # log filter (journalctl -u ruro-daemon)
+#
+# Hardware access: add the service user to the groups that own your devices
+# (for example `usermod -aG dialout,video ruro`) or uncomment
+# SupplementaryGroups below.
+
+[Unit]
+Description=ruro robotics dataflow daemon
+Documentation=https://github.com/mhussainahmad/ruro
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ruro
+Group=ruro
+#SupplementaryGroups=dialout video
+Environment=RURO_LISTEN=tcp/127.0.0.1:7447
+# Deployed graphs are written under $XDG_RUNTIME_DIR/ruro-<name>.
+Environment=XDG_RUNTIME_DIR=/run/ruro
+EnvironmentFile=-/etc/default/ruro
+ExecStart=/usr/bin/ruro daemon --listen ${RURO_LISTEN}
+KillMode=mixed
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=2
+
+RuntimeDirectory=ruro
+RuntimeDirectoryMode=0750
+StateDirectory=ruro
+WorkingDirectory=/var/lib/ruro
+
+# Real-time process groups (SCHED_FIFO priority and memory locking) need these
+# limits. They only raise what the processes may request; nothing runs with
+# real-time priority unless a graph asks for it.
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+LimitNOFILE=65536
+
+# Hardening. Deliberately absent:
+#   PrivateTmp, PrivateDevices, PrivateIPC - iceoryx2 shared memory lives in
+#     /dev/shm and /tmp/iceoryx2 and must be visible to every host process and
+#     to other ruro processes on the machine;
+#   RestrictRealtime - would forbid real-time scheduling;
+#   SystemCallFilter, MemoryDenyWriteExecute, RestrictAddressFamilies - node
+#     code is arbitrary user code (SocketCAN, raw packets, Bluetooth, ...);
+#   ProtectClock - implies a device allow-list that hides serial ports,
+#     cameras and GPUs;
+#   ProtectKernelTunables - makes /sys read-only, breaking sysfs GPIO and PWM.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+UMask=0007
+
+[Install]
+WantedBy=multi-user.target

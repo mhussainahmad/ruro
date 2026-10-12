@@ -1,0 +1,5 @@
+# Built site.
+/book
+# Screenshots are copied from docs/images before building:
+#   mkdir -p book/src/images && cp docs/images/*.png book/src/images/
+/src/images/

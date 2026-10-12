@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Hussain Ahmad -->
+<component type="desktop-application">
+  <id>io.github.mhussainahmad.ruro.Studio</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>ruro studio</name>
+  <summary>Design, run and inspect robotics dataflow graphs</summary>
+  <developer id="io.github.mhussainahmad">
+    <name>Hussain Ahmad</name>
+  </developer>
+  <description>
+    <p>
+      ruro is a fast, lightweight robotics dataflow platform written in Rust. A robot's
+      software is built as a graph of small nodes (drivers, perception, control) that exchange
+      typed messages: zero-copy between nodes in the same process and through shared memory
+      between processes.
+    </p>
+    <p>ruro studio is the native editor for these graphs:</p>
+    <ul>
+      <li>Build graphs from a library of typed nodes; invalid wires are rejected as you draw them</li>
+      <li>Run a graph locally or on a robot over the network, with one click</li>
+      <li>Watch any output live as an image, plot or value</li>
+      <li>Tune node parameters while the graph is running</li>
+      <li>See per-node rate, latency, CPU, drops and errors at a glance</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.mhussainahmad.ruro.Studio.desktop</launchable>
+  <url type="homepage">https://github.com/mhussainahmad/ruro</url>
+  <url type="bugtracker">https://github.com/mhussainahmad/ruro/issues</url>
+  <url type="vcs-browser">https://github.com/mhussainahmad/ruro</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>A camera pipeline running in the editor</caption>
+      <image>https://raw.githubusercontent.com/mhussainahmad/ruro/main/docs/images/studio.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The command palette</caption>
+      <image>https://raw.githubusercontent.com/mhussainahmad/ruro/main/docs/images/command-palette.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Development</category>
+    <category>Engineering</category>
+  </categories>
+  <keywords>
+    <keyword>robotics</keyword>
+    <keyword>dataflow</keyword>
+    <keyword>node editor</keyword>
+  </keywords>
+  <requires>
+    <display_length compare="ge">960</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" type="development" date="2026-10-11">
+      <description>
+        <p>First release: runtime, node SDK, daemon, command-line tools and studio.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,6 +1,11 @@
 [package]
 name = "ruro-transport"
 description = "Shared-memory transport for ruro wires"
+keywords = ["robotics", "shared-memory", "ipc", "zero-copy", "iceoryx2"]
+categories = ["science::robotics", "concurrency"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-transport"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

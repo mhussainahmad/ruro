@@ -469,28 +469,47 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
         .collect();
 
     // Node types: this daemon's hosts plus whatever the peers offer.
-    let mut descriptors: Vec<_> = st.registry.lock().iter().cloned().collect();
+    let local = st.registry.lock().clone();
     let custom_hosts: BTreeSet<String> = graph
         .groups
         .values()
         .filter(|c| c.machine.as_deref() == Some(st.name.as_str()))
         .filter_map(|c| c.host.clone())
         .collect();
+    let mut hosts = HashMap::new();
     for h in custom_hosts {
         let path = st.sup.lock().resolve_host(Some(&h))?;
-        descriptors.extend(load_registry(&path)?.iter().cloned());
+        hosts.insert(h, load_registry(&path)?);
     }
+    let mut peers = HashMap::new();
     for m in &machines {
         let body = st.peer_request(m, Ctl::Registry, "")?;
         let r: Registry = serde_json::from_str(&body).context("peer registry")?;
-        descriptors.extend(r.iter().cloned());
+        peers.insert(m.clone(), r);
     }
-    let registry = Registry::new(descriptors);
+    let registry = Registry::new(
+        local
+            .iter()
+            .chain(hosts.values().flat_map(Registry::iter))
+            .chain(peers.values().flat_map(Registry::iter))
+            .cloned(),
+    );
     let mut issues: Vec<String> = ruro_graph::validate(&graph, &registry)
         .iter()
         .map(ToString::to_string)
         .collect();
     issues.extend(runtime_issues(&graph, &registry));
+    // The types a group's host links. Peers only report their default host.
+    let offered = |group: &str| {
+        let config = graph.group_config(group);
+        match (config.machine.as_deref(), config.host.as_deref()) {
+            (Some(m), None) if m != st.name => peers.get(m),
+            (Some(m), Some(_)) if m != st.name => None,
+            (_, Some(h)) => hosts.get(h),
+            (_, None) => Some(&local),
+        }
+    };
+    issues.extend(placement_issues(&graph, &registry, offered));
     if !issues.is_empty() {
         bail!("graph is invalid:\n  {}", issues.join("\n  "));
     }
@@ -519,6 +538,31 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
             machines.into_iter().collect::<Vec<_>>().join(", ")
         )
     })
+}
+
+/// Nodes placed in a group whose host does not link their type, which
+/// would fail to start there. `offered` gives a group's host types, or
+/// `None` when they are not known here.
+fn placement_issues<'a>(
+    graph: &Graph,
+    registry: &Registry,
+    offered: impl Fn(&str) -> Option<&'a Registry>,
+) -> Vec<String> {
+    let mut issues = Vec::new();
+    for (id, node) in &graph.nodes {
+        // Unknown everywhere: already reported by validation.
+        if registry.get(&node.kind).is_none() {
+            continue;
+        }
+        let group = node.group();
+        if offered(group).is_some_and(|r| r.get(&node.kind).is_none()) {
+            issues.push(format!(
+                "node `{id}`: type `{}` is not linked into the host of group `{group}`",
+                node.kind
+            ));
+        }
+    }
+    issues
 }
 
 /// Checks that need the runtime's conventions rather than node descriptors.
@@ -567,6 +611,29 @@ fn runtime_issues(graph: &Graph, registry: &Registry) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nodes_must_run_in_a_group_whose_host_links_their_type() {
+        let desc = |kind: &str| ruro_graph::NodeDescriptor {
+            kind: kind.into(),
+            ..Default::default()
+        };
+        let std_host = Registry::new([desc("std/sine")]);
+        let custom_host = Registry::new([desc("std/sine"), desc("my/scale")]);
+        let all = Registry::new([desc("std/sine"), desc("my/scale")]);
+        let g = Graph::from_yaml(
+            "name: x\ngroups:\n  custom: { host: my-host }\n  far: { machine: robot, host: other }\nnodes:\n  a: { type: std/sine, group: custom }\n  b: { type: my/scale }\n  c: { type: my/scale, group: custom }\n  d: { type: my/scale, group: far }\n",
+        )
+        .unwrap();
+        let offered = |group: &str| match group {
+            "custom" => Some(&custom_host),
+            "far" => None,
+            _ => Some(&std_host),
+        };
+        let issues = placement_issues(&g, &all, offered);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("`b`") && issues[0].contains("`main`"));
+    }
 
     #[test]
     fn runtime_checks() {

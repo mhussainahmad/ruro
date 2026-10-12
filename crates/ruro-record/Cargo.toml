@@ -1,0 +1,21 @@
+[package]
+name = "ruro-record"
+description = "MCAP recording, replay and ROS 2 bag import for ruro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro-msg = { workspace = true }
+anyhow = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+# zstd is needed to read rosbag2 MCAP files, which compress chunks with it by default.
+mcap = { version = "0.25", default-features = false, features = ["zstd"] }
+memmap2 = "0.9"
+
+[dev-dependencies]
+serde_json = { workspace = true }

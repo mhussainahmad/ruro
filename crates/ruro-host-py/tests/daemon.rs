@@ -33,6 +33,16 @@ fn values(frames: &[TapFrame]) -> Vec<f64> {
         .collect()
 }
 
+/// Removes a test daemon's runtime directory when the test ends, also when
+/// it fails.
+struct RuntimeDir(std::path::PathBuf);
+
+impl Drop for RuntimeDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn rust_and_python_nodes_share_a_graph() {
     let module = repo().join("examples/python/threshold.py");
@@ -43,6 +53,9 @@ fn rust_and_python_nodes_share_a_graph() {
     let port = free_port();
     let endpoint = format!("tcp/127.0.0.1:{port}");
     let name = format!("pye2e{}", std::process::id());
+    // Declared before the daemon, so it is dropped (and the directory
+    // removed) after the daemon has stopped.
+    let _dir = RuntimeDir(ruro_daemon::runtime_dir(&name));
     let mut config = ruro_daemon::Config::new();
     config.name = name.clone();
     config.listen = endpoint.clone();

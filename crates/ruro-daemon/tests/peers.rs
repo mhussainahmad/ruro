@@ -232,3 +232,22 @@ fn an_unreachable_peer_does_not_keep_the_emergency_stop_from_the_others() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_daemon_that_fails_to_start_leaves_no_runtime_directory() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-busy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let name = format!("busy{}", std::process::id());
+    let mut config = ruro_daemon::Config::new();
+    config.name = name.clone();
+    config.listen = format!("tcp/127.0.0.1:{}", taken.local_addr().unwrap().port());
+    config.host = host;
+    assert!(
+        ruro_daemon::Daemon::start(config).is_err(),
+        "the port is taken"
+    );
+    assert!(!ruro_daemon::runtime_dir(&name).exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

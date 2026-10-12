@@ -196,9 +196,20 @@ pub struct Daemon {
 impl Daemon {
     /// Starts the daemon on background threads.
     pub fn start(config: Config) -> Result<Self> {
-        let registry = load_registry(&config.host)?;
         let dir = runtime_dir(&config.name);
-        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let created = !dir.exists();
+        Self::start_in(config, &dir).inspect_err(|_| {
+            // Leave nothing behind for a daemon that never ran; an existing
+            // directory may belong to a running daemon or hold uploads.
+            if created {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        })
+    }
+
+    fn start_in(config: Config, dir: &Path) -> Result<Self> {
+        let registry = load_registry(&config.host)?;
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 
         // Hosts reach the router over a private Unix socket, so they need
         // neither the network endpoint nor TLS certificates.
@@ -215,7 +226,7 @@ impl Daemon {
         let _ = std::fs::remove_file(&socket);
         let local = format!("unixsock-stream/{}", socket.display());
         let dictionary = match &config.security.token {
-            Some(token) => Some(write_dictionary(&dir, token)?),
+            Some(token) => Some(write_dictionary(dir, token)?),
             None => None,
         };
         let zconfig = ruro_proto::router_config_with(

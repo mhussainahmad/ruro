@@ -9,7 +9,7 @@ mod docs;
 mod edit;
 mod live;
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -156,6 +156,8 @@ pub enum Cmd {
     // Running.
     Deploy,
     Stop,
+    /// Engages (`true`) or releases the emergency stop.
+    Estop(bool),
     Kill(String),
     StartRecording(String),
     StopRecording,
@@ -209,6 +211,8 @@ pub struct Studio {
     pub(crate) status: Option<DaemonStatus>,
     pub(crate) metrics: HashMap<String, NodeMetrics>,
     pub(crate) fleet: BTreeMap<String, FleetEntry>,
+    /// The peers the link was last told to follow.
+    pub(crate) peers_sent: Option<BTreeSet<String>>,
     pub(crate) ros: crate::ros::RosBrowser,
     /// When the current recording started, as seen by this window.
     pub(crate) recording_since: Option<Instant>,
@@ -318,6 +322,7 @@ impl Studio {
             status: None,
             metrics: HashMap::new(),
             fleet: BTreeMap::new(),
+            peers_sent: None,
             ros: crate::ros::RosBrowser::default(),
             recording_since: None,
             record_draft: None,
@@ -573,6 +578,7 @@ impl Studio {
             Cmd::CloseCompare => self.compare = None,
             Cmd::Deploy => self.deploy(),
             Cmd::Stop => self.link.send(crate::link::Command::Stop),
+            Cmd::Estop(engage) => self.estop(engage),
             Cmd::Kill(group) => self.link.send(crate::link::Command::Kill(group)),
             Cmd::StartRecording(path) => self.start_recording(path),
             Cmd::StopRecording => self.link.send(crate::link::Command::Record(String::new())),
@@ -634,6 +640,12 @@ impl Studio {
             (cmd(Key::J), Cmd::TogglePanel),
             (cmd(Key::I), Cmd::ToggleInspector),
             (cmd(Key::Num0), Cmd::FitView),
+            // Works from anywhere, text fields included. Releasing is
+            // deliberately not a single key.
+            (
+                KeyboardShortcut::new(Modifiers::NONE, Key::F12),
+                Cmd::Estop(true),
+            ),
         ];
         // Editing shortcuts belong to a focused text field when there is one.
         let text_focus = ctx.egui_wants_keyboard_input();
@@ -923,16 +935,55 @@ pub fn yaml_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// `examples/*.yaml` in the working directory or above the executable.
+/// The example graphs offered by File > Open Example and the welcome page:
+/// the first directory of [`example_dirs`] that has any.
 pub fn example_files() -> Vec<PathBuf> {
-    let mut dirs = vec![PathBuf::from("examples")];
-    if let Ok(exe) = std::env::current_exe() {
-        dirs.extend(exe.ancestors().skip(1).take(5).map(|a| a.join("examples")));
-    }
-    dirs.into_iter()
-        .map(|d| yaml_files(&d))
+    let exe = std::env::current_exe().ok();
+    let data_dirs = std::env::var_os("XDG_DATA_DIRS");
+    first_yaml_files(&example_dirs(exe.as_deref(), data_dirs.as_deref()))
+}
+
+/// The `*.yaml` files of the first of `dirs` that has any.
+fn first_yaml_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    dirs.iter()
+        .map(|d| yaml_files(d))
         .find(|f| !f.is_empty())
         .unwrap_or_default()
+}
+
+/// Where example graphs are looked for, in order:
+///
+/// - `examples/` in the working directory (a source checkout);
+/// - `examples/` next to or above the executable (`target/release` in a
+///   checkout, the AppImage and the Flatpak's `/app`);
+/// - `share/ruro/examples` under the executable's prefix and each of
+///   `$XDG_DATA_DIRS` (default `/usr/local/share:/usr/share`), where the
+///   Debian package and the Docker image install them;
+/// - `share/doc/ruro/examples` under the same directories, where older
+///   packages put them.
+pub fn example_dirs(exe: Option<&Path>, xdg_data_dirs: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
+    let mut dirs = vec![PathBuf::from("examples")];
+    if let Some(exe) = exe {
+        dirs.extend(exe.ancestors().skip(1).take(5).map(|a| a.join("examples")));
+    }
+    let mut data: Vec<PathBuf> = Vec::new();
+    // <prefix>/bin/ruro-studio -> <prefix>/share
+    if let Some(prefix) = exe.and_then(Path::parent).and_then(Path::parent) {
+        data.push(prefix.join("share"));
+    }
+    let xdg = xdg_data_dirs
+        .filter(|v| !v.is_empty())
+        .unwrap_or(std::ffi::OsStr::new("/usr/local/share:/usr/share"));
+    data.extend(std::env::split_paths(xdg).filter(|p| p.is_absolute()));
+    for sub in ["ruro/examples", "doc/ruro/examples"] {
+        for d in &data {
+            let dir = d.join(sub);
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    dirs
 }
 
 pub fn capitalize(s: &str) -> String {

@@ -1,7 +1,8 @@
 //! Connection to a daemon, run on a background thread so the UI never blocks.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -12,18 +13,28 @@ use ruro_proto::{
 use zenoh::Wait;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// The daemon forwards an e-stop to its peers with a short timeout of its
+/// own, so a reply takes at most a few seconds.
+const ESTOP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Reply op of e-stop requests.
+pub const ESTOP_OP: &str = "e-stop";
 
 #[derive(Debug)]
 pub enum Command {
     Deploy(String),
     Stop,
     Kill(String),
+    /// `daemon` is the peer running the node, `None` for the connected one.
     SetParam {
+        daemon: Option<String>,
         node: String,
         name: String,
         value: String,
     },
+    /// Streams an output's previews from `daemon` (`None`: the connected one).
     Watch {
+        daemon: Option<String>,
         node: String,
         port: String,
     },
@@ -31,6 +42,12 @@ pub enum Command {
         node: String,
         port: String,
     },
+    /// The other daemons running groups of the graph: their metrics and
+    /// logs are followed along with the connected daemon's.
+    Peers(BTreeSet<String>),
+    /// Engages (`true`) or releases the emergency stop. Sent on a path of
+    /// its own, so it never waits behind a slow deploy or recording.
+    Estop(bool),
     FetchGraph,
     /// Start recording to a file on the daemon, or stop with an empty path.
     Record(String),
@@ -47,6 +64,7 @@ pub enum Event {
     Offline(String),
     Registry(Registry),
     Status(DaemonStatus),
+    /// Metrics of the connected daemon or of a peer.
     Metrics(GroupMetrics),
     Tap {
         node: String,
@@ -67,6 +85,7 @@ pub enum Event {
 
 pub struct Link {
     tx: Sender<Command>,
+    estop: Option<Sender<bool>>,
     pub events: Receiver<Event>,
     /// What a disabled link was asked to send, for tests.
     #[cfg(test)]
@@ -82,14 +101,34 @@ impl Link {
         ctx: egui::Context,
     ) -> Self {
         let (tx, commands) = unbounded();
+        let (estop_tx, estop_rx) = unbounded();
         let (events_tx, events) = unbounded();
         let emit = Emitter { tx: events_tx, ctx };
+        let current: Current = Arc::new(Mutex::new(None));
+        {
+            let (current, emit) = (current.clone(), emit.clone());
+            std::thread::Builder::new()
+                .name("ruro-estop".into())
+                .spawn(move || estop_loop(&estop_rx, &current, &emit))
+                .expect("spawn e-stop thread");
+        }
         std::thread::Builder::new()
             .name("ruro-link".into())
-            .spawn(move || run(endpoint, daemon, security, spawn_daemon, commands, emit))
+            .spawn(move || {
+                run(
+                    endpoint,
+                    daemon,
+                    security,
+                    spawn_daemon,
+                    commands,
+                    emit,
+                    current,
+                )
+            })
             .expect("spawn link thread");
         Self {
             tx,
+            estop: Some(estop_tx),
             events,
             #[cfg(test)]
             sent: None,
@@ -102,6 +141,7 @@ impl Link {
         let (_, events) = unbounded();
         Self {
             tx,
+            estop: None,
             events,
             #[cfg(test)]
             sent: Some(_sent),
@@ -118,7 +158,39 @@ impl Link {
     }
 
     pub fn send(&self, cmd: Command) {
-        let _ = self.tx.send(cmd);
+        match (cmd, &self.estop) {
+            (Command::Estop(engage), Some(estop)) => {
+                let _ = estop.send(engage);
+            }
+            (cmd, _) => {
+                let _ = self.tx.send(cmd);
+            }
+        }
+    }
+}
+
+/// The session and keys of the daemon currently connected, for the e-stop
+/// thread.
+type Current = Arc<Mutex<Option<(zenoh::Session, Keys)>>>;
+
+fn estop_loop(requests: &Receiver<bool>, current: &Current, emit: &Emitter) {
+    while let Ok(engage) = requests.recv() {
+        let conn = current.lock().ok().and_then(|c| c.clone());
+        let result = match conn {
+            Some((session, keys)) => ruro_proto::request(
+                &session,
+                &keys,
+                Ctl::Estop,
+                if engage { "engage" } else { "release" },
+                ESTOP_TIMEOUT,
+            )
+            .map_err(|e| format!("{e:#}")),
+            None => Err("not connected to a daemon".into()),
+        };
+        emit.emit(Event::Reply {
+            op: ESTOP_OP,
+            result,
+        });
     }
 }
 
@@ -152,6 +224,7 @@ fn run(
     spawn_daemon: bool,
     commands: Receiver<Command>,
     emit: Emitter,
+    current: Current,
 ) {
     let mut spawned: Option<std::process::Child> = None;
     let mut announced_offline = false;
@@ -189,7 +262,14 @@ fn run(
             daemon: keys.daemon().to_owned(),
             endpoint: endpoint.clone(),
         });
-        match serve(&session, &keys, &commands, &emit) {
+        if let Ok(mut c) = current.lock() {
+            *c = Some((session.clone(), keys.clone()));
+        }
+        let exit = serve(&session, &keys, &commands, &emit);
+        if let Ok(mut c) = current.lock() {
+            *c = None;
+        }
+        match exit {
             Exit::Quit => break,
             Exit::Switch(name) => {
                 daemon = Some(name);
@@ -228,15 +308,7 @@ fn serve(
             }
         })
         .wait();
-    let e = emit.clone();
-    let _metrics = session
-        .declare_subscriber(keys.all_metrics())
-        .callback(move |s| {
-            if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&s.payload().to_bytes()) {
-                e.emit(Event::Metrics(m));
-            }
-        })
-        .wait();
+    let _metrics = follow_metrics(session, keys, emit);
     // Every daemon on the network, for the fleet view.
     let e = emit.clone();
     let _fleet = session
@@ -247,15 +319,7 @@ fn serve(
             }
         })
         .wait();
-    let e = emit.clone();
-    let _logs = session
-        .declare_subscriber(keys.all_logs())
-        .callback(move |s| {
-            if let Ok(l) = ruro_proto::decode::<LogLine>(&s.payload().to_bytes()) {
-                e.emit(Event::Log(l));
-            }
-        })
-        .wait();
+    let _logs = follow_logs(session, keys, emit);
 
     match ruro_proto::request(session, keys, Ctl::Registry, "", REQUEST_TIMEOUT)
         .and_then(|body| Ok(serde_json::from_str::<Registry>(&body)?))
@@ -268,11 +332,25 @@ fn serve(
     }
 
     let mut taps: HashMap<(String, String), zenoh::pubsub::Subscriber<()>> = HashMap::new();
+    let mut peers: HashMap<String, [Option<Sub>; 2]> = HashMap::new();
     loop {
         match commands.recv_timeout(Duration::from_millis(250)) {
             Ok(Command::SwitchDaemon(name)) => {
                 if name != keys.daemon() {
                     return Exit::Switch(name);
+                }
+            }
+            Ok(Command::Peers(names)) => {
+                peers.retain(|p, _| names.contains(p));
+                for p in names {
+                    if p != keys.daemon() && !peers.contains_key(&p) {
+                        let k = Keys::new(&p);
+                        let subs = [
+                            follow_metrics(session, &k, emit),
+                            follow_logs(session, &k, emit),
+                        ];
+                        peers.insert(p, subs);
+                    }
                 }
             }
             Ok(cmd) => handle(session, keys, cmd, &mut taps, emit),
@@ -283,6 +361,36 @@ fn serve(
             return Exit::Lost;
         }
     }
+}
+
+type Sub = zenoh::pubsub::Subscriber<()>;
+
+/// Forwards the metrics of every group of one daemon.
+fn follow_metrics(session: &zenoh::Session, keys: &Keys, emit: &Emitter) -> Option<Sub> {
+    let e = emit.clone();
+    session
+        .declare_subscriber(keys.all_metrics())
+        .callback(move |s| {
+            if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&s.payload().to_bytes()) {
+                e.emit(Event::Metrics(m));
+            }
+        })
+        .wait()
+        .ok()
+}
+
+/// Forwards the log lines of every group of one daemon.
+fn follow_logs(session: &zenoh::Session, keys: &Keys, emit: &Emitter) -> Option<Sub> {
+    let e = emit.clone();
+    session
+        .declare_subscriber(keys.all_logs())
+        .callback(move |s| {
+            if let Ok(l) = ruro_proto::decode::<LogLine>(&s.payload().to_bytes()) {
+                e.emit(Event::Log(l));
+            }
+        })
+        .wait()
+        .ok()
 }
 
 fn handle(
@@ -317,15 +425,22 @@ fn handle(
                 result: Err(e),
             }),
         },
-        Command::SetParam { node, name, value } => {
+        Command::SetParam {
+            daemon,
+            node,
+            name,
+            value,
+        } => {
             let msg = SetParam { name, value };
+            let keys = daemon.map_or_else(|| keys.clone(), |d| Keys::new(&d));
             let _ = session
                 .put(keys.param(&node), ruro_proto::encode(&msg))
                 .wait();
         }
-        Command::Watch { node, port } => {
+        Command::Watch { daemon, node, port } => {
             let e = emit.clone();
             let (n, p) = (node.clone(), port.clone());
+            let keys = daemon.map_or_else(|| keys.clone(), |d| Keys::new(&d));
             if let Ok(sub) = session
                 .declare_subscriber(keys.tap(&node, &port))
                 .callback(move |s| {
@@ -352,7 +467,19 @@ fn handle(
                 .map_err(|e| e.to_string())
                 .and_then(|json| request(Ctl::Playback, &json)),
         }),
-        Command::SwitchDaemon(_) => {}
+        Command::SwitchDaemon(_) | Command::Peers(_) => {}
+        // Normally taken by the e-stop thread; handled here all the same.
+        Command::Estop(engage) => emit.emit(Event::Reply {
+            op: ESTOP_OP,
+            result: ruro_proto::request(
+                session,
+                keys,
+                Ctl::Estop,
+                if engage { "engage" } else { "release" },
+                ESTOP_TIMEOUT,
+            )
+            .map_err(|e| format!("{e:#}")),
+        }),
         Command::Unwatch { node, port } => {
             taps.remove(&(node, port));
         }
@@ -370,6 +497,7 @@ fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) -> Option<S
             Command::Kill(_) => "kill",
             Command::Record(path) => record_op(&path),
             Command::Playback(_) => "playback",
+            Command::Estop(_) => ESTOP_OP,
             Command::SwitchDaemon(name) => {
                 switch = Some(name);
                 continue;

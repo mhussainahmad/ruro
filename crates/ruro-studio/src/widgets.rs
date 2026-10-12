@@ -373,6 +373,68 @@ pub fn record_dot(ui: &mut Ui, radius: f32, color: Color32) -> Response {
 }
 
 /// The title bar's record button: a red dot, or a red square while recording.
+/// A stop-sign octagon of circumradius `r`.
+pub fn paint_octagon(ui: &Ui, center: egui::Pos2, r: f32, fill: Color32) {
+    let points = (0..8)
+        .map(|i| {
+            let a = std::f32::consts::FRAC_PI_8 + i as f32 * std::f32::consts::FRAC_PI_4;
+            center + vec2(a.cos(), a.sin()) * r
+        })
+        .collect();
+    ui.painter()
+        .add(egui::Shape::convex_polygon(points, fill, Stroke::NONE));
+}
+
+/// The emergency-stop button: solid red with a stop sign, the loudest
+/// control in the window. Its accessible label is "Emergency stop".
+pub fn estop_button(ui: &mut Ui, tooltip: &str) -> Response {
+    let label = "E-STOP";
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font_semibold(12.0), Color32::WHITE);
+    let size = vec2(galley.size().x + 40.0, 26.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let enabled = ui.is_enabled();
+    let (fill, text) = match (enabled, resp.hovered()) {
+        (false, _) => (CONTROL_DISABLED(), TEXT_FAINT()),
+        (true, true) => (ESTOP_HOVER(), Color32::WHITE),
+        (true, false) => (ESTOP(), Color32::WHITE),
+    };
+    let p = ui.painter();
+    p.rect(
+        rect,
+        CornerRadius::same(RADIUS_SM + 1),
+        fill,
+        if enabled {
+            Stroke::new(1.0, Color32::from_black_alpha(60))
+        } else {
+            Stroke::new(1.0, BORDER_STRONG())
+        },
+        egui::StrokeKind::Inside,
+    );
+    let sign = pos2(rect.left() + 17.0, rect.center().y);
+    paint_octagon(ui, sign, 7.5, text);
+    p.rect_filled(
+        Rect::from_center_size(sign, vec2(7.5, 2.2)),
+        CornerRadius::same(1),
+        fill,
+    );
+    p.galley_with_override_text_color(
+        pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        text,
+    );
+    resp.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, "Emergency stop")
+    });
+    let resp = if enabled {
+        resp.on_hover_cursor(CursorIcon::PointingHand)
+    } else {
+        resp
+    };
+    resp.on_hover_text(tooltip)
+}
+
 pub fn record_button(ui: &mut Ui, recording: bool, tooltip: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 26.0), Sense::click());
     let enabled = ui.is_enabled();

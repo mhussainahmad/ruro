@@ -91,6 +91,16 @@ fn commands(s: &Studio) -> Vec<Item> {
             Cmd::Deploy,
         ),
         item(icons::SQUARE, "Run: Stop", "", "", Cmd::Stop),
+        Item {
+            icon_color: ERR(),
+            ..item(
+                icons::CIRCLE_STOP,
+                "Run: Engage Emergency Stop",
+                "e-stop",
+                "F12",
+                Cmd::Estop(true),
+            )
+        },
         item(
             icons::FILE_PLUS,
             "File: New Graph",
@@ -114,6 +124,15 @@ fn commands(s: &Studio) -> Vec<Item> {
             Cmd::SaveAsDialog,
         ),
     ];
+    if s.estopped() {
+        v.push(item(
+            icons::CIRCLE_CHECK,
+            "Run: Release Emergency Stop",
+            "e-stop",
+            "",
+            Cmd::Estop(false),
+        ));
+    }
     for p in example_files() {
         let name = p
             .file_stem()

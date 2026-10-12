@@ -22,6 +22,8 @@ mod shell;
 mod sidebar;
 mod source;
 mod templates;
+#[cfg(test)]
+mod testdir;
 pub mod theme;
 mod view3d;
 mod watch;
@@ -30,6 +32,11 @@ pub mod widgets;
 use std::path::PathBuf;
 
 use clap::Parser;
+
+/// The studio's application id: the Wayland app id and X11 window class of
+/// its window, and the name of its desktop file, icons and AppStream
+/// metadata (`packaging/linux`), so desktops match the window to its entry.
+pub const APP_ID: &str = "io.github.mhussainahmad.ruro.Studio";
 
 #[derive(Parser)]
 #[command(
@@ -101,7 +108,7 @@ pub fn run() -> eframe::Result<()> {
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("ruro studio")
-            .with_app_id("ruro-studio")
+            .with_app_id(APP_ID)
             .with_inner_size([1480.0, 920.0])
             .with_min_inner_size([960.0, 600.0])
             .with_maximized(true),

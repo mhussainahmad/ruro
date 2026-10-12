@@ -34,8 +34,12 @@ pub fn title_bar(s: &mut Studio, ui: &mut Ui) {
                 menus(s, ui);
             });
 
-            // Command center, centred in the window like VS Code's.
-            let w = 440.0_f32.min(full.width() * 0.34);
+            // Command center, centred in the window like VS Code's, and
+            // narrow enough to leave the run controls room on small windows.
+            let w = 440.0_f32
+                .min(full.width() * 0.34)
+                .min((full.width() / 2.0 - RUN_CONTROLS_W - 12.0) * 2.0)
+                .max(160.0);
             let rect = Rect::from_center_size(full.center(), vec2(w, 24.0));
             let resp = ui.interact(rect, ui.id().with("command-center"), Sense::click());
             let fill = if resp.hovered() {
@@ -79,7 +83,8 @@ pub fn title_bar(s: &mut Studio, ui: &mut Ui) {
             }
 
             // Run controls on the right.
-            let right = Rect::from_min_max(pos2(full.right() - 360.0, full.top()), full.max);
+            let right =
+                Rect::from_min_max(pos2(full.right() - RUN_CONTROLS_W, full.top()), full.max);
             ui.scope_builder(
                 egui::UiBuilder::new()
                     .max_rect(right)
@@ -91,6 +96,9 @@ pub fn title_bar(s: &mut Studio, ui: &mut Ui) {
             );
         });
 }
+
+/// Room for the run controls at the right of the title bar.
+const RUN_CONTROLS_W: f32 = 400.0;
 
 fn logo(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
@@ -294,6 +302,13 @@ fn menus(s: &mut Studio, ui: &mut Ui) {
             s.push(Cmd::Stop);
         }
         ui.separator();
+        if item(ui, s.online(), "Engage Emergency Stop", "F12") {
+            s.push(Cmd::Estop(true));
+        }
+        if item(ui, s.online() && s.estopped(), "Release Emergency Stop", "") {
+            s.push(Cmd::Estop(false));
+        }
+        ui.separator();
         let recording = s.status.as_ref().is_some_and(|st| st.recording.is_some());
         if recording {
             if item(ui, true, "Stop Recording", "") {
@@ -325,6 +340,32 @@ fn short_dir(p: &std::path::Path) -> String {
 }
 
 fn run_controls(s: &mut Studio, ui: &mut Ui) {
+    // Rightmost and set apart: the one control that must be found blind.
+    let daemon = s.daemon_name().unwrap_or("the daemon").to_owned();
+    let tip = if s.estopped() {
+        format!(
+            "The emergency stop is engaged on `{daemon}`. Release it from the banner or the command palette."
+        )
+    } else {
+        format!(
+            "Emergency stop (F12): every node on `{daemon}` and the machines running the rest of its graph goes to its safe state"
+        )
+    };
+    let estop = ui
+        .add_enabled_ui(s.online(), |ui| widgets::estop_button(ui, &tip))
+        .inner;
+    if estop.clicked() {
+        s.push(Cmd::Estop(true));
+    }
+    ui.add_space(6.0);
+    let (sep, _) = ui.allocate_exact_size(vec2(1.0, 18.0), Sense::hover());
+    ui.painter().vline(
+        sep.center().x,
+        sep.y_range(),
+        Stroke::new(1.0, BORDER_STRONG()),
+    );
+    ui.add_space(6.0);
+
     let live = s.live();
     let label = if s.undeployed_changes() {
         "Apply changes"
@@ -357,7 +398,7 @@ fn run_controls(s: &mut Studio, ui: &mut Ui) {
             if recording {
                 widgets::record_button(ui, true, "Stop recording")
             } else {
-                widgets::record_button(ui, false, "Record every wire to a file")
+                widgets::record_button(ui, false, "Record the running graph to a file")
             }
         })
         .inner;
@@ -404,7 +445,7 @@ pub fn record_popover(s: &mut Studio, ctx: &egui::Context) {
                 ui.add(
                     egui::Label::new(
                         RichText::new(format!(
-                            "Records every wire of the running graph to an MCAP file on `{daemon}`."
+                            "Records the outputs of the groups running on `{daemon}` to an MCAP file there."
                         ))
                         .font(font(12.0))
                         .color(TEXT_DIM()),
@@ -694,8 +735,35 @@ pub fn editor_tabs(s: &mut Studio, ui: &mut Ui) {
     }
 }
 
-/// Notices across the top of the editor: recovery, comparison, subgraph editing.
+/// Notices across the top of the editor: the emergency stop, recovery,
+/// comparison, subgraph editing.
 pub fn banners(s: &mut Studio, ui: &mut Ui) {
+    let stopped = s.estopped_machines();
+    if !stopped.is_empty() {
+        // A stop engaged directly on a peer is released there, not here.
+        let here = s.estopped();
+        let text = format!(
+            "Emergency stop engaged on {}. Nodes hold their safe state until it is released{}.",
+            stopped.join(", "),
+            if here { "" } else { " on that machine" }
+        );
+        let actions: &[(&str, ButtonKind)] = if here {
+            &[("Release e-stop", ButtonKind::Danger)]
+        } else {
+            &[]
+        };
+        let choice = banner_with(
+            ui,
+            icons::CIRCLE_STOP,
+            ERR(),
+            ERR().gamma_multiply(if is_light() { 0.10 } else { 0.16 }),
+            &text,
+            actions,
+        );
+        if choice.is_some() {
+            s.push(Cmd::Estop(false));
+        }
+    }
     if !s.recovery.is_empty() {
         let names: Vec<String> = s.recovery.iter().map(|r| r.name.clone()).collect();
         let choice = banner(
@@ -770,9 +838,22 @@ fn banner(
     text: &str,
     actions: &[(&str, ButtonKind)],
 ) -> Option<usize> {
+    banner_with(ui, glyph, tint, Color32::TRANSPARENT, text, actions)
+}
+
+/// A notice bar washed with `wash` over the chrome colour.
+fn banner_with(
+    ui: &mut Ui,
+    glyph: &str,
+    tint: Color32,
+    wash: Color32,
+    text: &str,
+    actions: &[(&str, ButtonKind)],
+) -> Option<usize> {
     let mut clicked = None;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::ZERO, CHROME());
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, wash);
     ui.painter().hline(
         rect.x_range(),
         rect.bottom() - 0.5,
@@ -861,7 +942,27 @@ pub fn status_bar(s: &mut Studio, ui: &mut Ui) {
                 }
 
                 // Graph state.
-                let (glyph, color, text) = if s.live() {
+                if !s.estopped_machines().is_empty() {
+                    let here = s.estopped();
+                    let tip = if here {
+                        "Emergency stop engaged. Click to release it."
+                    } else {
+                        "Emergency stop engaged on a machine running part of the graph. Release it there."
+                    };
+                    if estop_item(ui, here).on_hover_text(tip).clicked() && here {
+                        s.push(Cmd::Estop(false));
+                    }
+                }
+                let (glyph, color, text) = if !s.estopped_machines().is_empty() {
+                    (
+                        icons::CIRCLE_STOP,
+                        ERR(),
+                        match s.running_graph() {
+                            Some(g) => format!("{g} held in safe state"),
+                            None => "idle".into(),
+                        },
+                    )
+                } else if s.live() {
                     let failed = s.metrics.values().any(|m| m.state == NodeState::Failed)
                         || s.status.as_ref().is_some_and(|st| {
                             st.groups.iter().any(|g| g.state != GroupState::Running)
@@ -972,6 +1073,41 @@ pub fn status_bar(s: &mut Studio, ui: &mut Ui) {
                 });
             });
         });
+}
+
+/// "E-STOP" on solid red, while the emergency stop is engaged.
+fn estop_item(ui: &mut Ui, releasable: bool) -> egui::Response {
+    let g = widgets::galley(ui, "E-STOP ENGAGED", font_semibold(11.5), Color32::WHITE);
+    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 36.0, STATUSBAR_H), Sense::click());
+    let fill = if resp.hovered() {
+        ESTOP_HOVER()
+    } else {
+        ESTOP()
+    };
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, fill);
+    let sign = pos2(rect.left() + 14.0, rect.center().y);
+    widgets::paint_octagon(ui, sign, 6.0, Color32::WHITE);
+    ui.painter().rect_filled(
+        Rect::from_center_size(sign, vec2(6.0, 1.8)),
+        CornerRadius::same(1),
+        fill,
+    );
+    ui.painter().galley(
+        pos2(rect.left() + 26.0, rect.center().y - g.size().y / 2.0),
+        g,
+        Color32::WHITE,
+    );
+    let label = if releasable {
+        "Release emergency stop"
+    } else {
+        "Emergency stop engaged"
+    };
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    if releasable {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
+    }
 }
 
 /// "REC 00:12" with a pulsing dot.

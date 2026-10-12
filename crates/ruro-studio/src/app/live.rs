@@ -1,14 +1,14 @@
 //! The connection to a daemon: events, deployment, watches, recording,
 //! playback and the fleet of daemons on the network.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::time::Instant;
 
 use ruro_graph::Graph;
 use ruro_proto::GroupState;
 
-use super::{Conn, FleetEntry, MAX_LOGS, PanelTab, Severity, Studio, capitalize};
-use crate::link::{Command, Event};
+use super::{Conn, FLEET_STALE, FleetEntry, MAX_LOGS, PanelTab, Severity, Studio, capitalize};
+use crate::link::{Command, ESTOP_OP, Event};
 use crate::model::Doc;
 use crate::watch::Watch;
 
@@ -23,8 +23,11 @@ impl Studio {
         match event {
             Event::Connected { daemon, endpoint } => {
                 self.conn = Conn::Online { daemon, endpoint };
+                // A new connection follows no peers yet.
+                self.peers_sent = None;
                 for w in &self.watches {
                     self.link.send(Command::Watch {
+                        daemon: w.daemon.clone(),
                         node: w.tap.0.clone(),
                         port: w.tap.1.clone(),
                     });
@@ -33,6 +36,7 @@ impl Studio {
             Event::Offline(reason) => {
                 self.conn = Conn::Offline(reason);
                 self.status = None;
+                self.peers_sent = None;
                 self.metrics.clear();
                 self.recording_since = None;
             }
@@ -44,13 +48,6 @@ impl Studio {
                 }
             }
             Event::Status(s) => {
-                let running: HashSet<&str> = s
-                    .groups
-                    .iter()
-                    .filter(|g| g.state == GroupState::Running)
-                    .flat_map(|g| g.nodes.iter().map(String::as_str))
-                    .collect();
-                self.metrics.retain(|id, _| running.contains(id.as_str()));
                 match (&s.recording, self.recording_since) {
                     (Some(_), None) => self.recording_since = Some(Instant::now()),
                     (None, Some(_)) => self.recording_since = None,
@@ -64,6 +61,22 @@ impl Studio {
                     },
                 );
                 self.status = Some(s);
+                // Metrics of nodes no longer running, here or on a peer, go.
+                let peers = self.peer_daemons();
+                let running: HashSet<String> = self
+                    .status
+                    .iter()
+                    .chain(
+                        peers
+                            .iter()
+                            .filter_map(|p| Some(&self.fleet.get(p)?.status)),
+                    )
+                    .flat_map(|st| &st.groups)
+                    .filter(|g| g.state == GroupState::Running)
+                    .flat_map(|g| g.nodes.iter().cloned())
+                    .collect();
+                self.metrics.retain(|id, _| running.contains(id));
+                self.sync_peers();
             }
             Event::Fleet(s) => {
                 self.fleet.insert(
@@ -73,6 +86,7 @@ impl Studio {
                         seen: Instant::now(),
                     },
                 );
+                self.sync_peers();
             }
             Event::Metrics(m) => {
                 for n in m.nodes {
@@ -108,6 +122,26 @@ impl Studio {
                 // The daemon says what it records, or what it wrote.
                 ("record", Ok(msg)) => self.toast(Severity::Success, capitalize(&msg)),
                 ("stop recording", Ok(msg)) => self.toast(Severity::Info, capitalize(&msg)),
+                (ESTOP_OP, Ok(msg)) => {
+                    // "e-stop engaged", "e-stop released" or "e-stop stays
+                    // engaged: …", followed by what each peer did.
+                    let severity = if msg.starts_with("e-stop released") {
+                        Severity::Success
+                    } else {
+                        Severity::Warning
+                    };
+                    self.toast(severity, capitalize(&msg));
+                }
+                (ESTOP_OP, Err(e)) => {
+                    // "e-stop engaged here, but not on `robot` (…)" is partly
+                    // done: say what happened rather than "failed".
+                    let text = if e.starts_with("e-stop") {
+                        capitalize(&e)
+                    } else {
+                        format!("E-stop failed: {e}")
+                    };
+                    self.toast(Severity::Error, text);
+                }
                 (_, Ok(_)) => {}
                 (op, Err(e)) => {
                     self.pending_deploy = None;
@@ -205,11 +239,15 @@ impl Studio {
     pub(crate) fn watch(&mut self, node: String, port: String, ty: String) {
         if !self.is_watched(&node, &port) {
             let tap = self.tap_of(&node, &port);
+            let daemon = self.node_daemon(&tap.0);
             self.link.send(Command::Watch {
+                daemon: daemon.clone(),
                 node: tap.0.clone(),
                 port: tap.1.clone(),
             });
-            self.watches.push(Watch::new(node, port, ty, tap));
+            let mut w = Watch::new(node, port, ty, tap);
+            w.daemon = daemon;
+            self.watches.push(w);
         }
         self.panel_open = true;
         self.panel_tab = PanelTab::Watch;
@@ -267,6 +305,111 @@ impl Studio {
         self.link.send(Command::Record(path));
     }
 
+    /// The other daemons running groups of the running graph: those named as
+    /// a group's `machine` in the graph being edited that report running a
+    /// graph of the same name.
+    pub fn peer_daemons(&self) -> BTreeSet<String> {
+        let (Some(me), Some(graph)) = (self.daemon_name(), self.running_graph()) else {
+            return BTreeSet::new();
+        };
+        let root = self.root_doc();
+        if root.name != graph {
+            return BTreeSet::new();
+        }
+        let machines: HashSet<&str> = root
+            .groups
+            .values()
+            .filter_map(|g| g.machine.as_deref())
+            .collect();
+        self.fleet
+            .values()
+            .filter(|f| f.seen.elapsed() < FLEET_STALE)
+            .map(|f| &f.status)
+            .filter(|st| st.name != me && st.graph.as_deref() == Some(graph))
+            .filter(|st| machines.contains(st.name.as_str()))
+            .map(|st| st.name.clone())
+            .collect()
+    }
+
+    /// The peer daemon running `node` (a running, flattened node id), or
+    /// `None` when it is the connected daemon's or not known to be a peer's.
+    pub fn node_daemon(&self, node: &str) -> Option<String> {
+        self.peer_daemons().into_iter().find(|p| {
+            self.fleet.get(p).is_some_and(|f| {
+                f.status
+                    .groups
+                    .iter()
+                    .any(|g| g.nodes.iter().any(|n| n == node))
+            })
+        })
+    }
+
+    /// Follows the metrics and logs of the peers running the graph, and
+    /// moves watches to the daemon that runs their node.
+    pub(crate) fn sync_peers(&mut self) {
+        if !self.online() {
+            return;
+        }
+        let peers = self.peer_daemons();
+        // A new connection follows no peers, so there is nothing to say
+        // until there are some.
+        let follows = self
+            .peers_sent
+            .as_ref()
+            .map_or(peers.is_empty(), |p| *p == peers);
+        if !follows {
+            self.link.send(Command::Peers(peers.clone()));
+        }
+        self.peers_sent = Some(peers);
+        for i in 0..self.watches.len() {
+            let owner = self.node_daemon(&self.watches[i].tap.0);
+            let w = &mut self.watches[i];
+            if w.daemon != owner {
+                w.daemon = owner;
+                self.link.send(Command::Unwatch {
+                    node: w.tap.0.clone(),
+                    port: w.tap.1.clone(),
+                });
+                self.link.send(Command::Watch {
+                    daemon: w.daemon.clone(),
+                    node: w.tap.0.clone(),
+                    port: w.tap.1.clone(),
+                });
+            }
+        }
+    }
+
+    pub(crate) fn estop(&mut self, engage: bool) {
+        if !self.online() {
+            self.toast(Severity::Error, "Not connected to a daemon");
+            return;
+        }
+        self.link.send(Command::Estop(engage));
+    }
+
+    /// Whether the emergency stop is engaged on the connected daemon.
+    pub fn estopped(&self) -> bool {
+        self.status.as_ref().is_some_and(|s| s.estopped)
+    }
+
+    /// The connected daemon and the peers running the graph whose emergency
+    /// stop is engaged. A stop engaged directly on a peer does not travel to
+    /// the daemon that deployed the graph, so peers are listed too.
+    pub fn estopped_machines(&self) -> Vec<String> {
+        let mut v: Vec<String> = self
+            .status
+            .iter()
+            .filter(|s| s.estopped)
+            .map(|s| s.name.clone())
+            .collect();
+        v.extend(
+            self.peer_daemons()
+                .into_iter()
+                .filter(|p| self.fleet.get(p).is_some_and(|f| f.status.estopped)),
+        );
+        v
+    }
+
     pub(crate) fn connect_daemon(&mut self, name: String) {
         if self.daemon_name() == Some(name.as_str()) {
             return;
@@ -275,6 +418,7 @@ impl Studio {
         self.metrics.clear();
         self.deployed_rev = None;
         self.recording_since = None;
+        self.peers_sent = None;
         self.conn = Conn::Connecting;
         self.link.send(Command::SwitchDaemon(name));
     }

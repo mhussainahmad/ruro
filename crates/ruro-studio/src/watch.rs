@@ -18,6 +18,8 @@ pub struct Watch {
     pub ty: String,
     /// The running port it streams from (differs inside composites).
     pub tap: (String, String),
+    /// The peer daemon running `tap`'s node, `None` for the connected one.
+    pub daemon: Option<String>,
     view: Option<(&'static VisualizerKind, Box<dyn Visualizer>)>,
     /// Shape of the last preview.
     kind: Option<PreviewKind>,
@@ -33,6 +35,7 @@ impl Watch {
             port,
             ty,
             tap,
+            daemon: None,
             view: None,
             kind: None,
             frames: 0,

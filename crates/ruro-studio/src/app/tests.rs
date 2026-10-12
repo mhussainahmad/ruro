@@ -12,17 +12,16 @@ use ruro_proto::{
 
 use super::*;
 use crate::link::{Command, Event};
+use crate::testdir::TempDir;
 
 fn examples() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples")
 }
 
-/// A fresh directory for one test.
-fn tempdir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("ruro-studio-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    d
+/// A fresh directory for one test, removed when the returned guard drops.
+/// Bind it before the harness so the studio is gone before its files are.
+fn tempdir(name: &str) -> TempDir {
+    TempDir::new(name)
 }
 
 /// A writable copy of an example graph.
@@ -83,6 +82,86 @@ fn with_ros_topics(h: &mut Harness<'static, Studio>) {
     st.activity = Activity::Ros2;
     st.sidebar_open = true;
     h.run_steps(3);
+}
+
+/// The window's app id names the desktop file, icon and AppStream entry, so
+/// desktops (Wayland by app id, X11 by window class) match the window to them.
+#[test]
+fn desktop_files_match_the_app_id() {
+    let id = crate::APP_ID;
+    let packaging = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packaging");
+    let desktop = std::fs::read_to_string(packaging.join(format!("linux/{id}.desktop"))).unwrap();
+    let field = |key: &str| {
+        desktop
+            .lines()
+            .find_map(|l| l.strip_prefix(key)?.strip_prefix('='))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert_eq!(field("StartupWMClass"), id);
+    assert_eq!(field("Icon"), id);
+    let metainfo =
+        std::fs::read_to_string(packaging.join(format!("linux/{id}.metainfo.xml"))).unwrap();
+    assert!(metainfo.contains(&format!("<id>{id}</id>")));
+    assert!(metainfo.contains(&format!(
+        "<launchable type=\"desktop-id\">{id}.desktop</launchable>"
+    )));
+    assert!(packaging.join(format!("icons/{id}.svg")).is_file());
+    for size in [16, 32, 48, 64, 128, 256, 512] {
+        let png = packaging.join(format!("icons/hicolor/{size}x{size}/apps/{id}.png"));
+        assert!(png.is_file(), "{}", png.display());
+    }
+    let flatpak = std::fs::read_to_string(packaging.join(format!("flatpak/{id}.yml"))).unwrap();
+    assert!(flatpak.starts_with('#') && flatpak.contains(&format!("\nid: {id}\n")));
+}
+
+#[test]
+fn examples_are_found_where_packages_install_them() {
+    let tmp = tempdir("examples");
+    // Deep enough that the search above the executable stays inside `tmp`.
+    let prefix = tmp.join("a/b/c/usr");
+    let exe = prefix.join("bin/ruro-studio");
+    let xdg = tmp.join("xdg");
+    let data_dirs = std::env::join_paths([xdg.clone(), prefix.join("share")]).unwrap();
+    let dirs = super::example_dirs(Some(&exe), Some(&data_dirs));
+    // The working directory first, then above the executable, then the data dirs.
+    assert_eq!(dirs[0], PathBuf::from("examples"));
+    assert_eq!(dirs[1], prefix.join("bin/examples"));
+    let pos = |d: &Path| dirs.iter().position(|x| x == d).unwrap();
+    let share = prefix.join("share/ruro/examples");
+    let doc = prefix.join("share/doc/ruro/examples");
+    assert!(pos(&prefix.join("examples")) < pos(&share));
+    assert!(pos(&share) < pos(&xdg.join("ruro/examples")));
+    assert!(pos(&xdg.join("ruro/examples")) < pos(&doc));
+    assert_eq!(dirs.iter().filter(|d| **d == share).count(), 1, "{dirs:?}");
+    let without_cwd = &dirs[1..];
+
+    // Nothing installed yet.
+    assert!(super::first_yaml_files(without_cwd).is_empty());
+    // An older package's documentation directory.
+    std::fs::create_dir_all(&doc).unwrap();
+    std::fs::write(doc.join("old.yaml"), "name: old\n").unwrap();
+    assert_eq!(super::first_yaml_files(without_cwd), [doc.join("old.yaml")]);
+    // The Debian package: /usr/share/ruro/examples wins over the doc dir.
+    std::fs::create_dir_all(&share).unwrap();
+    std::fs::write(share.join("camera.yaml"), "name: c\n").unwrap();
+    std::fs::write(share.join("README.md"), "not a graph").unwrap();
+    assert_eq!(
+        super::first_yaml_files(without_cwd),
+        [share.join("camera.yaml")]
+    );
+    // A directory from $XDG_DATA_DIRS.
+    let x = xdg.join("ruro/examples");
+    std::fs::create_dir_all(&x).unwrap();
+    std::fs::write(x.join("arm.yml"), "name: arm\n").unwrap();
+    let dirs = super::example_dirs(None, Some(xdg.as_os_str()));
+    assert_eq!(super::first_yaml_files(&dirs[1..]), [x.join("arm.yml")]);
+
+    // Without XDG_DATA_DIRS the standard locations are searched.
+    let dirs = super::example_dirs(None, None);
+    assert!(dirs.contains(&PathBuf::from("/usr/share/ruro/examples")));
+    assert!(dirs.contains(&PathBuf::from("/usr/local/share/ruro/examples")));
+    assert!(dirs.contains(&PathBuf::from("/usr/share/doc/ruro/examples")));
 }
 
 #[test]
@@ -843,7 +922,7 @@ fn deploy_flattens_and_watches_resolve_into_composites() {
     h.run_steps(2);
     let sent = h.state().link.take_sent();
     assert!(
-        matches!(&sent[..], [Command::Watch { node, port }] if node == "group__gray" && port == "out"),
+        matches!(&sent[..], [Command::Watch { daemon: None, node, port }] if node == "group__gray" && port == "out"),
         "{sent:?}"
     );
 }
@@ -855,7 +934,7 @@ fn record_and_replay_controls_send_requests() {
     h.run_steps(2);
     h.state().link.take_sent();
 
-    h.get_by_label("Record every wire to a file").click();
+    h.get_by_label("Record the running graph to a file").click();
     h.run_steps(3);
     assert!(h.state().record_draft.is_some());
     h.get_by_label("Start recording").click();
@@ -951,6 +1030,251 @@ fn fleet_lists_daemons_and_switches() {
     let sent = h.state().link.take_sent();
     assert!(
         matches!(&sent[..], [Command::SwitchDaemon(n)] if n == "rover"),
+        "{sent:?}"
+    );
+}
+
+#[test]
+fn estop_button_shortcut_banner_and_release() {
+    let mut h = harness(Some(examples().join("camera.yaml")));
+    // Offline: the button is there but disabled.
+    let button = h.get_by_label("Emergency stop");
+    assert!(egui_kittest::kittest::NodeT::accesskit_node(&button).is_disabled());
+
+    simulate_live(&mut h);
+    h.run_steps(2);
+    h.state().link.take_sent();
+    h.get_by_label("Emergency stop").click();
+    h.run_steps(2);
+    let sent = h.state().link.take_sent();
+    assert!(matches!(&sent[..], [Command::Estop(true)]), "{sent:?}");
+
+    // F12 works even while typing in a text field.
+    h.key_press(egui::Key::F12);
+    h.run_steps(2);
+    let sent = h.state().link.take_sent();
+    assert!(matches!(&sent[..], [Command::Estop(true)]), "{sent:?}");
+
+    // Nothing to release yet.
+    assert!(h.query_by_label("Release e-stop").is_none());
+    assert!(h.query_by_label("Release emergency stop").is_none());
+
+    // The daemon reports the stop engaged: a banner and a status bar item.
+    let ctx = h.ctx.clone();
+    let mut status = camera_status(None, None);
+    status.estopped = true;
+    h.state_mut().handle_event(&ctx, Event::Status(status));
+    h.run_steps(3);
+    assert!(h.query_by_label("Release emergency stop").is_some());
+    h.get_by_label("Release e-stop").click();
+    h.run_steps(2);
+    let sent = h.state().link.take_sent();
+    assert!(matches!(&sent[..], [Command::Estop(false)]), "{sent:?}");
+
+    // And from the command palette.
+    key(&mut h, CTRL, egui::Key::K);
+    h.event(egui::Event::Text("release emergency".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let sent = h.state().link.take_sent();
+    assert!(matches!(&sent[..], [Command::Estop(false)]), "{sent:?}");
+
+    // Released: the banner goes.
+    set_status(&mut h, None, None);
+    h.run_steps(3);
+    assert!(h.query_by_label("Release e-stop").is_none());
+}
+
+#[test]
+fn estop_replies_say_what_happened() {
+    let mut h = harness(None);
+    let ctx = h.ctx.clone();
+    let st = h.state_mut();
+    let reply = |result: Result<&str, &str>| Event::Reply {
+        op: crate::link::ESTOP_OP,
+        result: result.map(Into::into).map_err(Into::into),
+    };
+    st.handle_event(&ctx, reply(Ok("e-stop engaged; robot: e-stop engaged")));
+    assert_eq!(st.toasts[0].severity, Severity::Warning);
+    assert_eq!(st.toasts[0].text, "E-stop engaged; robot: e-stop engaged");
+    st.toasts.clear();
+    st.handle_event(&ctx, reply(Ok("e-stop stays engaged: it was engaged here")));
+    st.handle_event(&ctx, reply(Ok("e-stop released")));
+    st.handle_event(
+        &ctx,
+        reply(Err(
+            "e-stop engaged here, but not on `robot` (no reply from daemon `robot`)",
+        )),
+    );
+    st.handle_event(&ctx, reply(Err("not connected to a daemon")));
+    let toasts: Vec<(Severity, &str)> = st
+        .toasts
+        .iter()
+        .map(|t| (t.severity, t.text.as_str()))
+        .collect();
+    assert_eq!(
+        toasts,
+        [
+            (
+                Severity::Warning,
+                "E-stop stays engaged: it was engaged here"
+            ),
+            (Severity::Success, "E-stop released"),
+            (
+                Severity::Error,
+                "E-stop engaged here, but not on `robot` (no reply from daemon `robot`)"
+            ),
+            (Severity::Error, "E-stop failed: not connected to a daemon"),
+        ]
+    );
+    // Offline, the studio says so itself.
+    st.toasts.clear();
+    st.push(Cmd::Estop(true));
+    h.run_steps(2);
+    assert!(h.state().link.take_sent().is_empty());
+    assert_eq!(h.state().toasts[0].text, "Not connected to a daemon");
+}
+
+/// A graph whose `vision` group runs on the peer daemon `robot`: the studio
+/// follows the peer's metrics and logs, and watches and tunes its nodes there.
+#[test]
+fn nodes_on_peer_daemons_show_metrics_and_can_be_watched() {
+    let mut h = harness(Some(examples().join("camera.yaml")));
+    let ctx = h.ctx.clone();
+    {
+        let st = h.state_mut();
+        st.doc.groups.entry("vision".into()).or_default().machine = Some("robot".into());
+        st.handle_event(
+            &ctx,
+            Event::Connected {
+                daemon: "rover".into(),
+                endpoint: "tcp/127.0.0.1:7447".into(),
+            },
+        );
+    }
+    // The connected daemon runs `camera`; the peer runs `vision`; another
+    // daemon runs a graph of the same name that is not part of this one.
+    let mut here = camera_status(None, None);
+    here.groups.retain(|g| g.name == "camera");
+    let mut robot = camera_status(None, None);
+    robot.name = "robot".into();
+    robot.groups.retain(|g| g.name == "vision");
+    let mut other = camera_status(None, None);
+    other.name = "lab-pc".into();
+    let metrics = |group: &str, ids: &[&str]| GroupMetrics {
+        group: group.into(),
+        pid: 1,
+        nodes: ids
+            .iter()
+            .map(|id| NodeMetrics {
+                id: (*id).into(),
+                state: ruro_proto::NodeState::Running,
+                hz: 30.0,
+                step_p50_us: 100.0,
+                step_p99_us: 200.0,
+                input_age_ms: None,
+                cpu_pct: 1.0,
+                errors: 0,
+                last_error: None,
+                dropped: 0,
+                timing: None,
+            })
+            .collect(),
+    };
+    {
+        let st = h.state_mut();
+        st.handle_event(&ctx, Event::Status(here.clone()));
+        st.handle_event(&ctx, Event::Fleet(here.clone()));
+        st.handle_event(&ctx, Event::Fleet(robot.clone()));
+        st.handle_event(&ctx, Event::Fleet(other));
+        st.handle_event(&ctx, Event::Metrics(metrics("camera", &["camera"])));
+        st.handle_event(
+            &ctx,
+            Event::Metrics(metrics("vision", &["blur", "gray", "stats"])),
+        );
+        // The next status of the connected daemon keeps the peer's metrics.
+        st.handle_event(&ctx, Event::Status(here.clone()));
+    }
+    h.run_steps(3);
+    let st = h.state();
+    assert!(st.live());
+    assert_eq!(st.peer_daemons().into_iter().collect::<Vec<_>>(), ["robot"]);
+    let mut ids: Vec<&str> = st.metrics.keys().map(String::as_str).collect();
+    ids.sort();
+    assert_eq!(ids, ["blur", "camera", "gray", "stats"]);
+    let sent = st.link.take_sent();
+    let peers: Vec<_> = sent
+        .iter()
+        .filter_map(|c| match c {
+            Command::Peers(p) => Some(p.iter().cloned().collect::<Vec<_>>()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(peers, [vec!["robot".to_owned()]], "sent once: {sent:?}");
+
+    // Watching an output of a node on the peer subscribes there.
+    for (node, port, ty) in [
+        ("blur", "out", "std/Image"),
+        ("camera", "image", "std/Image"),
+    ] {
+        h.state_mut().push(Cmd::Watch {
+            node: node.into(),
+            port: port.into(),
+            ty: ty.into(),
+        });
+    }
+    h.run_steps(2);
+    let sent = h.state().link.take_sent();
+    assert!(
+        matches!(&sent[..], [
+            Command::Watch { daemon: Some(d), node: a, .. },
+            Command::Watch { daemon: None, node: b, .. },
+        ] if d == "robot" && a == "blur" && b == "camera"),
+        "{sent:?}"
+    );
+    // Tuning a node on the peer sends the parameter there.
+    let blur = h.state().doc.find("blur").unwrap();
+    h.state_mut()
+        .set_param(blur, "radius", serde_json::json!(7));
+    let sent = h.state().link.take_sent();
+    assert!(
+        matches!(&sent[..], [Command::SetParam { daemon: Some(d), node, .. }] if d == "robot" && node == "blur"),
+        "{sent:?}"
+    );
+
+    // A stop engaged directly on the peer shows here, without a release
+    // (it is released on that machine).
+    let mut stopped = robot.clone();
+    stopped.estopped = true;
+    h.state_mut().handle_event(&ctx, Event::Fleet(stopped));
+    h.run_steps(3);
+    assert_eq!(h.state().estopped_machines(), ["robot"]);
+    assert!(h.query_by_label("Emergency stop engaged").is_some());
+    assert!(h.query_by_label("Release e-stop").is_none());
+    h.state_mut()
+        .handle_event(&ctx, Event::Fleet(robot.clone()));
+    h.state().link.take_sent();
+
+    // The peer stops running the graph: its metrics go and the watch moves
+    // back to the connected daemon.
+    robot.graph = None;
+    robot.groups.clear();
+    {
+        let st = h.state_mut();
+        st.handle_event(&ctx, Event::Fleet(robot));
+        st.handle_event(&ctx, Event::Status(here));
+    }
+    let st = h.state();
+    assert!(st.peer_daemons().is_empty());
+    assert_eq!(st.metrics.keys().collect::<Vec<_>>(), ["camera"]);
+    let sent = st.link.take_sent();
+    assert!(
+        matches!(&sent[..], [
+            Command::Peers(p),
+            Command::Unwatch { node: a, .. },
+            Command::Watch { daemon: None, node: b, .. },
+        ] if p.is_empty() && a == "blur" && b == "blur"),
         "{sent:?}"
     );
 }
@@ -1385,6 +1709,16 @@ fn screenshots() {
     set_status(&mut h, None, None);
     save(&mut h, "studio-fleet");
 
+    // The emergency stop, engaged.
+    let mut h = shot(Some(examples().join("camera.yaml")));
+    simulate_live(&mut h);
+    h.state_mut().push(Cmd::Focus(Some("blur".into())));
+    let mut status = camera_status(None, None);
+    status.estopped = true;
+    let ctx = h.ctx.clone();
+    h.state_mut().handle_event(&ctx, Event::Status(status));
+    save(&mut h, "studio-estop");
+
     // The 3D view.
     let mut h = shot_with(Some(examples().join("camera.yaml")), 520.0);
     simulate_live(&mut h);
@@ -1634,6 +1968,16 @@ fn studio_drives_a_real_daemon() {
         st.status.is_some() && playback(st).is_none()
     });
 
+    // The emergency stop, engaged and released from the studio.
+    h.state_mut().push(Cmd::Estop(true));
+    wait(&mut h, "the e-stop to engage", &|st| {
+        st.estopped() && toasted(st, "E-stop engaged")
+    });
+    h.state_mut().push(Cmd::Estop(false));
+    wait(&mut h, "the e-stop to release", &|st| {
+        !st.estopped() && toasted(st, "E-stop released")
+    });
+
     h.state_mut().push(Cmd::Stop);
     wait(&mut h, "the graph to stop", &|st| {
         st.status.as_ref().is_some_and(|s| s.graph.is_none())
@@ -1641,5 +1985,4 @@ fn studio_drives_a_real_daemon() {
     drop(h);
     drop(daemon);
     let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
-    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -204,20 +204,21 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testdir::TempDir;
 
-    fn store(name: &str) -> Store {
-        let root =
-            std::env::temp_dir().join(format!("ruro-settings-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        Store {
+    /// A store in a scratch directory, removed when the guard drops.
+    fn store(name: &str) -> (Store, TempDir) {
+        let root = TempDir::new(&format!("settings-{name}"));
+        let store = Store {
             config_dir: root.join("config"),
             state_dir: root.join("state"),
-        }
+        };
+        (store, root)
     }
 
     #[test]
     fn settings_roundtrip_and_defaults() {
-        let s = store("roundtrip");
+        let (s, _dir) = store("roundtrip");
         assert_eq!(s.load_settings(), Settings::default());
         let mut settings = Settings {
             theme: ThemeKind::Light,
@@ -236,7 +237,7 @@ mod tests {
 
     #[test]
     fn autosaves_from_other_sessions_are_recoverable() {
-        let s = store("autosave");
+        let (s, _dir) = store("autosave");
         s.write_autosave(7, "demo", Some(Path::new("/x/demo.yaml")), "name: demo\n")
             .unwrap();
         // Our own autosaves are not offered back to us.

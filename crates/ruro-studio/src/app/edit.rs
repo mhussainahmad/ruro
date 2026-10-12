@@ -109,6 +109,7 @@ impl Studio {
                 let (a, b) = (old.param(p), new.param(p));
                 if a != b {
                     self.link.send(Command::SetParam {
+                        daemon: self.node_daemon(&new.id),
                         node: new.id.clone(),
                         name: p.name.clone(),
                         value: b.to_string(),
@@ -141,6 +142,7 @@ impl Studio {
             && self.metrics.contains_key(&node)
         {
             self.link.send(Command::SetParam {
+                daemon: self.node_daemon(&node),
                 node,
                 name,
                 value: value.to_string(),

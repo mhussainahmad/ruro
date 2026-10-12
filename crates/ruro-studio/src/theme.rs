@@ -66,6 +66,9 @@ struct Palette {
     command_center_hover: Color32,
     status_connecting: Color32,
     status_offline: Color32,
+    /// The emergency-stop button: a deep red that white text reads on.
+    estop: Color32,
+    estop_hover: Color32,
     /// Opacity multiplier for drop shadows.
     shadow: f32,
 }
@@ -101,6 +104,8 @@ const DARK: Palette = Palette {
     command_center_hover: Color32::from_rgb(0x2a, 0x2a, 0x2a),
     status_connecting: Color32::from_rgb(0x3a, 0x3a, 0x3a),
     status_offline: Color32::from_rgb(0x6b, 0x1f, 0x1f),
+    estop: Color32::from_rgb(0xc4, 0x2b, 0x1c),
+    estop_hover: Color32::from_rgb(0xd6, 0x3a, 0x2a),
     shadow: 1.0,
 };
 
@@ -137,6 +142,8 @@ const LIGHT: Palette = Palette {
     command_center_hover: Color32::from_rgb(0xe6, 0xe6, 0xe6),
     status_connecting: Color32::from_rgb(0x6e, 0x6e, 0x6e),
     status_offline: Color32::from_rgb(0xa1, 0x26, 0x0d),
+    estop: Color32::from_rgb(0xc4, 0x2b, 0x1c),
+    estop_hover: Color32::from_rgb(0xa8, 0x22, 0x15),
     shadow: 0.28,
 };
 
@@ -198,6 +205,8 @@ tokens! {
     COMMAND_CENTER_HOVER => command_center_hover,
     STATUS_CONNECTING => status_connecting,
     STATUS_OFFLINE => status_offline,
+    ESTOP => estop,
+    ESTOP_HOVER => estop_hover,
 }
 
 /// A drop shadow colour of the given strength, softened in the light theme.

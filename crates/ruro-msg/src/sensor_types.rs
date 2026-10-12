@@ -150,6 +150,15 @@ pub struct Flag(pub bool);
 impl_postcard_message!(Flag, "std/Flag");
 
 /// Opaque bytes, e.g. raw serial frames.
+/// Simulated time. A graph with `clock: sim` follows the one output of this
+/// type: `Ctx::now_ns` and timer-triggered nodes use it instead of wall time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Clock {
+    /// Graph time in nanoseconds.
+    pub time_ns: u64,
+}
+impl_postcard_message!(Clock, "std/Clock");
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Bytes(pub Vec<u8>);
 impl_postcard_message!(Bytes, "std/Bytes");

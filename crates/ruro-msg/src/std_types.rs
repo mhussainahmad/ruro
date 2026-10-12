@@ -140,6 +140,45 @@ impl Image {
     pub fn stride(&self) -> usize {
         self.width as usize * self.encoding.channels()
     }
+
+    /// Changes the size and layout, keeping the pixel buffer's allocation
+    /// when it is large enough. Pixel contents are unspecified afterwards.
+    /// Useful with pooled images, see `Output::loan`.
+    pub fn reshape(&mut self, width: u32, height: u32, encoding: Encoding) {
+        self.width = width;
+        self.height = height;
+        self.encoding = encoding;
+        self.data
+            .resize(width as usize * height as usize * encoding.channels(), 0);
+    }
+
+    /// Validates an encoded image header and returns `(width, height, encoding)`.
+    fn decode_header(buf: &[u8]) -> Result<(u32, u32, Encoding), DecodeError> {
+        if buf.len() < IMAGE_HEADER {
+            return Err(DecodeError::TooShort {
+                need: IMAGE_HEADER,
+                got: buf.len(),
+            });
+        }
+        let width = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+        let height = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+        let encoding = Encoding::from_u8(buf[8])?;
+        // Checked: a corrupt header must not overflow (and so panic) here.
+        let need = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(encoding.channels()))
+            .and_then(|n| n.checked_add(IMAGE_HEADER))
+            .ok_or_else(|| {
+                DecodeError::Invalid(format!("image size {width}x{height} overflows"))
+            })?;
+        if buf.len() != need {
+            return Err(DecodeError::TooShort {
+                need,
+                got: buf.len(),
+            });
+        }
+        Ok((width, height, encoding))
+    }
 }
 
 const IMAGE_HEADER: usize = 4 + 4 + 1;
@@ -159,28 +198,23 @@ impl Message for Image {
     }
 
     fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
-        if buf.len() < IMAGE_HEADER {
-            return Err(DecodeError::TooShort {
-                need: IMAGE_HEADER,
-                got: buf.len(),
-            });
-        }
-        let width = u32::from_le_bytes(buf[0..4].try_into().unwrap());
-        let height = u32::from_le_bytes(buf[4..8].try_into().unwrap());
-        let encoding = Encoding::from_u8(buf[8])?;
-        let need = IMAGE_HEADER + width as usize * height as usize * encoding.channels();
-        if buf.len() != need {
-            return Err(DecodeError::TooShort {
-                need,
-                got: buf.len(),
-            });
-        }
+        let (width, height, encoding) = Self::decode_header(buf)?;
         Ok(Self {
             width,
             height,
             encoding,
             data: buf[IMAGE_HEADER..].to_vec(),
         })
+    }
+
+    fn decode_into(&mut self, buf: &[u8]) -> Result<(), DecodeError> {
+        let (width, height, encoding) = Self::decode_header(buf)?;
+        self.width = width;
+        self.height = height;
+        self.encoding = encoding;
+        self.data.clear();
+        self.data.extend_from_slice(&buf[IMAGE_HEADER..]);
+        Ok(())
     }
 
     fn preview(&self) -> Preview {
@@ -236,19 +270,26 @@ impl Message for PointCloud {
     }
 
     fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
+        let mut cloud = Self::default();
+        cloud.decode_into(buf)?;
+        Ok(cloud)
+    }
+
+    fn decode_into(&mut self, buf: &[u8]) -> Result<(), DecodeError> {
         if !buf.len().is_multiple_of(12) {
             return Err(DecodeError::Invalid(
                 "point cloud length is not a multiple of 12".into(),
             ));
         }
         let f = |b: &[u8]| f32::from_le_bytes(b.try_into().unwrap());
-        let points = buf
-            .as_chunks::<12>()
-            .0
-            .iter()
-            .map(|c| [f(&c[0..4]), f(&c[4..8]), f(&c[8..12])])
-            .collect();
-        Ok(Self { points })
+        self.points.clear();
+        self.points.extend(
+            buf.as_chunks::<12>()
+                .0
+                .iter()
+                .map(|c| [f(&c[0..4]), f(&c[4..8]), f(&c[8..12])]),
+        );
+        Ok(())
     }
 
     fn preview(&self) -> Preview {
@@ -295,6 +336,50 @@ mod tests {
         roundtrip(PointCloud {
             points: vec![[1.0, 2.0, 3.0], [-1.0, 0.5, 9.0]],
         });
+    }
+
+    #[test]
+    fn decode_into_reuses_the_allocation() {
+        let mut img = Image::new(64, 48, Encoding::Rgb8);
+        img.data[5] = 9;
+        let bytes = img.to_bytes();
+        let mut target = Image::new(64, 48, Encoding::Rgb8);
+        let ptr = target.data.as_ptr();
+        target.decode_into(&bytes).unwrap();
+        assert_eq!(target, img);
+        assert_eq!(target.data.as_ptr(), ptr);
+        // A failed decode leaves the target untouched.
+        assert!(target.decode_into(&bytes[..10]).is_err());
+        assert_eq!(target, img);
+
+        let cloud = PointCloud {
+            points: vec![[1.0, 2.0, 3.0]],
+        };
+        let mut c = PointCloud::default();
+        c.decode_into(&cloud.to_bytes()).unwrap();
+        assert_eq!(c, cloud);
+
+        let mut s = Scalar(0.0);
+        s.decode_into(&Scalar(3.0).to_bytes()).unwrap();
+        assert_eq!(s, Scalar(3.0));
+    }
+
+    #[test]
+    fn reshape_keeps_capacity() {
+        let mut img = Image::new(100, 100, Encoding::Rgba8);
+        let ptr = img.data.as_ptr();
+        img.reshape(50, 50, Encoding::Rgb8);
+        assert_eq!(img.data.len(), 50 * 50 * 3);
+        assert_eq!(img.data.as_ptr(), ptr);
+    }
+
+    #[test]
+    fn image_header_overflow_is_an_error() {
+        let mut buf = vec![0u8; IMAGE_HEADER];
+        buf[0..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        buf[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        buf[8] = Encoding::Rgba8 as u8;
+        assert!(Image::decode(&buf).is_err());
     }
 
     #[test]

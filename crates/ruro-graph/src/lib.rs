@@ -10,8 +10,8 @@ mod validate;
 
 pub use descriptor::{NodeDescriptor, ParamDesc, ParamKind, PortDesc, Registry};
 pub use spec::{
-    DEFAULT_GROUP, Graph, GraphError, GroupConfig, NodeInstance, PortRef, Realtime, RestartPolicy,
-    Wire,
+    ClockSource, DEFAULT_GROUP, Graph, GraphError, GroupConfig, NodeInstance, PortRef, Realtime,
+    RestartPolicy, Wire,
 };
 pub use validate::{Issue, validate};
 

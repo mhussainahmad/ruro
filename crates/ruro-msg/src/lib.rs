@@ -38,6 +38,14 @@ pub trait Message: Send + Sync + Sized + 'static {
     /// Reconstructs a message from bytes produced by [`Message::encode_into`].
     fn decode(buf: &[u8]) -> Result<Self, DecodeError>;
 
+    /// Decodes into an existing value, reusing its allocations where the type
+    /// supports it. Receivers call this on recycled messages so that steady
+    /// state reception does not allocate. On error `self` is left unchanged.
+    fn decode_into(&mut self, buf: &[u8]) -> Result<(), DecodeError> {
+        *self = Self::decode(buf)?;
+        Ok(())
+    }
+
     /// A small, display-oriented summary of the message.
     fn preview(&self) -> Preview;
 

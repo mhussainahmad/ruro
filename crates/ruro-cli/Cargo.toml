@@ -21,6 +21,9 @@ ruro-msg = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-proto = { workspace = true }
 ruro-daemon = { workspace = true }
+ruro-schema = { workspace = true }
+ruro-pkg = { workspace = true }
+ruro-ros2 = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 clap = { workspace = true }

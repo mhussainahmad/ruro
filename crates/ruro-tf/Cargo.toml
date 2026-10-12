@@ -1,0 +1,16 @@
+[package]
+name = "ruro-tf"
+description = "Transform tree for ruro: a time-indexed buffer of coordinate frames and tf nodes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

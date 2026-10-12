@@ -205,6 +205,17 @@ pub struct Output<T> {
     port: Arc<OutputPort<T>>,
 }
 
+/// Another handle to the same output, e.g. to send from a callback that a
+/// driver library runs on its own thread. Both handles share the sequence
+/// counter and the connected inputs.
+impl<T> Clone for Output<T> {
+    fn clone(&self) -> Self {
+        Self {
+            port: self.port.clone(),
+        }
+    }
+}
+
 impl<T: Message> Output<T> {
     pub(crate) fn new(port: Arc<OutputPort<T>>) -> Self {
         Self { port }

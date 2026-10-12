@@ -1,0 +1,30 @@
+[package]
+name = "ruro-host-py"
+description = "ruro host with an embedded Python interpreter for Python nodes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "ruro-host-py"
+path = "src/main.rs"
+
+[dependencies]
+ruro-py = { workspace = true }
+ruro-host = { workspace = true }
+ruro-msg = { workspace = true }
+ruro-tf = { workspace = true }
+serde_json = { workspace = true }
+pyo3 = { workspace = true, features = ["auto-initialize"] }
+
+[build-dependencies]
+pyo3-build-config = { workspace = true }
+
+[dev-dependencies]
+ruro-daemon = { workspace = true }
+ruro-proto = { workspace = true }
+ruro-graph = { workspace = true }
+zenoh = { workspace = true }

@@ -1,0 +1,24 @@
+# A Rust sine source feeding Python nodes in the same process. Needs the
+# Python host and examples/python/threshold.py, see that file.
+name: python-threshold
+nodes:
+  sine:
+    type: std/sine
+    rate: 50
+    params: { frequency: 2.0, amplitude: 1.0 }
+    pos: [0, 0]
+  threshold:
+    type: py/threshold
+    params: { limit: 0.5 }
+    pos: [380, 0]
+  camera:
+    type: std/fake-camera
+    rate: 10
+    params: { width: 320, height: 240 }
+    pos: [0, 200]
+  brightness:
+    type: py/brightness
+    pos: [380, 200]
+wires:
+  - sine.value -> threshold.value
+  - camera.image -> brightness.image

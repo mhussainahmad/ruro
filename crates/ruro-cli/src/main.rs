@@ -81,6 +81,14 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Print message schemas, check compatibility, generate bindings.
+    Schema(ruro_schema::cli::SchemaArgs),
+    /// Create a node package or add a node to one.
+    New(ruro_pkg::cli::NewArgs),
+    /// Build a host binary that links the packages listed in ruro.toml.
+    Build(ruro_pkg::cli::BuildArgs),
+    /// ROS 2 interop: list topics, generate message types, compute type hashes.
+    Ros2(ruro_ros2::cli::Ros2Args),
 }
 
 fn main() {
@@ -224,6 +232,10 @@ fn run(cli: Cli) -> Result<()> {
             let err = exec(&exe, &args);
             bail!("failed to start {}: {err}", exe.display())
         }
+        Cmd::Schema(args) => ruro_schema::cli::run(args),
+        Cmd::New(args) => ruro_pkg::cli::run_new(args),
+        Cmd::Build(args) => ruro_pkg::cli::run_build(args),
+        Cmd::Ros2(args) => ruro_ros2::cli::run(args),
     }
 }
 

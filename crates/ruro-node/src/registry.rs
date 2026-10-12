@@ -59,7 +59,19 @@ pub fn registry() -> Registry {
         .into_iter()
         .map(|r| (r.descriptor)());
     let dynamic: Vec<NodeDescriptor> = DYNAMIC.read().iter().map(|(d, _)| d.clone()).collect();
-    Registry::new(linked.chain(dynamic))
+    let mut registry = Registry::new(linked.chain(dynamic));
+    let schemas = ruro_msg::schema::registered();
+    let port_types: Vec<String> = registry
+        .iter()
+        .flat_map(|d| d.inputs.iter().chain(&d.outputs))
+        .map(|p| p.ty.clone())
+        .collect();
+    for ty in port_types {
+        if let Some(s) = schemas.get(ty.as_str()) {
+            registry.schema_hashes.insert(ty, s.hash.clone());
+        }
+    }
+    registry
 }
 
 /// Finds the registration for a node kind.

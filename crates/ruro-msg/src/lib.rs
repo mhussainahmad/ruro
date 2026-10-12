@@ -6,10 +6,13 @@
 //! they travel as reference-counted values.
 
 mod preview;
+pub mod schema;
 mod sensor_types;
+mod std_schemas;
 mod std_types;
 
 pub use preview::{FramePreview, PREVIEW_MAX_POINTS, Preview, flatten_json, subsample_points};
+pub use schema::{Describe, MessageSchema, Schema};
 pub use sensor_types::*;
 pub use std_types::*;
 
@@ -47,17 +50,52 @@ pub trait Message: Send + Sync + Sized + 'static {
         self.encode_into(&mut buf);
         buf
     }
+
+    /// Layout of the encoding. Types that do not describe themselves report
+    /// an opaque schema.
+    fn schema() -> Schema {
+        Schema::opaque(Self::TYPE)
+    }
+
+    /// The schema bundled with the type name and wire hash.
+    fn message_schema() -> MessageSchema {
+        MessageSchema::new(Self::TYPE, Self::schema())
+    }
 }
 
 /// Implements [`Message`] for a `serde` type using the postcard wire format.
 ///
 /// This is what `#[derive(Message)]` expands to; it can also be used directly.
+/// Add a trailing `schema` argument when the type implements [`Describe`]: the
+/// message then reports that schema and registers it for tooling.
+///
+/// ```ignore
+/// impl_postcard_message!(Reading, "my/Reading", schema);
+/// impl_postcard_message!(Reading, "my/Reading", preview: |r: &Reading| ..., schema);
+/// ```
 #[macro_export]
 macro_rules! impl_postcard_message {
     ($ty:ty, $name:expr) => {
-        $crate::impl_postcard_message!($ty, $name, preview: |m: &$ty| $crate::Preview::from_serialize(m));
+        $crate::impl_postcard_message!(@impl $ty, $name,
+            |m: &$ty| $crate::Preview::from_serialize(m),
+            || $crate::Schema::opaque($name));
+    };
+    ($ty:ty, $name:expr, schema) => {
+        $crate::impl_postcard_message!(@impl $ty, $name,
+            |m: &$ty| $crate::Preview::from_serialize(m),
+            <$ty as $crate::Describe>::describe);
+        $crate::register_schema!($ty);
     };
     ($ty:ty, $name:expr, preview: $preview:expr) => {
+        $crate::impl_postcard_message!(@impl $ty, $name, $preview,
+            || $crate::Schema::opaque($name));
+    };
+    ($ty:ty, $name:expr, preview: $preview:expr, schema) => {
+        $crate::impl_postcard_message!(@impl $ty, $name, $preview,
+            <$ty as $crate::Describe>::describe);
+        $crate::register_schema!($ty);
+    };
+    (@impl $ty:ty, $name:expr, $preview:expr, $schema:expr) => {
         impl $crate::Message for $ty {
             const TYPE: &'static str = $name;
 
@@ -79,12 +117,35 @@ macro_rules! impl_postcard_message {
                 let f: fn(&$ty) -> $crate::Preview = $preview;
                 f(self)
             }
+
+            fn schema() -> $crate::Schema {
+                let f: fn() -> $crate::Schema = $schema;
+                f()
+            }
+        }
+    };
+}
+
+/// Makes a message type's schema discoverable through
+/// [`schema::registered`] in every binary that links the defining crate.
+///
+/// `impl_postcard_message!(T, name, schema)` and `#[derive(Message)]` do this
+/// automatically; call it for hand-written [`Message`] impls.
+#[macro_export]
+macro_rules! register_schema {
+    ($ty:ty) => {
+        $crate::__private::inventory::submit! {
+            $crate::schema::SchemaEntry {
+                ty: <$ty as $crate::Message>::TYPE,
+                schema: <$ty as $crate::Message>::schema,
+            }
         }
     };
 }
 
 #[doc(hidden)]
 pub mod __private {
+    pub use inventory;
     pub use postcard;
     pub use serde_json;
 }

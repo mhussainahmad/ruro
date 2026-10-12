@@ -1,0 +1,18 @@
+[package]
+name = "ruro-nodes-ros2"
+description = "ROS 2 bridge nodes for ruro (rmw_zenoh compatible)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro = { workspace = true }
+ruro-ros2 = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+zenoh = { workspace = true }

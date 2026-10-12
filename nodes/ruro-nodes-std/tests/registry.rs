@@ -42,3 +42,22 @@ fn descriptors_carry_types_params_and_docs() {
     );
     assert_eq!(pid.param("kp").unwrap().kind, ParamKind::Float);
 }
+
+#[test]
+fn registry_carries_schema_hashes_of_port_types() {
+    ruro_nodes_std::link();
+    let reg = ruro::node::registry();
+    let hash = reg.schema_hash("std/Image").expect("image schema hash");
+    assert!(hash.starts_with("RS1_"));
+    assert_eq!(
+        reg.schema_hash("std/Scalar"),
+        Some(
+            <ruro::msg::Scalar as ruro::msg::Message>::message_schema()
+                .hash
+                .as_str()
+        )
+    );
+    let json = serde_json::to_string(&reg).unwrap();
+    let back: ruro::graph::Registry = serde_json::from_str(&json).unwrap();
+    assert!(back.schema_mismatches(&reg).is_empty());
+}

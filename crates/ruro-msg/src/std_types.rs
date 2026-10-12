@@ -10,12 +10,12 @@ const PREVIEW_MAX_EDGE: u32 = 320;
 /// A single floating point value.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Scalar(pub f64);
-impl_postcard_message!(Scalar, "std/Scalar");
+impl_postcard_message!(Scalar, "std/Scalar", schema);
 
 /// A UTF-8 string.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Text(pub String);
-impl_postcard_message!(Text, "std/Text");
+impl_postcard_message!(Text, "std/Text", schema);
 
 /// A 3D vector.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ pub struct Vec3 {
     pub y: f64,
     pub z: f64,
 }
-impl_postcard_message!(Vec3, "std/Vec3");
+impl_postcard_message!(Vec3, "std/Vec3", schema);
 
 /// A unit quaternion.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -52,7 +52,7 @@ pub struct Pose {
     pub position: Vec3,
     pub orientation: Quat,
 }
-impl_postcard_message!(Pose, "std/Pose", preview: |p: &Pose| Preview::Frames(vec![p.frame_preview("pose", "")]));
+impl_postcard_message!(Pose, "std/Pose", preview: |p: &Pose| Preview::Frames(vec![p.frame_preview("pose", "")]), schema);
 
 impl Pose {
     /// This pose as a named frame for 3D previews.
@@ -73,7 +73,7 @@ pub struct Twist {
     pub linear: Vec3,
     pub angular: Vec3,
 }
-impl_postcard_message!(Twist, "std/Twist");
+impl_postcard_message!(Twist, "std/Twist", schema);
 
 /// State of a set of joints. Vectors are index-aligned.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -82,7 +82,7 @@ pub struct JointState {
     pub velocity: Vec<f64>,
     pub effort: Vec<f64>,
 }
-impl_postcard_message!(JointState, "std/JointState");
+impl_postcard_message!(JointState, "std/JointState", schema);
 
 /// Pixel layout of an [`Image`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -146,6 +146,10 @@ const IMAGE_HEADER: usize = 4 + 4 + 1;
 
 impl Message for Image {
     const TYPE: &'static str = "std/Image";
+
+    fn schema() -> crate::Schema {
+        <Self as crate::Describe>::describe()
+    }
 
     fn encoded_len(&self) -> usize {
         IMAGE_HEADER + self.data.len()
@@ -222,6 +226,10 @@ pub struct PointCloud {
 
 impl Message for PointCloud {
     const TYPE: &'static str = "std/PointCloud";
+
+    fn schema() -> crate::Schema {
+        <Self as crate::Describe>::describe()
+    }
 
     fn encoded_len(&self) -> usize {
         self.points.len() * 12

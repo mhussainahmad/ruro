@@ -27,6 +27,12 @@ ruro-nodes-hw = { version = "0.1.0", path = "nodes/ruro-nodes-hw" }
 ruro-nodes-sim = { version = "0.1.0", path = "nodes/ruro-nodes-sim" }
 ruro-nodes-ml = { version = "0.1.0", path = "nodes/ruro-nodes-ml" }
 ruro-urdf = { version = "0.1.0", path = "crates/ruro-urdf" }
+ruro-schema = { version = "0.1.0", path = "crates/ruro-schema" }
+ruro-tf = { version = "0.1.0", path = "crates/ruro-tf" }
+ruro-pkg = { version = "0.1.0", path = "crates/ruro-pkg" }
+ruro-py = { version = "0.1.0", path = "crates/ruro-py" }
+ruro-ros2 = { version = "0.1.0", path = "crates/ruro-ros2" }
+ruro-nodes-ros2 = { version = "0.1.0", path = "nodes/ruro-nodes-ros2" }
 
 anyhow = "1"
 thiserror = "2"
@@ -62,6 +68,12 @@ arrow-array = "57"
 arrow-schema = "57"
 parquet = { version = "57", default-features = false, features = ["arrow", "snap"] }
 png = "0.18"
+sha2 = "0.10"
+toml = "1"
+tempfile = "3"
+pyo3 = "0.29"
+pyo3-build-config = "0.29"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [profile.release]
 lto = "thin"

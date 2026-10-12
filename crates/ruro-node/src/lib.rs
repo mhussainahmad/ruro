@@ -13,6 +13,7 @@ mod ctx;
 mod param;
 mod port;
 mod registry;
+pub mod testing;
 mod waker;
 
 pub use builder::{Builder, BuiltNode};

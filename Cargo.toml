@@ -83,6 +83,8 @@ strip = "debuginfo"
 
 [profile.dev]
 debug = "line-tables-only"
+# Incremental artifacts for a workspace this size run to many gigabytes.
+incremental = false
 
 [profile.dev.package."*"]
 opt-level = 2

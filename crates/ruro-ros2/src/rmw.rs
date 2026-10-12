@@ -193,6 +193,96 @@ pub struct EndpointConfig {
     pub node_name: String,
     /// Node namespace, `/` for the root.
     pub namespace: String,
+    /// Token and TLS settings for a router that requires them.
+    pub credentials: Credentials,
+}
+
+/// Credentials for a Zenoh router that requires them, such as a ruro daemon
+/// started with a token or listening on TLS.
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+pub struct Credentials {
+    /// Token for Zenoh's user/password authentication, presented as the
+    /// user `ruro`, as ruro daemons expect. Routers that do not
+    /// authenticate ignore it.
+    pub token: Option<String>,
+    /// CA certificate (PEM) that signed the router's certificate, for
+    /// `tls/` endpoints.
+    pub tls_ca: Option<std::path::PathBuf>,
+    /// Client certificate and its key (PEM), for routers that require
+    /// mutual TLS.
+    pub tls_cert: Option<std::path::PathBuf>,
+    pub tls_key: Option<std::path::PathBuf>,
+}
+
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credentials")
+            .field("token", &self.token.as_ref().map(|_| "<hidden>"))
+            .field("tls_ca", &self.tls_ca)
+            .field("tls_cert", &self.tls_cert)
+            .field("tls_key", &self.tls_key)
+            .finish()
+    }
+}
+
+/// User name ruro daemons expect with a token.
+const TOKEN_USER: &str = "ruro";
+
+impl Credentials {
+    /// The credentials ruro processes share through the environment:
+    /// `RURO_TOKEN` (or the first line of the file `RURO_TOKEN_FILE`),
+    /// `RURO_TLS_CA`, `RURO_TLS_CERT` and `RURO_TLS_KEY`. Daemons give
+    /// their hosts the token this way.
+    pub fn from_env() -> Result<Self> {
+        let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+        let token = match var("RURO_TOKEN_FILE") {
+            Some(path) => {
+                let text = std::fs::read_to_string(&path).with_context(|| {
+                    format!("reading the token file {}", path.to_string_lossy())
+                })?;
+                Some(text.lines().next().unwrap_or_default().trim().to_owned())
+            }
+            None => var("RURO_TOKEN").map(|t| t.to_string_lossy().into_owned()),
+        };
+        Ok(Self {
+            token: token.filter(|t| !t.is_empty()),
+            tls_ca: var("RURO_TLS_CA").map(Into::into),
+            tls_cert: var("RURO_TLS_CERT").map(Into::into),
+            tls_key: var("RURO_TLS_KEY").map(Into::into),
+        })
+    }
+
+    fn apply(&self, c: &mut zenoh::Config) -> Result<()> {
+        let set = |c: &mut zenoh::Config, k: &str, v: String| {
+            c.insert_json5(k, &v)
+                .map_err(|e| anyhow!("zenoh config `{k}`: {e}"))
+        };
+        let path = |p: &std::path::Path| -> Result<String> {
+            let p = std::fs::canonicalize(p).with_context(|| p.display().to_string())?;
+            Ok(serde_json::to_string(&p.to_string_lossy())?)
+        };
+        if let Some(ca) = &self.tls_ca {
+            set(c, "transport/link/tls/root_ca_certificate", path(ca)?)?;
+        }
+        match (&self.tls_cert, &self.tls_key) {
+            (Some(cert), Some(key)) => {
+                set(c, "transport/link/tls/connect_certificate", path(cert)?)?;
+                set(c, "transport/link/tls/connect_private_key", path(key)?)?;
+                set(c, "transport/link/tls/enable_mtls", "true".into())?;
+            }
+            (None, None) => {}
+            _ => anyhow::bail!("a TLS certificate needs its private key and vice versa"),
+        }
+        if let Some(token) = &self.token {
+            set(c, "transport/auth/usrpwd/user", format!("{TOKEN_USER:?}"))?;
+            set(
+                c,
+                "transport/auth/usrpwd/password",
+                serde_json::to_string(token)?,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 impl Default for EndpointConfig {
@@ -206,6 +296,7 @@ impl Default for EndpointConfig {
                 .unwrap_or(0),
             node_name: "ruro".into(),
             namespace: "/".into(),
+            credentials: Credentials::default(),
         }
     }
 }
@@ -225,13 +316,14 @@ impl EndpointConfig {
             serde_json::to_string(&self.connect)?,
         )?;
         set(&mut c, "scouting/multicast/enabled", "false".into())?;
+        self.credentials.apply(&mut c)?;
         Ok(c)
     }
 }
 
 /// Zenoh sessions shared by every endpoint of a process with the same
-/// connection settings.
-type SessionEntry = (Vec<String>, String, Weak<SharedSession>);
+/// connection settings: endpoints, mode and credentials.
+type SessionEntry = ((Vec<String>, String, Credentials), Weak<SharedSession>);
 
 static SESSIONS: Mutex<Vec<SessionEntry>> = Mutex::new(Vec::new());
 
@@ -243,26 +335,32 @@ struct SharedSession {
 
 fn shared_session(cfg: &EndpointConfig) -> Result<Arc<SharedSession>> {
     let mut sessions = SESSIONS.lock().unwrap();
-    sessions.retain(|(_, _, w)| w.strong_count() > 0);
+    sessions.retain(|(_, w)| w.strong_count() > 0);
+    let key = (
+        cfg.connect.clone(),
+        cfg.mode.clone(),
+        cfg.credentials.clone(),
+    );
     if let Some(s) = sessions
         .iter()
-        .find(|(c, m, _)| *c == cfg.connect && *m == cfg.mode)
-        .and_then(|(_, _, w)| w.upgrade())
+        .find(|(k, _)| *k == key)
+        .and_then(|(_, w)| w.upgrade())
     {
         return Ok(s);
     }
-    let session = zenoh::open(cfg.zenoh_config()?)
-        .wait()
-        .map_err(|e| anyhow!("cannot reach Zenoh at {:?}: {e}", cfg.connect))?;
+    let session = zenoh::open(cfg.zenoh_config()?).wait().map_err(|e| {
+        let hint = if cfg.credentials.token.is_none() {
+            " (a router that requires a token needs one, e.g. from RURO_TOKEN)"
+        } else {
+            ""
+        };
+        anyhow!("cannot reach Zenoh at {:?}: {e}{hint}", cfg.connect)
+    })?;
     let shared = Arc::new(SharedSession {
         session,
         next_id: AtomicU32::new(0),
     });
-    sessions.push((
-        cfg.connect.clone(),
-        cfg.mode.clone(),
-        Arc::downgrade(&shared),
-    ));
+    sessions.push((key, Arc::downgrade(&shared)));
     Ok(shared)
 }
 

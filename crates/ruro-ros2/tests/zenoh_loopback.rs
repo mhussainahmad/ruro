@@ -32,6 +32,7 @@ fn config(endpoint: &str, node: &str) -> EndpointConfig {
         domain: 7,
         node_name: node.into(),
         namespace: "/".into(),
+        credentials: Default::default(),
     }
 }
 

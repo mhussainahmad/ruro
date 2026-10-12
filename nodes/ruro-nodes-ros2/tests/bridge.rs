@@ -220,3 +220,56 @@ fn every_bridge_kind_is_registered() {
             .contains("E-stop")
     );
 }
+
+/// A router that, like a ruro daemon started with a token, only accepts
+/// sessions that present it.
+fn router_with_token(token: &str) -> (zenoh::Session, String, std::path::PathBuf) {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let endpoint = format!("tcp/127.0.0.1:{port}");
+    let dictionary = std::env::temp_dir().join(format!("ruro-ros2-auth-{port}"));
+    std::fs::write(&dictionary, format!("ruro:{token}\n")).unwrap();
+    let mut c = zenoh::Config::default();
+    let mut set = |k: &str, v: String| c.insert_json5(k, &v).unwrap();
+    set("mode", "\"router\"".into());
+    set("listen/endpoints", format!("[\"{endpoint}\"]"));
+    set("scouting/multicast/enabled", "false".into());
+    set("transport/auth/usrpwd/user", "\"ruro\"".into());
+    set("transport/auth/usrpwd/password", format!("{token:?}"));
+    set(
+        "transport/auth/usrpwd/dictionary_file",
+        format!("{:?}", dictionary.display().to_string()),
+    );
+    (zenoh::open(c).wait().unwrap(), endpoint, dictionary)
+}
+
+#[test]
+fn bridges_present_a_token_to_routers_that_require_one() {
+    ruro_nodes_ros2::link();
+    let (_router, endpoint, dictionary) = router_with_token("open sesame");
+    let params = |token: &str| json!({ "topic": "/secure", "router": endpoint, "domain_id": 5, "token": token });
+    let refused = Harness::new("ros2/sub-float64", params("wrong")).and_then(|mut h| h.step());
+    let err = format!("{:#}", refused.expect_err("a wrong token is refused"));
+    assert!(err.contains("cannot reach Zenoh"), "{err}");
+
+    let mut sub = Harness::new("ros2/sub-float64", params("open sesame")).unwrap();
+    sub.step().unwrap();
+    let mut publ = Harness::new("ros2/pub-float64", params("open sesame")).unwrap();
+    let got = relay(&mut publ, &mut sub, ruro::msg::Scalar(2.5));
+    assert_eq!(got[0], ruro::msg::Scalar(2.5));
+    let _ = std::fs::remove_file(dictionary);
+
+    // A token given as a parameter is required: a router that does not
+    // authenticate refuses it. (One from the environment, meant for the
+    // daemon, is dropped instead.)
+    let (_plain, endpoint) = router();
+    let params = json!({ "topic": "/open", "router": endpoint, "domain_id": 6, "token": "given" });
+    assert!(
+        Harness::new("ros2/sub-float64", params)
+            .and_then(|mut h| h.step())
+            .is_err()
+    );
+}

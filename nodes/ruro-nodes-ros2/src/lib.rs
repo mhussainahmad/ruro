@@ -37,7 +37,9 @@ use std::sync::Arc;
 
 use ruro::prelude::*;
 use ruro_ros2::RosMessage;
-use ruro_ros2::rmw::{Endpoint, EndpointConfig, Publisher, Qos, Reliability, Subscriber};
+use ruro_ros2::rmw::{
+    Credentials, Endpoint, EndpointConfig, Publisher, Qos, Reliability, Subscriber,
+};
 
 /// Forces this crate to be linked so its nodes are registered.
 pub fn link() {}
@@ -50,10 +52,22 @@ struct Settings {
     qos: Qos,
     router: String,
     node: String,
+    credentials: Credentials,
+    /// The token comes from the environment rather than the node's
+    /// parameter: it is meant for the daemon, and the router may be another
+    /// one that does not authenticate.
+    token_from_env: bool,
 }
 
 impl Settings {
-    fn new(node: &str, topic: &str, domain_id: i64, qos: &str, router: &str) -> Result<Self> {
+    fn new(
+        node: &str,
+        topic: &str,
+        domain_id: i64,
+        qos: &str,
+        router: &str,
+        token: &str,
+    ) -> Result<Self> {
         if topic.is_empty() {
             bail!("parameter `topic` is empty");
         }
@@ -63,6 +77,12 @@ impl Settings {
             u32::try_from(domain_id).context("domain_id")?
         };
         let reliability: Reliability = qos.parse()?;
+        // Hosts of a daemon started with a token find it in RURO_TOKEN.
+        let mut credentials = Credentials::from_env()?;
+        let token_from_env = token.is_empty() && credentials.token.is_some();
+        if !token.is_empty() {
+            credentials.token = Some(token.to_owned());
+        }
         // ROS node names allow letters, digits and underscores.
         let node: String = node
             .chars()
@@ -77,16 +97,43 @@ impl Settings {
             },
             router: router.to_owned(),
             node: format!("ruro_{node}"),
+            credentials,
+            token_from_env,
         })
     }
 
+    /// The credentials to try, in order. A router that does not
+    /// authenticate refuses sessions that present a token, so a token from
+    /// the environment is dropped if the router refuses it.
+    fn attempts(&self) -> Vec<Credentials> {
+        let mut attempts = vec![self.credentials.clone()];
+        if self.token_from_env {
+            attempts.push(Credentials {
+                token: None,
+                ..self.credentials.clone()
+            });
+        }
+        attempts
+    }
+
     fn endpoint(&self) -> Result<Arc<Endpoint>> {
-        ruro_ros2::rmw::shared_endpoint(EndpointConfig {
-            connect: vec![self.router.clone()],
-            domain: self.domain,
-            node_name: self.node.clone(),
-            ..EndpointConfig::default()
-        })
+        let mut first_error = None;
+        for credentials in self.attempts() {
+            let cfg = EndpointConfig {
+                connect: vec![self.router.clone()],
+                domain: self.domain,
+                node_name: self.node.clone(),
+                credentials,
+                ..EndpointConfig::default()
+            };
+            match ruro_ros2::rmw::shared_endpoint(cfg) {
+                Ok(e) => return Ok(e),
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
+            }
+        }
+        Err(first_error.expect("at least one attempt"))
     }
 }
 
@@ -186,12 +233,18 @@ macro_rules! bridge {
             /// Zenoh router shared with the ROS 2 nodes.
             #[param(default = "tcp/127.0.0.1:7447")]
             router: String,
+            /// Token of a router that requires one (a ruro daemon started
+            /// with a token). Empty uses RURO_TOKEN, which daemons give
+            /// their hosts. TLS settings come from RURO_TLS_CA,
+            /// RURO_TLS_CERT and RURO_TLS_KEY.
+            #[param(default = "")]
+            token: String,
             state: Option<SubState>,
         }
 
         impl $Sub {
             fn ensure(&mut self, ctx: &Ctx) -> Result {
-                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router)?;
+                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router, &self.token)?;
                 if self.state.as_ref().is_none_or(|s| s.settings != want) {
                     self.state = None;
                     self.state = Some(subscribe::<$ros, $ruro>(want, self.out.clone(), $from)?);
@@ -234,6 +287,12 @@ macro_rules! bridge {
             /// Zenoh router shared with the ROS 2 nodes.
             #[param(default = "tcp/127.0.0.1:7447")]
             router: String,
+            /// Token of a router that requires one (a ruro daemon started
+            /// with a token). Empty uses RURO_TOKEN, which daemons give
+            /// their hosts. TLS settings come from RURO_TLS_CA,
+            /// RURO_TLS_CERT and RURO_TLS_KEY.
+            #[param(default = "")]
+            token: String,
             /// Frame for ROS messages whose ruro form carries none.
             #[param(default = "base_link")]
             frame_id: String,
@@ -244,7 +303,7 @@ macro_rules! bridge {
 
         impl $Pub {
             fn ensure(&mut self, ctx: &Ctx) -> Result {
-                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router)?;
+                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router, &self.token)?;
                 if self.state.as_ref().is_none_or(|s| s.settings != want) {
                     self.state = None;
                     self.state = Some(advertise::<$ros>(want)?);
@@ -485,3 +544,23 @@ bridge!(
     "/flag",
     "std_msgs/Bool"
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_token_from_the_environment_is_optional() {
+        let mut s = Settings::new("n", "/t", 0, "reliable", "tcp/127.0.0.1:7447", "given").unwrap();
+        assert_eq!(
+            s.attempts().len(),
+            1,
+            "a token given as a parameter is required"
+        );
+        s.token_from_env = true;
+        let attempts = s.attempts();
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].token.as_deref(), Some("given"));
+        assert_eq!(attempts[1].token, None);
+    }
+}

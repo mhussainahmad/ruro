@@ -403,8 +403,9 @@ pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
 /// Transport security for daemons and their clients.
 ///
 /// TLS applies to `tls/...` endpoints: a daemon presents `cert`/`key`, and
-/// clients verify it against `ca`. With a client `cert`/`key` as well, the
-/// connection is mutually authenticated. `token` turns on Zenoh's
+/// clients verify it against `ca`. A daemon that is also given a `ca`
+/// requires clients to present a certificate signed by it (mutual TLS),
+/// which clients configure with their own `cert`/`key`. `token` turns on Zenoh's
 /// username/password authentication with the fixed user `ruro`: a daemon
 /// accepts only sessions that present the same token, on every endpoint.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -431,21 +432,29 @@ impl Security {
         if let Some(ca) = &self.ca {
             set(c, "transport/link/tls/root_ca_certificate", &path(ca)?)?;
         }
-        let (cert_key, key_key) = if router {
-            ("listen_certificate", "listen_private_key")
-        } else {
-            ("connect_certificate", "connect_private_key")
-        };
         match (&self.cert, &self.key) {
             (Some(cert), Some(key)) => {
-                set(c, &format!("transport/link/tls/{cert_key}"), &path(cert)?)?;
-                set(c, &format!("transport/link/tls/{key_key}"), &path(key)?)?;
-                if !router {
-                    set(c, "transport/link/tls/enable_mtls", "true")?;
+                let (cert, key) = (path(cert)?, path(key)?);
+                // A daemon presents its certificate to clients, and to the
+                // peers it connects to; a client presents it for mutual TLS.
+                if router {
+                    set(c, "transport/link/tls/listen_certificate", &cert)?;
+                    set(c, "transport/link/tls/listen_private_key", &key)?;
                 }
+                set(c, "transport/link/tls/connect_certificate", &cert)?;
+                set(c, "transport/link/tls/connect_private_key", &key)?;
             }
             (None, None) => {}
             _ => anyhow::bail!("a TLS certificate needs its private key and vice versa"),
+        }
+        // A daemon given a CA accepts only clients with a certificate it signed.
+        let mtls = if router {
+            self.ca.is_some() && self.cert.is_some()
+        } else {
+            self.cert.is_some()
+        };
+        if mtls {
+            set(c, "transport/link/tls/enable_mtls", "true")?;
         }
         if let Some(token) = &self.token {
             set(c, "transport/auth/usrpwd/user", &format!("\"{AUTH_USER}\""))?;

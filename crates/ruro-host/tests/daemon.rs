@@ -350,26 +350,39 @@ wires: [cam.image -> stats.image, src.value -> gain.input]
 
 /// A CA and a certificate for `localhost` signed by it, as PEM files.
 fn certificates(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let (ca, mut certs) = certificates_for(dir, &["localhost"]);
+    let (cert, key) = certs.remove(0);
+    (ca, cert, key)
+}
+
+/// A CA and, for each name, a certificate signed by it: `(ca, [(cert, key)])`.
+fn certificates_for(dir: &Path, names: &[&str]) -> (PathBuf, Vec<(PathBuf, PathBuf)>) {
     use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
     std::fs::create_dir_all(dir).unwrap();
     let ca_key = KeyPair::generate().unwrap();
     let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     let ca = ca_params.self_signed(&ca_key).unwrap();
-    let key = KeyPair::generate().unwrap();
-    let cert = CertificateParams::new(vec!["localhost".to_owned()])
-        .unwrap()
-        .signed_by(&key, &ca, &ca_key)
-        .unwrap();
-    let paths = (
-        dir.join("ca.pem"),
-        dir.join("cert.pem"),
-        dir.join("key.pem"),
-    );
-    std::fs::write(&paths.0, ca.pem()).unwrap();
-    std::fs::write(&paths.1, cert.pem()).unwrap();
-    std::fs::write(&paths.2, key.serialize_pem()).unwrap();
-    paths
+    let ca_path = dir.join("ca.pem");
+    std::fs::write(&ca_path, ca.pem()).unwrap();
+    let certs = names
+        .iter()
+        .map(|name| {
+            let key = KeyPair::generate().unwrap();
+            let cert = CertificateParams::new(vec![(*name).to_owned()])
+                .unwrap()
+                .signed_by(&key, &ca, &ca_key)
+                .unwrap();
+            let paths = (
+                dir.join(format!("{name}.pem")),
+                dir.join(format!("{name}-key.pem")),
+            );
+            std::fs::write(&paths.0, cert.pem()).unwrap();
+            std::fs::write(&paths.1, key.serialize_pem()).unwrap();
+            paths
+        })
+        .collect();
+    (ca_path, certs)
 }
 
 #[test]
@@ -426,6 +439,40 @@ fn tls_and_token_protect_the_daemon() {
         "that does not trust the daemon's certificate",
     );
     request(&s, &d.keys, Ctl::Stop, "").unwrap();
+}
+
+#[test]
+fn mutual_tls_requires_client_certificates() {
+    let (ca, certs) = certificates_for(&tmp("mtls"), &["localhost", "studio"]);
+    let [(cert, key), (client_cert, client_key)] = <[_; 2]>::try_from(certs).unwrap();
+    let d = TestDaemon::start("mtls", |c| {
+        c.listen = format!("tls/localhost:{}", free_port());
+        c.security = Security {
+            cert: Some(cert.clone()),
+            key: Some(key.clone()),
+            ca: Some(ca.clone()),
+            token: None,
+        };
+    });
+    let with_cert = Security {
+        cert: Some(client_cert),
+        key: Some(client_key),
+        ca: Some(ca.clone()),
+        token: None,
+    };
+    let s = d
+        .client_with(&with_cert)
+        .expect("client with a certificate");
+    request(&s, &d.keys, Ctl::Ping, "").unwrap();
+    let without = Security {
+        ca: Some(ca),
+        ..Default::default()
+    };
+    let ok = d
+        .client_with(&without)
+        .and_then(|s| request(&s, &d.keys, Ctl::Ping, ""))
+        .is_ok();
+    assert!(!ok, "a client without a certificate was let in");
 }
 
 #[test]

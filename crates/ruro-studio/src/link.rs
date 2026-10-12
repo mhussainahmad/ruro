@@ -232,7 +232,11 @@ fn run(
         let session = match ruro_proto::connect_with(&endpoint, &security) {
             Ok(s) => s,
             Err(e) => {
-                if spawn_daemon && spawned.is_none() && is_local(&endpoint) {
+                // Start a daemon only when nothing listens; one that refused the
+                // session (TLS or token) must not be shadowed by a second one.
+                let nothing_listens = ruro_proto::ConnectError::failure_of(&e)
+                    .is_none_or(|f| f == ruro_proto::ConnectFailure::NoDaemon);
+                if spawn_daemon && spawned.is_none() && nothing_listens && is_local(&endpoint) {
                     spawned = start_local_daemon(&endpoint, security.token.as_deref());
                     std::thread::sleep(Duration::from_millis(300));
                     continue;

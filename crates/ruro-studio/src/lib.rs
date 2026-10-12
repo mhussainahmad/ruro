@@ -62,9 +62,13 @@ struct Cli {
     /// Key of the client certificate.
     #[arg(long, env = "RURO_TLS_KEY")]
     tls_key: Option<PathBuf>,
-    /// Access token of daemons started with `--token`.
+    /// Access token of daemons started with `--token`. Visible to other users
+    /// in `ps`; prefer `--token-file`.
     #[arg(long, env = "RURO_TOKEN", hide_env_values = true)]
     token: Option<String>,
+    /// File whose first line is the access token. Overrides `--token`.
+    #[arg(long, env = "RURO_TOKEN_FILE")]
+    token_file: Option<PathBuf>,
     /// Do not start a local daemon when none is running.
     #[arg(long)]
     no_spawn: bool,
@@ -88,6 +92,16 @@ pub fn run() -> eframe::Result<()> {
         .compact()
         .init();
     let cli = Cli::parse();
+    let token = match &cli.token_file {
+        Some(path) => match ruro_proto::read_token_file(path) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                eprintln!("ruro-studio: {e:#}");
+                std::process::exit(2);
+            }
+        },
+        None => cli.token.clone().filter(|t| !t.is_empty()),
+    };
     let mut files = cli.files.into_iter();
     let opts = app::Options {
         endpoint: cli.connect,
@@ -96,7 +110,7 @@ pub fn run() -> eframe::Result<()> {
             cert: cli.tls_cert,
             key: cli.tls_key,
             ca: cli.tls_ca,
-            token: cli.token.filter(|t| !t.is_empty()),
+            token,
         },
         spawn_daemon: !cli.no_spawn,
         file: files.next(),

@@ -28,25 +28,34 @@ ruro --connect tls/robot:7447 --tls-ca ca.pem --token "$(cat token)" status
   TLS peers, a CA that trusts the other daemon's certificate).
 - Hosts always talk to their daemon over a Unix socket in the daemon's runtime directory.
 
+`--token` is visible to other users in `ps`; prefer `--token-file <path>` (or
+`RURO_TOKEN_FILE`), whose first line is the token. It overrides `--token`.
+
 Every option has an environment variable (`RURO_TLS_CERT`, `RURO_TLS_KEY`, `RURO_TLS_CA`,
-`RURO_TOKEN`), which is how the system service takes them (see
+`RURO_TOKEN`, `RURO_TOKEN_FILE`), which is how the system service takes them (see
 [Deploying on robots](deployment.md#system-service)). Programs built on `ruro-proto`
 connect with `ruro_proto::connect_with` and a `Security` holding the certificates and
 token.
 
-> **The studio does not support TLS or tokens yet.** It connects without either, so it
-> cannot reach a daemon started with TLS or a token; such daemons can only be used from the
-> CLI for now. To use the studio with a remote robot, run the robot's daemon on its default
-> `tcp/127.0.0.1:7447` without a token and reach it through an SSH tunnel (or a VPN), for
-> example `ssh -L 7447:127.0.0.1:7447 robot` and
-> `ruro-studio --connect tcp/127.0.0.1:7447`.
+The studio takes the same options (`--tls-ca`, `--tls-cert`, `--tls-key`, `--token`,
+`--token-file` and their environment variables):
+
+```sh
+ruro-studio --connect tls/robot:7447 --tls-ca ca.pem --token-file token
+```
+
+It only starts a local daemon when nothing listens at its endpoint, never over a daemon
+that refused it.
 
 A plain `tcp/` listener on a network interface accepts anyone who can reach the port. If
 you must use one, do so only on a network you trust (the robot's own network, a VPN), and
 restrict it with a firewall.
 
-The ROS 2 bridge nodes connect to their own Zenoh router (the `router` parameter) without
-TLS or a token; keep that router on a trusted network too.
+The ROS 2 bridge nodes connect to the Zenoh router named by their `router` parameter. They
+take a token from their `token` parameter or from `RURO_TOKEN` / `RURO_TOKEN_FILE`, and TLS
+settings from `RURO_TLS_CA`, `RURO_TLS_CERT` and `RURO_TLS_KEY`, so they can use a
+protected daemon as their router. A token taken from the environment is retried without it
+when the router does not authenticate, as `rmw_zenohd` does by default.
 
 To report a vulnerability, see
 [SECURITY.md](https://github.com/mhussainahmad/ruro/blob/main/SECURITY.md).

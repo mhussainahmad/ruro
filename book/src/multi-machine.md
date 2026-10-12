@@ -43,15 +43,22 @@ each remote group to its daemon and starts its own. Wires between machines go ov
 lz4-compressed for messages of 4 KiB and up when that makes them smaller; wires between
 groups on one machine stay in shared memory. `ruro stop` stops every machine's part.
 
-`ruro check` only knows the node types of the daemon it asks (or the local host), so a
-graph that uses node types available only on a peer fails `check` but deploys.
+`ruro check` asks the daemon to validate the graph, so node types that exist only on a peer
+or in an uploaded host are known. Offline, unknown types in groups with `machine:` or
+`host:` set are reported as warnings rather than errors.
 
-What does not span machines yet:
+Recording and replay span machines: each peer records its own groups, and stopping the
+recording collects every machine's part into one file at the daemon you asked. Replay mutes
+recorded nodes on the machines that run them. The reply to `ruro record --stop` names the
+groups recorded on each machine and any machine that could not record. A very large peer
+part can take longer than the CLI's 10 s request timeout to collect.
 
-- Recording and replay cover the groups of the daemon you talk to.
+`ruro kill`, `ruro echo` and `ruro param` reach the machine that runs the group or node.
 
-The emergency stop does span machines: engaged at the daemon you deployed to, it is passed
-on to every machine of the graph (see [Emergency stop](runtime.md#emergency-stop)). The
+The emergency stop spans machines too: engaged at the daemon you deployed to, it is passed
+on to every machine of the graph (see [Emergency stop](runtime.md#emergency-stop)). A stop
+engaged directly on a robot stays there, and `ruro status` lists every machine of the graph
+whose stop is engaged. The
 studio shows the live metrics of nodes on every machine of the graph, and watches and tunes
 them on the daemon that runs them.
 

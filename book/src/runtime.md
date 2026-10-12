@@ -54,7 +54,7 @@ the clock over shared memory (or the network), so every process follows the same
   clock that goes backwards gives `dt` = 0.
 - Message stamps (`Sample::stamp_ns`) stay wall time.
 - The daemon checks at deploy time that a `clock: sim` graph has exactly one `std/Clock`
-  output. `ruro check` does not.
+  output, and so does `ruro check` when it can reach a daemon.
 
 The MuJoCo node (`sim/mujoco`) publishes its simulation time as a `std/Clock`; see
 `examples/arm-sim.yaml`. Flattening composite nodes keeps the graph's `clock` setting.

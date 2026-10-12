@@ -7,27 +7,103 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
+  # ruro-py and ruro-host-py embed Python through pyo3, so building or testing
+  # the whole workspace needs a Python with its shared library. The ruro Python
+  # package requires 3.11 or newer.
+  PYTHON_VERSION: '3.12'
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  fmt:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+          components: rustfmt
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+
+  test:
+    name: clippy and test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy (workspace, default features)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Optional node features that the default build leaves out. `onnx`
+      # downloads a CPU build of ONNX Runtime; `mujoco` only loads libmujoco at
+      # run time, so it builds without MuJoCo installed. Warnings are reported
+      # but not yet fatal here: the feature-gated tests still have a few
+      # (unused `mut` in tests/onnx.rs and tests/mujoco.rs). Add `-D warnings`
+      # once they are fixed.
+      - name: Clippy (optional node features)
+        run: >
+          cargo clippy --locked --all-targets
+          -p ruro-nodes-ml -p ruro-nodes-sim
+          --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco
+      - name: Test (workspace, default features)
+        run: cargo test --workspace --locked
+      # The MuJoCo tests are skipped unless RURO_MUJOCO_LIB is set, so only the
+      # ONNX and LeRobot tests run here.
+      - name: Test (optional node features)
+        run: >
+          cargo test --locked
+          -p ruro-nodes-ml -p ruro-nodes-sim
+          --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco
+
+  msrv:
+    # Keep in sync with `rust-version` in the workspace Cargo.toml.
+    name: check (Rust 1.95)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo check --workspace --all-targets --locked
+
+  python:
+    name: python package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          # The oldest Python the package supports (requires-python >= 3.11).
+          python-version: '3.11'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the extension and run the tests
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install 'maturin>=1.9,<2'
+          maturin develop --locked -m crates/ruro-py/Cargo.toml --extras test
+          cd crates/ruro-py && pytest
 
   cross:
     name: build (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -42,9 +118,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The linker for each target is set in .cargo/config.toml; the cc crate
+      # (ring, zstd) picks the same cross compiler by its target prefix.
       - name: Cross toolchain
-        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.gcc }}
-      # The linker for each target is set in .cargo/config.toml.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.gcc }}
       - name: Build CLI and host
         run: cargo build --release --locked --target ${{ matrix.target }} -p ruro-cli -p ruro-host
       - uses: actions/upload-artifact@v4
@@ -56,14 +134,12 @@ jobs:
           if-no-files-found: error
 
   book:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: peaceiris/actions-mdbook@v2
         with:
           mdbook-version: '0.4.52'
-      - name: Copy screenshots into the book
-        run: mkdir -p book/src/images && cp docs/images/*.png book/src/images/
       - run: mdbook build book
       - uses: actions/upload-artifact@v4
         with:
@@ -71,14 +147,19 @@ jobs:
           path: book/book
 
   package:
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    name: debian package
+    # Release builds of the studio take a while; skip them on pull requests.
+    if: github.event_name != 'pull_request'
+    # The oldest supported Ubuntu, so the package's glibc requirement stays low.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev dpkg-dev
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Packaging tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev
       - name: Build .deb
         run: scripts/package-deb.sh
       - name: Inspect package
@@ -93,7 +174,7 @@ jobs:
 
   docker:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

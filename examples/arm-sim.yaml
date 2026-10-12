@@ -4,7 +4,9 @@
 # identical. See docs/sim-to-real.md.
 #
 # Needs a host built with the MuJoCo and LeRobot features and the MuJoCo
-# library, run from the repository root:
+# library. Model paths are relative to the working directory of the daemon
+# (hosts inherit it), so start the daemon from the repository root or use
+# absolute paths:
 #   cargo build --release -p ruro-host --features ruro-nodes-sim/mujoco,ruro-nodes-ml/lerobot
 #   RURO_MUJOCO_LIB=/path/to/libmujoco.so ruro run examples/arm-sim.yaml
 name: arm-sim

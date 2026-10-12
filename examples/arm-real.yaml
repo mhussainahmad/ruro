@@ -3,7 +3,8 @@
 #
 # Calibrate first: `offsets` are the raw servo readings (0..4095) with the arm
 # pointing straight up and the gripper closed; flip `directions` for joints
-# that turn the wrong way compared with the simulation.
+# that turn the wrong way compared with the simulation. The model path is
+# relative to the daemon's working directory (start it from the repository root).
 #   cargo build --release -p ruro-host --features ruro-nodes-ml/lerobot
 #   ruro run examples/arm-real.yaml
 name: arm-real

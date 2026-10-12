@@ -88,5 +88,8 @@ ROS 2, so the route is ROS 2 bridge → ruro:
   `isaacsim.ros2.bridge`), publish joint states, cameras and TF from the action graph,
   and subscribe to joint commands, then connect through the same ROS 2 bridge nodes.
 
-Once the bridge is in place, the downstream nodes of `examples/arm-sim.yaml` work
-unchanged; only the `arm` and `camera` nodes are swapped for bridge nodes.
+The intended setup keeps the downstream nodes of `examples/arm-sim.yaml` as they are
+and swaps only the `arm` and `camera` nodes for bridge nodes. This has not been tried
+yet: the bridge node types do not exist on this branch, so no example graph is
+shipped for this path, and the extension and package names above should be checked
+against the Gazebo and Isaac Sim versions in use.

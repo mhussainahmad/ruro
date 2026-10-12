@@ -89,11 +89,12 @@ for bin in "${bins[@]}"; do
         strip --strip-unneeded "$appdir/usr/bin/$bin"
     fi
 done
-install -Dm644 packaging/linux/ruro-studio.desktop "$appdir/usr/share/applications/ruro-studio.desktop"
-install -Dm644 packaging/icons/ruro-studio.svg "$appdir/usr/share/icons/hicolor/scalable/apps/ruro-studio.svg"
-for png in packaging/icons/hicolor/*/apps/ruro-studio.png; do
+app_id=io.github.mhussainahmad.ruro.Studio
+install -Dm644 "packaging/linux/$app_id.desktop" "$appdir/usr/share/applications/$app_id.desktop"
+install -Dm644 "packaging/icons/$app_id.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
+for png in packaging/icons/hicolor/*/apps/"$app_id.png"; do
     size="$(basename "$(dirname "$(dirname "$png")")")"
-    install -Dm644 "$png" "$appdir/usr/share/icons/hicolor/$size/apps/ruro-studio.png"
+    install -Dm644 "$png" "$appdir/usr/share/icons/hicolor/$size/apps/$app_id.png"
 done
 # The studio offers examples/ found above its executable in File > Open Example.
 install -d "$appdir/examples"
@@ -107,9 +108,9 @@ for f in crates/ruro-studio/assets/fonts/LICENSE-*.txt crates/ruro-studio/assets
 done
 
 # Top-level entries required by the AppImage specification.
-cp packaging/linux/ruro-studio.desktop "$appdir/ruro-studio.desktop"
-cp packaging/icons/hicolor/256x256/apps/ruro-studio.png "$appdir/ruro-studio.png"
-ln -s ruro-studio.png "$appdir/.DirIcon"
+cp "packaging/linux/$app_id.desktop" "$appdir/$app_id.desktop"
+cp "packaging/icons/hicolor/256x256/apps/$app_id.png" "$appdir/$app_id.png"
+ln -s "$app_id.png" "$appdir/.DirIcon"
 
 cat >"$appdir/AppRun" <<'EOF'
 #!/bin/sh

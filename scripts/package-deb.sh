@@ -97,18 +97,18 @@ for bin in "${bins[@]}"; do
     fi
 done
 
-# Desktop integration.
-install -Dm644 packaging/linux/ruro-studio.desktop \
-    "$stage/usr/share/applications/ruro-studio.desktop"
-install -Dm644 packaging/linux/io.github.mhussainahmad.ruro.Studio.metainfo.xml \
-    "$stage/usr/share/metainfo/io.github.mhussainahmad.ruro.Studio.metainfo.xml"
-sed -i 's|<launchable type="desktop-id">.*</launchable>|<launchable type="desktop-id">ruro-studio.desktop</launchable>|' \
-    "$stage/usr/share/metainfo/io.github.mhussainahmad.ruro.Studio.metainfo.xml"
-install -Dm644 packaging/icons/ruro-studio.svg \
-    "$stage/usr/share/icons/hicolor/scalable/apps/ruro-studio.svg"
-for png in packaging/icons/hicolor/*/apps/ruro-studio.png; do
+# Desktop integration. The desktop file, icons and metadata are all named
+# after the studio's app id, which is also its window's app id and class.
+app_id=io.github.mhussainahmad.ruro.Studio
+install -Dm644 "packaging/linux/$app_id.desktop" \
+    "$stage/usr/share/applications/$app_id.desktop"
+install -Dm644 "packaging/linux/$app_id.metainfo.xml" \
+    "$stage/usr/share/metainfo/$app_id.metainfo.xml"
+install -Dm644 "packaging/icons/$app_id.svg" \
+    "$stage/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
+for png in packaging/icons/hicolor/*/apps/"$app_id.png"; do
     size="$(basename "$(dirname "$(dirname "$png")")")"
-    install -Dm644 "$png" "$stage/usr/share/icons/hicolor/$size/apps/ruro-studio.png"
+    install -Dm644 "$png" "$stage/usr/share/icons/hicolor/$size/apps/$app_id.png"
 done
 
 # systemd units (installed disabled).
@@ -121,10 +121,15 @@ install -Dm644 packaging/systemd/user/ruro-daemon.service \
 doc="$stage/usr/share/doc/ruro"
 install -Dm644 README.md "$doc/README.md"
 # Example graphs with the files they reference (robot model, Python nodes).
-install -d "$doc/examples"
+# They are data the studio opens (File > Open Example), so they live in
+# /usr/share/ruro rather than under /usr/share/doc, which minimal systems may
+# leave out; the documentation directory links to them.
+examples="$stage/usr/share/ruro/examples"
+install -d "$examples"
 while IFS= read -r -d '' f; do
-    install -Dm644 "examples/$f" "$doc/examples/$f"
+    install -Dm644 "examples/$f" "$examples/$f"
 done < <(cd examples && find . -type f ! -name '.*' ! -path '*/__pycache__/*' -printf '%P\0')
+ln -s ../../ruro/examples "$doc/examples"
 if [[ -f CHANGELOG.md ]]; then
     gzip -9n <CHANGELOG.md >"$doc/changelog.gz"
     chmod 644 "$doc/changelog.gz"

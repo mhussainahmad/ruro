@@ -16,13 +16,10 @@
 #
 #   flatpak run io.github.mhussainahmad.ruro.Studio examples/camera.yaml
 #
-# App id: Flatpak requires a reverse-DNS id, so the manifest, desktop file,
-# icons and metainfo use io.github.mhussainahmad.ruro.Studio. The studio itself
-# currently sets its Wayland app id and X11 WM class to `ruro-studio`. On X11 the
-# desktop file's StartupWMClass=ruro-studio matches the window to this entry; on
-# Wayland compositors match the app id against the desktop file name, so the
-# window is not associated with it (generic icon, separate dock entry) until the
-# studio uses the same reverse-DNS id.
+# App id: the manifest, desktop file, icons and metainfo all use
+# io.github.mhussainahmad.ruro.Studio, and the studio sets the same id as its
+# Wayland app id and X11 window class, so the window is matched to its desktop
+# entry (icon, dock entry) on both.
 #
 # No libclang or LLVM extension is needed: iceoryx2 only runs bindgen for QNX.
 # The build does not need Python either (only ruro-py and ruro-host-py do, and
@@ -68,16 +65,14 @@ modules:
       - install -Dm755 target/release/ruro-studio /app/bin/ruro-studio
       # The studio looks for examples/ next to its install prefix.
       - mkdir -p /app/examples && cp -r examples/. /app/examples/
-      - install -Dm644 packaging/linux/ruro-studio.desktop
-        /app/share/applications/io.github.mhussainahmad.ruro.Studio.desktop
-      - desktop-file-edit --set-icon=io.github.mhussainahmad.ruro.Studio
+      - install -Dm644 packaging/linux/io.github.mhussainahmad.ruro.Studio.desktop
         /app/share/applications/io.github.mhussainahmad.ruro.Studio.desktop
       - install -Dm644 packaging/linux/io.github.mhussainahmad.ruro.Studio.metainfo.xml
         /app/share/metainfo/io.github.mhussainahmad.ruro.Studio.metainfo.xml
-      - install -Dm644 packaging/icons/ruro-studio.svg
+      - install -Dm644 packaging/icons/io.github.mhussainahmad.ruro.Studio.svg
         /app/share/icons/hicolor/scalable/apps/io.github.mhussainahmad.ruro.Studio.svg
       - for size in 16 32 48 64 128 256 512; do
-          install -Dm644 packaging/icons/hicolor/${size}x${size}/apps/ruro-studio.png
+          install -Dm644 packaging/icons/hicolor/${size}x${size}/apps/io.github.mhussainahmad.ruro.Studio.png
           /app/share/icons/hicolor/${size}x${size}/apps/io.github.mhussainahmad.ruro.Studio.png;
         done
     sources:

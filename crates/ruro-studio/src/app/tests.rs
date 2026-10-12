@@ -32,12 +32,23 @@ fn copy_example(name: &str, dir: &Path) -> PathBuf {
     to
 }
 
+/// The standard node library only, so layouts in tests do not depend on
+/// which other node crates the test binary links.
+fn std_registry() -> ruro_graph::Registry {
+    ruro_graph::Registry::new(
+        ruro_node::registry()
+            .iter()
+            .filter(|d| d.kind.starts_with("std/"))
+            .cloned(),
+    )
+}
+
 fn build(size: egui::Vec2, opts: Options, file: Option<PathBuf>) -> Harness<'static, Studio> {
     ruro_nodes_std::link();
     let mut opts = Some(opts);
     let mut h = Harness::builder().with_size(size).build_eframe(move |cc| {
         let mut s = Studio::new(cc, opts.take().unwrap());
-        s.registry = ruro_node::registry();
+        s.registry = std_registry();
         if let Some(f) = &file {
             s.open(f);
         }

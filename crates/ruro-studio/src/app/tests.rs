@@ -1146,6 +1146,14 @@ fn screenshots() {
     let Some(dir) = std::env::var_os("RURO_SCREENSHOTS").map(PathBuf::from) else {
         return;
     };
+    // Tests run in the crate directory; relative paths mean the workspace root.
+    let dir = if dir.is_relative() {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(dir)
+    } else {
+        dir
+    };
     std::fs::create_dir_all(&dir).unwrap();
     let save = |h: &mut Harness<'static, Studio>, name: &str| {
         h.run_steps(6);
@@ -1163,9 +1171,11 @@ fn screenshots() {
                 let mut s = Studio::new(cc, Options::offline());
                 s.registry = ruro_node::registry();
                 s.settings.panel_height = Some(panel);
-                s.settings.recent = ["camera.yaml", "arm.yaml"]
+                // Recent files as a user would have them.
+                let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+                s.settings.recent = ["rover/perception.yaml", "rover/drive.yaml", "arm/pick.yaml"]
                     .iter()
-                    .map(|f| examples().join(f).canonicalize().unwrap())
+                    .map(|f| home.join("robots").join(f))
                     .collect();
                 if let Some(f) = file.take() {
                     s.open(&f);
@@ -1176,23 +1186,23 @@ fn screenshots() {
     let shot = |file: Option<PathBuf>| shot_with(file, 280.0);
 
     let mut h = shot(None);
-    save(&mut h, "01-welcome");
+    save(&mut h, "studio-welcome");
 
     let mut h = shot(Some(examples().join("camera.yaml")));
-    save(&mut h, "02-editing");
+    save(&mut h, "studio-editing");
 
     simulate_live(&mut h);
     h.state_mut().push(Cmd::Focus(Some("blur".into())));
-    save(&mut h, "03-live");
+    save(&mut h, "studio");
 
     h.state_mut().push(Cmd::Activity(Activity::Processes));
     h.state_mut().push(Cmd::ShowPanel(PanelTab::Output));
-    save(&mut h, "04-processes-output");
+    save(&mut h, "studio-processes");
 
     h.state_mut().push(Cmd::CommandPalette);
     h.run_steps(2);
     h.event(egui::Event::Text("watch".into()));
-    save(&mut h, "05-command-palette");
+    save(&mut h, "command-palette");
     h.key_press(egui::Key::Escape);
 
     // Recording and replay.
@@ -1205,10 +1215,10 @@ fn screenshots() {
     );
     h.state_mut().recording_since =
         std::time::Instant::now().checked_sub(std::time::Duration::from_secs(83));
-    save(&mut h, "06-recording-replay");
+    save(&mut h, "studio-replay");
     h.state_mut().push(Cmd::Activity(Activity::Fleet));
     set_status(&mut h, None, None);
-    save(&mut h, "07-fleet");
+    save(&mut h, "studio-fleet");
 
     // The 3D view.
     let mut h = shot_with(Some(examples().join("camera.yaml")), 520.0);
@@ -1216,17 +1226,17 @@ fn screenshots() {
     h.state_mut().watches.clear();
     simulate_3d(&mut h);
     h.state_mut().push(Cmd::Focus(Some("blur".into())));
-    save(&mut h, "08-3d-view");
+    save(&mut h, "studio-3d");
 
     // Light theme.
     let mut h = shot(Some(examples().join("camera.yaml")));
     simulate_live(&mut h);
     h.state_mut().push(Cmd::Focus(Some("blur".into())));
     h.state_mut().push(Cmd::SetTheme(ThemeKind::Light));
-    save(&mut h, "09-light");
+    save(&mut h, "studio-light");
     let mut w = shot(None);
     w.state_mut().push(Cmd::SetTheme(ThemeKind::Light));
-    save(&mut w, "10-welcome-light");
+    save(&mut w, "studio-welcome-light");
     crate::theme::apply(&w.ctx, ThemeKind::Dark);
 
     // Tabs, a subgraph and a comparison.
@@ -1261,22 +1271,22 @@ fn screenshots() {
     }
     h.state_mut().push(Cmd::CompareWithSaved);
     h.state_mut().push(Cmd::FitView);
-    save(&mut h, "11-compare");
+    save(&mut h, "studio-compare");
     h.state_mut().push(Cmd::CloseCompare);
     h.state_mut().push(Cmd::Activity(Activity::Outline));
     h.state_mut().push(Cmd::Focus(Some("vision".into())));
-    save(&mut h, "12-subgraph");
+    save(&mut h, "studio-composite");
     h.state_mut().push(Cmd::OpenSubgraph("vision".into()));
     h.state_mut().push(Cmd::FitView);
-    save(&mut h, "13-subgraph-tab");
+    save(&mut h, "studio-subgraph");
 
     // Multi-selection and the close prompt.
     let mut h = shot(Some(examples().join("camera.yaml")));
     h.key_press_modifiers(CTRL, egui::Key::A);
-    save(&mut h, "14-selection");
+    save(&mut h, "studio-selection");
     h.state_mut().push(Cmd::AddNode("std/sine".into()));
     h.run_steps(2);
     let uid = h.state().doc.uid;
     h.state_mut().push(Cmd::CloseTab(uid));
-    save(&mut h, "15-close-prompt");
+    save(&mut h, "studio-close-prompt");
 }

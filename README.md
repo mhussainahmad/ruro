@@ -18,8 +18,10 @@ the `ruro` CLI.
 - **Typed.** Ports carry typed messages. Invalid wires are rejected in the editor and before
   deployment.
 - **Observable.** Every node reports its rate, step latency (p50/p99), CPU, input age, drops and
-  errors. Any output can be watched live: images, plots, values. Watching costs nothing while
-  nobody is looking.
+  errors. Any output can be watched live: images, plots, values, point clouds and transform
+  trees in 3D. Watching costs nothing while nobody is looking.
+- **Composable.** Group nodes into subgraphs, reuse them across graphs from their own files,
+  and compare versions of a graph node by node.
 - **Remote-ready.** The daemon is a Zenoh router: point the studio at a robot on the network
   and work with it as if it were local.
 - **Native.** The studio is a single native Linux binary built with egui. No browser, no
@@ -54,6 +56,21 @@ Or from a terminal:
 ./target/release/ruro param blur radius 12       # retune a running node
 ./target/release/ruro kill camera                # crash a process; watch it come back
 ```
+
+## The studio
+
+Graphs open as tabs with full undo and redo. Copy and paste nodes as YAML, group them into
+subgraphs, start from templates, and compare a graph with its saved version. While a graph runs,
+watch any output as an image, a plot or a 3D scene, record it, and replay recordings on a
+timeline. A fleet view lists every daemon on the network. Dark and light themes.
+
+| | |
+|---|---|
+| ![Point cloud and transform tree in the 3D view](docs/images/studio-3d.png) | ![The light theme](docs/images/studio-light.png) |
+| ![Comparing a graph with its saved version](docs/images/studio-compare.png) | ![A subgraph open in its own tab](docs/images/studio-subgraph.png) |
+
+The [studio guide](book/src/studio.md) covers every feature, and
+[studio plugins](book/src/studio-plugins.md) shows how to add visualizers and panels.
 
 ## Concepts
 
@@ -187,8 +204,10 @@ nodes/
 
 ```sh
 cargo test --workspace
-cargo clippy --workspace --all-targets
-# Re-render the studio screenshots headlessly:
+cargo clippy --workspace --all-targets -- -D warnings
+# The documentation book (needs mdbook):
+mdbook serve book
+# Re-render the studio screenshots headlessly (into docs/images):
 RURO_SCREENSHOTS=docs/images cargo test -p ruro-studio screenshots
 ```
 

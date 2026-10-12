@@ -169,13 +169,18 @@ fn graph(s: &mut Studio, ui: &mut Ui) {
             }
         });
         widgets::prop_row(ui, "File", "", |ui| {
-            let path = s
-                .doc
-                .path
-                .as_ref()
-                .map_or("not saved".to_owned(), |p| p.display().to_string());
-            ui.label(RichText::new(widgets::truncate(&path, 34)).color(TEXT_DIM()))
-                .on_hover_text(path);
+            // The file name; the full path is on hover.
+            let (name, path) = match &s.doc.path {
+                Some(p) => (crate::app::file_name(p), p.display().to_string()),
+                None if s.doc.parent.is_some() => {
+                    ("part of the parent graph".to_owned(), String::new())
+                }
+                None => ("not saved".to_owned(), String::new()),
+            };
+            let label = ui.label(RichText::new(widgets::truncate(&name, 34)).color(TEXT_DIM()));
+            if !path.is_empty() {
+                label.on_hover_text(path);
+            }
         });
         let graph = s.doc.to_graph(&s.registry);
         widgets::prop_row(ui, "Nodes", "", |ui| {

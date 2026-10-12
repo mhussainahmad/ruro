@@ -2,10 +2,15 @@
 //!
 //! It runs the Zenoh router every other ruro process connects to, validates
 //! and deploys graphs, starts one host process per group and restarts them
-//! according to their restart policy.
+//! according to their restart policy (or when they stop sending heartbeats).
+//! It also latches the emergency stop, coordinates recording and replay, and
+//! forwards the groups of multi-machine graphs to the daemons that run them.
 
+mod session;
 mod supervisor;
+mod upload;
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,22 +19,36 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use parking_lot::Mutex;
 use ruro_graph::{Graph, Registry};
-use ruro_proto::{Ctl, CtlReply, DaemonStatus, Keys};
+use ruro_proto::{Ctl, CtlReply, DaemonStatus, GroupMetrics, Keys, Security};
 use zenoh::Wait;
 
+use crate::session::{Playback, RecordSession};
 use crate::supervisor::Supervisor;
+
+pub use supervisor::runtime_dir;
 
 /// Default port of the daemon's router.
 pub const DEFAULT_PORT: u16 = 7447;
+
+/// How long control requests to hosts and peer daemons may take.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 pub struct Config {
     /// Daemon name; defaults to the hostname.
     pub name: String,
-    /// Zenoh endpoint to listen on, e.g. `tcp/127.0.0.1:7447`.
+    /// Zenoh endpoint to listen on, e.g. `tcp/127.0.0.1:7447` or
+    /// `tls/0.0.0.0:7447`. Hosts always use a private Unix socket.
     pub listen: String,
     /// Host binary used to run groups.
     pub host: PathBuf,
+    /// Other daemons to connect to, e.g. `tcp/robot2:7447`, so graphs can
+    /// span machines.
+    pub peers: Vec<String>,
+    /// TLS certificates and access token.
+    pub security: Security,
+    /// Hosts that publish no metrics for this long are killed and restarted.
+    pub heartbeat_timeout: Duration,
 }
 
 impl Config {
@@ -38,6 +57,9 @@ impl Config {
             name: ruro_proto::hostname(),
             listen: format!("tcp/127.0.0.1:{DEFAULT_PORT}"),
             host: default_host_binary(),
+            peers: Vec::new(),
+            security: Security::default(),
+            heartbeat_timeout: Duration::from_secs(5),
         }
     }
 }
@@ -76,11 +98,58 @@ pub fn load_registry(host: &Path) -> Result<Registry> {
     serde_json::from_slice(&out.stdout).context("parsing node registry")
 }
 
-/// Endpoint that local child processes use to reach a router listening on `listen`.
-fn local_endpoint(listen: &str) -> String {
-    listen
-        .replace("0.0.0.0", "127.0.0.1")
-        .replace("[::]", "[::1]")
+/// Everything the daemon's threads share.
+pub(crate) struct State {
+    pub name: String,
+    pub keys: Keys,
+    pub session: zenoh::Session,
+    pub sup: Mutex<Supervisor>,
+    pub host: PathBuf,
+    pub registry: Mutex<Registry>,
+    pub estop: AtomicBool,
+    pub recording: Mutex<Option<RecordSession>>,
+    pub playback: Mutex<Option<Playback>>,
+    /// Daemons running groups of the graph deployed here.
+    pub peers: Mutex<BTreeSet<String>>,
+    /// Last metrics seen per group: `(pid, when)`.
+    pub heartbeats: Mutex<HashMap<String, (u32, Instant)>>,
+    /// The graph as deployed by the client (before flattening and machine
+    /// assignment), returned by `Ctl::Graph`.
+    pub deployed: Mutex<Option<String>>,
+}
+
+impl State {
+    /// Sends a command to the host running `group` and waits for its reply.
+    pub fn host_request(&self, group: &str, cmd: &ruro_proto::HostCommand) -> Result<String> {
+        let payload = serde_json::to_vec(cmd)?;
+        ruro_proto::request_key(
+            &self.session,
+            &self.keys.host_ctl(group),
+            payload,
+            REQUEST_TIMEOUT,
+        )
+        .with_context(|| format!("group `{group}`"))
+    }
+
+    /// Sends a control request to another daemon.
+    pub fn peer_request(&self, daemon: &str, op: Ctl, payload: &str) -> Result<String> {
+        ruro_proto::request(
+            &self.session,
+            &Keys::new(daemon),
+            op,
+            payload,
+            REQUEST_TIMEOUT,
+        )
+        .with_context(|| format!("daemon `{daemon}`"))
+    }
+
+    fn publish_estop(&self) {
+        let flag = ruro_msg::Flag(self.estop.load(Ordering::Relaxed));
+        let _ = self
+            .session
+            .put(self.keys.estop(), ruro_msg::Message::to_bytes(&flag))
+            .wait();
+    }
 }
 
 /// A running daemon. Dropping it stops the deployed graph.
@@ -93,15 +162,48 @@ impl Daemon {
     /// Starts the daemon on background threads.
     pub fn start(config: Config) -> Result<Self> {
         let registry = load_registry(&config.host)?;
-        let session = zenoh::open(ruro_proto::router_config(&config.listen)?)
+        let dir = runtime_dir(&config.name);
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+
+        // Hosts reach the router over a private Unix socket, so they need
+        // neither the network endpoint nor TLS certificates.
+        let socket = dir.join("zenoh.sock");
+        let _ = std::fs::remove_file(&socket);
+        let local = format!("unixsock-stream/{}", socket.display());
+        let dictionary = match &config.security.token {
+            Some(token) => Some(write_dictionary(&dir, token)?),
+            None => None,
+        };
+        let zconfig = ruro_proto::router_config_with(
+            &[config.listen.clone(), local.clone()],
+            &config.peers,
+            &config.security,
+            dictionary.as_deref(),
+        )?;
+        let session = zenoh::open(zconfig)
             .wait()
             .map_err(|e| anyhow!("cannot listen on {}: {e}", config.listen))?;
         let keys = Keys::new(&config.name);
-        let sup = Arc::new(Mutex::new(Supervisor::new(
+        let sup = Supervisor::new(
             config.name.clone(),
             config.host.clone(),
-            local_endpoint(&config.listen),
-        )?));
+            local,
+            config.security.token.clone(),
+        )?;
+        let state = Arc::new(State {
+            name: config.name.clone(),
+            keys: keys.clone(),
+            session: session.clone(),
+            sup: Mutex::new(sup),
+            host: config.host.clone(),
+            registry: Mutex::new(registry),
+            estop: AtomicBool::new(false),
+            recording: Mutex::new(None),
+            playback: Mutex::new(None),
+            peers: Mutex::new(BTreeSet::new()),
+            heartbeats: Mutex::new(HashMap::new()),
+            deployed: Mutex::new(None),
+        });
 
         let queryable = session
             .declare_queryable(format!("ruro/{}/ctl/*", config.name))
@@ -109,14 +211,10 @@ impl Daemon {
             .map_err(|e| anyhow!("{e}"))?;
         let stop = Arc::new(AtomicBool::new(false));
 
-        let ctl_sup = sup.clone();
-        let ctl_keys = keys.clone();
-        let ctl_registry = registry.clone();
-        let host = config.host.clone();
+        let ctl_state = state.clone();
         std::thread::Builder::new()
             .name("ruro-ctl".into())
             .spawn(move || {
-                let mut registry = ctl_registry;
                 while let Ok(query) = queryable.recv() {
                     let op = query
                         .key_expr()
@@ -127,63 +225,81 @@ impl Daemon {
                         .to_owned();
                     let payload = query
                         .payload()
-                        .map(|p| String::from_utf8_lossy(&p.to_bytes()).into_owned());
-                    let payload = payload.unwrap_or_default();
-                    if op == Ctl::Registry.as_str() {
-                        // Re-read so newly built node types show up without a restart.
-                        if let Ok(r) = load_registry(&host) {
-                            registry = r;
-                        }
-                    }
+                        .map(|p| p.to_bytes().into_owned())
+                        .unwrap_or_default();
                     let reply: CtlReply =
-                        handle(&op, &payload, &ctl_sup, &registry).map_err(|e| format!("{e:#}"));
+                        handle(&ctl_state, &op, &payload).map_err(|e| format!("{e:#}"));
                     if let Err(e) = &reply {
                         tracing::warn!("{op}: {e}");
                     }
                     let _ = query
-                        .reply(ctl_keys.ctl_key_for(&op), ruro_proto::reply_bytes(&reply))
+                        .reply(
+                            format!("ruro/{}/ctl/{op}", ctl_state.name),
+                            ruro_proto::reply_bytes(&reply),
+                        )
                         .wait();
                 }
             })?;
 
+        // Heartbeats: every host publishes metrics twice a second.
+        let hb = state.clone();
+        let heartbeat_sub = session
+            .declare_subscriber(keys.all_metrics())
+            .callback(move |sample| {
+                if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&sample.payload().to_bytes()) {
+                    hb.heartbeats
+                        .lock()
+                        .insert(m.group, (m.pid, Instant::now()));
+                }
+            })
+            .wait()
+            .map_err(|e| anyhow!("{e}"))?;
+
         let loop_stop = stop.clone();
-        let name = config.name.clone();
         let started = Instant::now();
+        let heartbeat_timeout = config.heartbeat_timeout;
+        let st = state.clone();
         let thread = std::thread::Builder::new()
             .name("ruro-supervisor".into())
             .spawn(move || {
+                let _heartbeat_sub = heartbeat_sub;
                 let mut last_status = Instant::now() - Duration::from_secs(1);
                 while !loop_stop.load(Ordering::Relaxed) {
-                    sup.lock().poll();
+                    {
+                        let beats: Vec<_> = st.heartbeats.lock().drain().collect();
+                        let mut sup = st.sup.lock();
+                        for (group, (pid, _)) in beats {
+                            sup.heartbeat(&group, pid);
+                        }
+                        sup.check_heartbeats(heartbeat_timeout);
+                        sup.poll();
+                    }
+                    session::reap_playback(&st);
                     if last_status.elapsed() >= Duration::from_millis(500) {
                         last_status = Instant::now();
-                        let s = sup.lock();
-                        let status = DaemonStatus {
-                            name: name.clone(),
-                            version: env!("CARGO_PKG_VERSION").into(),
-                            pid: std::process::id(),
-                            uptime_s: started.elapsed().as_secs_f64(),
-                            graph: s.graph().map(|g| g.name.clone()),
-                            groups: s.status(),
-                            recording: None,
-                            playback: None,
-                        };
-                        drop(s);
-                        let _ = session
-                            .put(keys.status(), ruro_proto::encode(&status))
+                        let status = status(&st, started);
+                        let _ = st
+                            .session
+                            .put(st.keys.status(), ruro_proto::encode(&status))
                             .wait();
+                        // Republished so hosts that missed a change converge.
+                        st.publish_estop();
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                sup.lock().stop_all();
-                let _ = session.close().wait();
+                session::stop_playback(&st);
+                st.sup.lock().stop_all();
+                if let Err(e) = session::finish_recording(&st, false) {
+                    tracing::warn!("{e:#}");
+                }
+                let _ = st.session.close().wait();
             })?;
 
         tracing::info!(
             "daemon `{}` listening on {} with {} node types (host: {})",
             config.name,
             config.listen,
-            registry.nodes.len(),
+            state.registry.lock().nodes.len(),
             config.host.display()
         );
         Ok(Self {
@@ -211,44 +327,256 @@ impl Drop for Daemon {
     }
 }
 
-fn handle(op: &str, payload: &str, sup: &Mutex<Supervisor>, registry: &Registry) -> Result<String> {
+/// Writes the `user:password` file Zenoh checks tokens against.
+fn write_dictionary(dir: &Path, token: &str) -> Result<PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let path = dir.join("auth");
+    let _ = std::fs::remove_file(&path);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("writing {}", path.display()))?;
+    writeln!(f, "{}:{token}", ruro_proto::AUTH_USER)?;
+    Ok(path)
+}
+
+fn status(st: &State, started: Instant) -> DaemonStatus {
+    let s = st.sup.lock();
+    DaemonStatus {
+        name: st.name.clone(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        pid: std::process::id(),
+        uptime_s: started.elapsed().as_secs_f64(),
+        graph: s.graph().map(|g| g.name.clone()),
+        groups: s.status(),
+        recording: st
+            .recording
+            .lock()
+            .as_ref()
+            .map(|r| r.output.display().to_string()),
+        playback: st.playback.lock().as_ref().map(Playback::status),
+        estopped: st.estop.load(Ordering::Relaxed),
+    }
+}
+
+fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
+    let text = || String::from_utf8_lossy(payload).into_owned();
     match op {
-        "deploy" => {
-            let graph = Graph::from_yaml(payload)?;
-            let issues = ruro_graph::validate(&graph, registry);
-            if !issues.is_empty() {
-                let list: Vec<String> = issues.iter().map(ToString::to_string).collect();
-                bail!("graph is invalid:\n  {}", list.join("\n  "));
-            }
-            let groups = sup.lock().deploy(graph)?;
-            Ok(format!("deployed {groups} group(s)"))
+        "deploy" => deploy(st, &text()),
+        "deploy-groups" => {
+            let graph = Graph::from_yaml(&text())?;
+            session::stop_playback(st);
+            st.sup.lock().stop_all();
+            session::finish_recording(st, false)?;
+            let n = st.sup.lock().deploy(graph)?;
+            *st.deployed.lock() = Some(text());
+            Ok(format!("deployed {n} group(s) on `{}`", st.name))
         }
         "stop" => {
-            sup.lock().stop_all();
-            Ok("stopped".into())
+            session::stop_playback(st);
+            st.sup.lock().stop_all();
+            let recorded = session::finish_recording(st, false)?;
+            let peers = std::mem::take(&mut *st.peers.lock());
+            for p in peers {
+                if let Err(e) = st.peer_request(&p, Ctl::Stop, "") {
+                    tracing::warn!("{e:#}");
+                }
+            }
+            Ok(match recorded {
+                Some(r) => format!("stopped; {r}"),
+                None => "stopped".into(),
+            })
         }
-        "registry" => Ok(serde_json::to_string(registry)?),
-        "graph" => Ok(sup
-            .lock()
-            .graph()
-            .map(|g| g.to_yaml())
-            .transpose()?
-            .unwrap_or_default()),
-        "ping" => Ok(sup.lock().daemon().to_owned()),
+        "registry" => {
+            // Re-read so newly built node types show up without a restart.
+            if let Ok(r) = load_registry(&st.host) {
+                *st.registry.lock() = r;
+            }
+            Ok(serde_json::to_string(&*st.registry.lock())?)
+        }
+        "graph" => Ok(match st.sup.lock().graph() {
+            Some(_) => st.deployed.lock().clone().unwrap_or_default(),
+            None => String::new(),
+        }),
+        "ping" => Ok(st.name.clone()),
         "kill" => {
-            sup.lock().kill(payload.trim())?;
-            Ok(format!("killed `{}`", payload.trim()))
+            let group = text();
+            st.sup.lock().kill(group.trim())?;
+            Ok(format!("killed `{}`", group.trim()))
+        }
+        "record" => {
+            let path = text();
+            let path = path.trim();
+            if path.is_empty() {
+                session::finish_recording(st, true)?.context("not recording")
+            } else {
+                session::start_recording(st, Path::new(path))
+            }
+        }
+        "playback" => {
+            let cmd = serde_json::from_slice(payload).context("bad playback command")?;
+            session::playback(st, cmd)
+        }
+        "estop" => {
+            let engage = match text().trim() {
+                "engage" | "" => true,
+                "release" => false,
+                other => bail!("expected `engage` or `release`, got `{other}`"),
+            };
+            st.estop.store(engage, Ordering::Relaxed);
+            st.sup.lock().host_state.estopped = engage;
+            st.publish_estop();
+            tracing::warn!(
+                "emergency stop {}",
+                if engage { "engaged" } else { "released" }
+            );
+            Ok(if engage {
+                "e-stop engaged".into()
+            } else {
+                "e-stop released".into()
+            })
+        }
+        "upload" => {
+            let chunk: ruro_proto::UploadChunk = ruro_proto::decode(payload)?;
+            let dir = st.sup.lock().hosts_dir();
+            upload::receive(&dir, &chunk)
         }
         other => bail!("unknown operation `{other}`"),
     }
 }
 
-trait CtlKey {
-    fn ctl_key_for(&self, op: &str) -> String;
+/// Validates `yaml`, sends the groups of other machines to their daemons and
+/// starts the local ones.
+fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
+    let mut graph = Graph::from_yaml(yaml)?.flatten()?;
+    // Pin every group to a machine, so each daemon knows exactly what it runs.
+    for group in graph.groups().into_keys() {
+        graph
+            .groups
+            .entry(group)
+            .or_default()
+            .machine
+            .get_or_insert_with(|| st.name.clone());
+    }
+    let machines: BTreeSet<String> = graph
+        .groups
+        .values()
+        .filter_map(|c| c.machine.clone())
+        .filter(|m| *m != st.name)
+        .collect();
+
+    // Node types: this daemon's hosts plus whatever the peers offer.
+    let mut descriptors: Vec<_> = st.registry.lock().iter().cloned().collect();
+    let custom_hosts: BTreeSet<String> = graph
+        .groups
+        .values()
+        .filter(|c| c.machine.as_deref() == Some(st.name.as_str()))
+        .filter_map(|c| c.host.clone())
+        .collect();
+    for h in custom_hosts {
+        let path = st.sup.lock().resolve_host(Some(&h))?;
+        descriptors.extend(load_registry(&path)?.iter().cloned());
+    }
+    for m in &machines {
+        let body = st.peer_request(m, Ctl::Registry, "")?;
+        let r: Registry = serde_json::from_str(&body).context("peer registry")?;
+        descriptors.extend(r.iter().cloned());
+    }
+    let registry = Registry::new(descriptors);
+    let mut issues: Vec<String> = ruro_graph::validate(&graph, &registry)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    issues.extend(runtime_issues(&graph, &registry));
+    if !issues.is_empty() {
+        bail!("graph is invalid:\n  {}", issues.join("\n  "));
+    }
+
+    session::stop_playback(st);
+    st.sup.lock().stop_all();
+    session::finish_recording(st, false)?;
+    let previous = std::mem::take(&mut *st.peers.lock());
+    for p in previous.difference(&machines) {
+        if let Err(e) = st.peer_request(p, Ctl::Stop, "") {
+            tracing::warn!("{e:#}");
+        }
+    }
+    let normalized = graph.to_yaml()?;
+    for m in &machines {
+        st.peer_request(m, Ctl::DeployGroups, &normalized)?;
+        st.peers.lock().insert(m.clone());
+    }
+    let n = st.sup.lock().deploy(graph)?;
+    *st.deployed.lock() = Some(yaml.to_owned());
+    Ok(if machines.is_empty() {
+        format!("deployed {n} group(s)")
+    } else {
+        format!(
+            "deployed {n} group(s) here and the rest on {}",
+            machines.into_iter().collect::<Vec<_>>().join(", ")
+        )
+    })
 }
 
-impl CtlKey for Keys {
-    fn ctl_key_for(&self, op: &str) -> String {
-        format!("ruro/{}/ctl/{op}", self.daemon())
+/// Checks that need the runtime's conventions rather than node descriptors.
+fn runtime_issues(graph: &Graph, registry: &Registry) -> Vec<String> {
+    let mut issues = Vec::new();
+    if graph.clock == ruro_graph::ClockSource::Sim {
+        let clocks = graph
+            .nodes
+            .values()
+            .filter_map(|n| registry.get(&n.kind))
+            .flat_map(|d| d.outputs.iter())
+            .filter(|p| p.ty == "std/Clock")
+            .count();
+        if clocks != 1 {
+            issues.push(format!(
+                "`clock: sim` needs exactly one std/Clock output, found {clocks}"
+            ));
+        }
+    }
+    let groups = graph.groups();
+    for (name, config) in &graph.groups {
+        let Some(rt) = &config.realtime else { continue };
+        for node in rt.deadlines_us.keys() {
+            if !groups.get(name).is_some_and(|ns| ns.contains(node)) {
+                issues.push(format!(
+                    "group `{name}`: deadline for `{node}`, which is not in the group"
+                ));
+            }
+        }
+        if let Some(p) = rt.priority
+            && !(1..=99).contains(&p)
+        {
+            issues.push(format!("group `{name}`: priority {p} is outside 1-99"));
+        }
+        if let Some(r) = rt.rate
+            && !(r.is_finite() && r > 0.0 && r <= 100_000.0)
+        {
+            issues.push(format!(
+                "group `{name}`: rate {r} Hz is out of range (0, 100000]"
+            ));
+        }
+    }
+    issues
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_checks() {
+        let registry = Registry::new([]);
+        let g = Graph::from_yaml(
+            "name: x\nclock: sim\ngroups:\n  a:\n    realtime: { priority: 120, rate: -1, deadlines_us: { ghost: 5 } }\nnodes:\n  n: { type: t/x, group: a }\n",
+        )
+        .unwrap();
+        let issues = runtime_issues(&g, &registry);
+        assert_eq!(issues.len(), 4, "{issues:?}");
+        assert!(issues[0].contains("std/Clock"));
     }
 }

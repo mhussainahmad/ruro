@@ -20,9 +20,16 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+ruro-msg = { workspace = true }
+ruro-node = { workspace = true }
+serde_json = { workspace = true }
 
 [[bench]]
 name = "hop"
+harness = false
+
+[[bench]]
+name = "receive"
 harness = false
 
 [lib]

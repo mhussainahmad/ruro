@@ -77,6 +77,28 @@ impl Keys {
     pub fn shm_topic(&self, graph: &str, node: &str, port: &str) -> String {
         format!("ruro/{}/{graph}/{node}/{port}", self.daemon)
     }
+
+    /// Emergency stop state, a [`ruro_msg::Flag`] (postcard). The daemon
+    /// latches it and republishes it with every status.
+    pub fn estop(&self) -> String {
+        format!("{}/estop", self.prefix)
+    }
+
+    /// Request/reply endpoint of one host process, for [`HostCommand`]s.
+    pub fn host_ctl(&self, group: &str) -> String {
+        format!("{}/host/{group}/ctl", self.prefix)
+    }
+
+    /// Replayed messages for an output port, as [`DataFrame`]s.
+    pub fn inject(&self, node: &str, port: &str) -> String {
+        format!("{}/inject/{node}/{port}", self.prefix)
+    }
+
+    /// Data-plane key of an output port whose consumers run on another
+    /// machine. Not scoped to a daemon: both ends name it from the graph.
+    pub fn data(graph: &str, node: &str, port: &str) -> String {
+        format!("ruro/data/{graph}/{node}/{port}")
+    }
 }
 
 /// Control operations served by the daemon.
@@ -99,6 +121,13 @@ pub enum Ctl {
     Record,
     /// Payload: JSON [`PlaybackCommand`]. Controls replay of a recording.
     Playback,
+    /// Payload: `engage` or `release`. Latches the emergency stop.
+    Estop,
+    /// Payload: graph YAML with `machine` set on every group. Sent by the
+    /// daemon a graph was deployed to, asking a peer to run its groups.
+    DeployGroups,
+    /// Payload: postcard [`UploadChunk`]. Stores a host binary.
+    Upload,
 }
 
 impl Ctl {
@@ -112,6 +141,9 @@ impl Ctl {
             Ctl::Ping => "ping",
             Ctl::Record => "record",
             Ctl::Playback => "playback",
+            Ctl::Estop => "estop",
+            Ctl::DeployGroups => "deploy-groups",
+            Ctl::Upload => "upload",
         }
     }
 }
@@ -133,6 +165,8 @@ pub struct DaemonStatus {
     pub recording: Option<String>,
     /// Replay in progress, if any.
     pub playback: Option<PlaybackStatus>,
+    /// True while the emergency stop is engaged.
+    pub estopped: bool,
 }
 
 /// State of a replay.
@@ -213,6 +247,104 @@ pub struct NodeMetrics {
     pub last_error: Option<String>,
     /// Messages dropped by full input queues since start.
     pub dropped: u64,
+    /// Scheduling quality, for timer-driven nodes and nodes with a deadline.
+    pub timing: Option<TimingMetrics>,
+}
+
+/// Wakeup jitter, deadline misses and cycle overruns of one node.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimingMetrics {
+    /// Lateness of timer wakeups (actual minus scheduled) over the last
+    /// window, in microseconds. Zero for nodes without a timer.
+    pub jitter_p50_us: f64,
+    pub jitter_p99_us: f64,
+    pub jitter_max_us: f64,
+    /// Steps that exceeded the node's deadline, since start.
+    pub deadline_misses: u64,
+    /// Cycles of the node's deterministic group that ran over their period,
+    /// since start. Always zero outside deterministic groups.
+    pub overruns: u64,
+}
+
+/// Control requests a daemon sends to one of its host processes (JSON).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+pub enum HostCommand {
+    /// Record every output of the group into `path` (an MCAP segment), or
+    /// stop recording and finish the file when `path` is `None`.
+    Record { path: Option<String> },
+    /// Nodes whose outputs are being replayed: they stop stepping and their
+    /// outputs carry injected messages instead. Empty resumes every node.
+    Mute { nodes: Vec<String> },
+}
+
+/// One chunk of an uploaded host binary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UploadChunk {
+    /// Name groups use to request the binary (`groups.<g>.host`).
+    pub name: String,
+    pub offset: u64,
+    pub total: u64,
+    /// SHA-256 of the whole file, lowercase hex.
+    pub sha256: String,
+    pub data: Vec<u8>,
+}
+
+/// A message on the network data plane (cross-machine wires and replay):
+/// sequence number, send stamp and the message encoding, lz4-compressed when
+/// that pays off.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DataFrame {
+    pub seq: u64,
+    pub stamp_ns: u64,
+    pub body: Vec<u8>,
+}
+
+/// Payloads at least this large are lz4-compressed when compression is on.
+pub const COMPRESS_MIN: usize = 4096;
+
+const FRAME_HEADER: usize = 17;
+const FLAG_LZ4: u8 = 1;
+
+impl DataFrame {
+    /// Encodes a frame. With `compress`, bodies of at least [`COMPRESS_MIN`]
+    /// bytes are lz4-compressed if that makes them smaller.
+    pub fn encode(seq: u64, stamp_ns: u64, body: &[u8], compress: bool) -> Vec<u8> {
+        let packed = (compress && body.len() >= COMPRESS_MIN)
+            .then(|| lz4_flex::compress_prepend_size(body))
+            .filter(|c| c.len() < body.len());
+        let (flags, payload) = match &packed {
+            Some(c) => (FLAG_LZ4, c.as_slice()),
+            None => (0, body),
+        };
+        let mut out = Vec::with_capacity(FRAME_HEADER + payload.len());
+        out.push(flags);
+        out.extend_from_slice(&seq.to_le_bytes());
+        out.extend_from_slice(&stamp_ns.to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        anyhow::ensure!(
+            bytes.len() >= FRAME_HEADER,
+            "data frame shorter than its header"
+        );
+        let seq = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
+        let stamp_ns = u64::from_le_bytes(bytes[9..17].try_into().unwrap());
+        let payload = &bytes[FRAME_HEADER..];
+        let body = match bytes[0] {
+            0 => payload.to_vec(),
+            FLAG_LZ4 => lz4_flex::decompress_size_prepended(payload)
+                .map_err(|e| anyhow!("corrupt compressed frame: {e}"))?,
+            f => anyhow::bail!("unknown data frame flags {f:#x}"),
+        };
+        Ok(Self {
+            seq,
+            stamp_ns,
+            body,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,22 +400,117 @@ pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     postcard::from_bytes(bytes).context("malformed protocol message")
 }
 
+/// Transport security for daemons and their clients.
+///
+/// TLS applies to `tls/...` endpoints: a daemon presents `cert`/`key`, and
+/// clients verify it against `ca`. A daemon that is also given a `ca`
+/// requires clients to present a certificate signed by it (mutual TLS),
+/// which clients configure with their own `cert`/`key`. `token` turns on Zenoh's
+/// username/password authentication with the fixed user `ruro`: a daemon
+/// accepts only sessions that present the same token, on every endpoint.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Security {
+    pub cert: Option<std::path::PathBuf>,
+    pub key: Option<std::path::PathBuf>,
+    pub ca: Option<std::path::PathBuf>,
+    pub token: Option<String>,
+}
+
+/// User name presented with [`Security::token`].
+pub const AUTH_USER: &str = "ruro";
+
+impl Security {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    fn apply(&self, c: &mut zenoh::Config, router: bool) -> Result<()> {
+        let path = |p: &std::path::Path| -> Result<String> {
+            let p = std::fs::canonicalize(p).with_context(|| format!("{}", p.display()))?;
+            Ok(serde_json::to_string(&p.to_string_lossy())?)
+        };
+        if let Some(ca) = &self.ca {
+            set(c, "transport/link/tls/root_ca_certificate", &path(ca)?)?;
+        }
+        match (&self.cert, &self.key) {
+            (Some(cert), Some(key)) => {
+                let (cert, key) = (path(cert)?, path(key)?);
+                // A daemon presents its certificate to clients, and to the
+                // peers it connects to; a client presents it for mutual TLS.
+                if router {
+                    set(c, "transport/link/tls/listen_certificate", &cert)?;
+                    set(c, "transport/link/tls/listen_private_key", &key)?;
+                }
+                set(c, "transport/link/tls/connect_certificate", &cert)?;
+                set(c, "transport/link/tls/connect_private_key", &key)?;
+            }
+            (None, None) => {}
+            _ => anyhow::bail!("a TLS certificate needs its private key and vice versa"),
+        }
+        // A daemon given a CA accepts only clients with a certificate it signed.
+        let mtls = if router {
+            self.ca.is_some() && self.cert.is_some()
+        } else {
+            self.cert.is_some()
+        };
+        if mtls {
+            set(c, "transport/link/tls/enable_mtls", "true")?;
+        }
+        if let Some(token) = &self.token {
+            set(c, "transport/auth/usrpwd/user", &format!("\"{AUTH_USER}\""))?;
+            set(
+                c,
+                "transport/auth/usrpwd/password",
+                &serde_json::to_string(token)?,
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// Zenoh configuration for a daemon: a router listening on `listen`.
 pub fn router_config(listen: &str) -> Result<zenoh::Config> {
+    router_config_with(&[listen.to_owned()], &[], &Security::default(), None)
+}
+
+/// Zenoh configuration for a daemon listening on several endpoints and
+/// connecting to peer daemons. `dictionary` is the `user:password` file that
+/// enforces [`Security::token`]; the caller writes it with private permissions.
+pub fn router_config_with(
+    listen: &[String],
+    peers: &[String],
+    security: &Security,
+    dictionary: Option<&std::path::Path>,
+) -> Result<zenoh::Config> {
     let mut c = zenoh::Config::default();
     set(&mut c, "mode", "\"router\"")?;
-    set(&mut c, "listen/endpoints", &format!("[\"{listen}\"]"))?;
+    set(&mut c, "listen/endpoints", &serde_json::to_string(listen)?)?;
+    set(&mut c, "connect/endpoints", &serde_json::to_string(peers)?)?;
     set(&mut c, "scouting/multicast/enabled", "false")?;
+    security.apply(&mut c, true)?;
+    if let Some(d) = dictionary {
+        set(
+            &mut c,
+            "transport/auth/usrpwd/dictionary_file",
+            &serde_json::to_string(&d.to_string_lossy())?,
+        )?;
+    }
     Ok(c)
 }
 
 /// Zenoh configuration for a client of the daemon at `endpoint`.
 /// Opening fails immediately if nothing is listening.
 pub fn client_config(endpoint: &str) -> Result<zenoh::Config> {
+    client_config_with(endpoint, &Security::default())
+}
+
+/// Like [`client_config`], with TLS and token authentication.
+pub fn client_config_with(endpoint: &str, security: &Security) -> Result<zenoh::Config> {
     let mut c = zenoh::Config::default();
     set(&mut c, "mode", "\"client\"")?;
     set(&mut c, "connect/endpoints", &format!("[\"{endpoint}\"]"))?;
     set(&mut c, "scouting/multicast/enabled", "false")?;
+    security.apply(&mut c, false)?;
     Ok(c)
 }
 
@@ -300,16 +527,42 @@ pub fn request(
     payload: &str,
     timeout: std::time::Duration,
 ) -> Result<String> {
+    request_bytes(session, keys, op, payload.as_bytes().to_vec(), timeout)
+}
+
+/// Like [`request`], with a binary payload.
+pub fn request_bytes(
+    session: &zenoh::Session,
+    keys: &Keys,
+    op: Ctl,
+    payload: Vec<u8>,
+    timeout: std::time::Duration,
+) -> Result<String> {
+    request_key(session, &keys.ctl(op), payload, timeout).map_err(|e| {
+        if e.to_string().starts_with("no reply") {
+            anyhow!("no reply from daemon `{}` (is it running?)", keys.daemon())
+        } else {
+            e
+        }
+    })
+}
+
+/// Sends a request to any queryable that answers with a [`CtlReply`]
+/// (daemons and hosts) and waits for the reply.
+pub fn request_key(
+    session: &zenoh::Session,
+    key: &str,
+    payload: Vec<u8>,
+    timeout: std::time::Duration,
+) -> Result<String> {
     use zenoh::Wait;
     let replies = session
-        .get(keys.ctl(op))
-        .payload(payload.as_bytes().to_vec())
+        .get(key)
+        .payload(payload)
         .timeout(timeout)
         .wait()
         .map_err(|e| anyhow!("request failed: {e}"))?;
-    let reply = replies
-        .recv()
-        .map_err(|_| anyhow!("no reply from daemon `{}` (is it running?)", keys.daemon()))?;
+    let reply = replies.recv().map_err(|_| anyhow!("no reply from {key}"))?;
     let sample = reply
         .result()
         .map_err(|e| anyhow!("daemon error: {:?}", e.payload().to_bytes()))?;
@@ -320,8 +573,13 @@ pub fn request(
 
 /// Opens a client session to the daemon at `endpoint`.
 pub fn connect(endpoint: &str) -> Result<zenoh::Session> {
+    connect_with(endpoint, &Security::default())
+}
+
+/// Opens a client session with TLS and token authentication.
+pub fn connect_with(endpoint: &str, security: &Security) -> Result<zenoh::Session> {
     use zenoh::Wait;
-    zenoh::open(client_config(endpoint)?)
+    zenoh::open(client_config_with(endpoint, security)?)
         .wait()
         .map_err(|e| anyhow!("no ruro daemon reachable at {endpoint} ({e})"))
 }
@@ -396,9 +654,48 @@ mod tests {
                 errors: 0,
                 last_error: None,
                 dropped: 0,
+                timing: Some(TimingMetrics {
+                    jitter_p99_us: 12.0,
+                    deadline_misses: 2,
+                    ..Default::default()
+                }),
             }],
         };
         assert_eq!(decode::<GroupMetrics>(&encode(&m)).unwrap(), m);
+    }
+
+    #[test]
+    fn data_frames_roundtrip_and_compress() {
+        let small = DataFrame::encode(3, 9, b"abc", true);
+        assert_eq!(small.len(), 17 + 3, "small payloads are sent as is");
+        assert_eq!(
+            DataFrame::decode(&small).unwrap(),
+            DataFrame {
+                seq: 3,
+                stamp_ns: 9,
+                body: b"abc".to_vec()
+            }
+        );
+        let image = vec![7u8; 640 * 480];
+        let packed = DataFrame::encode(1, 2, &image, true);
+        assert!(packed.len() < image.len() / 10);
+        assert_eq!(DataFrame::decode(&packed).unwrap().body, image);
+        let plain = DataFrame::encode(1, 2, &image, false);
+        assert_eq!(plain.len(), 17 + image.len());
+        assert!(DataFrame::decode(&packed[..10]).is_err());
+        let mut bad = packed.clone();
+        bad[0] = 9;
+        assert!(DataFrame::decode(&bad).is_err());
+    }
+
+    #[test]
+    fn host_commands_are_json() {
+        let c = HostCommand::Mute {
+            nodes: vec!["src".into()],
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert_eq!(json, r#"{"cmd":"mute","nodes":["src"]}"#);
+        assert_eq!(serde_json::from_str::<HostCommand>(&json).unwrap(), c);
     }
 
     #[test]

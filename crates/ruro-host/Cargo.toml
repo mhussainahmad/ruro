@@ -23,6 +23,7 @@ ruro-node = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-proto = { workspace = true }
 ruro-transport = { workspace = true }
+ruro-record = { path = "../ruro-record" }
 ruro-nodes-std = { workspace = true }
 ruro-nodes-hw = { workspace = true }
 ruro-nodes-sim = { workspace = true }
@@ -41,3 +42,10 @@ libc = { workspace = true }
 
 [dev-dependencies]
 ruro = { workspace = true }
+ruro-daemon = { workspace = true }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
+sha2 = "0.10"
+
+[[bench]]
+name = "jitter"
+harness = false

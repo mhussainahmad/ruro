@@ -1,11 +1,59 @@
-use std::sync::atomic::{AtomicI32, AtomicU8, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU64, Ordering};
 use std::time::Instant;
 
 use parking_lot::Mutex;
-use ruro_proto::{NodeMetrics, NodeState};
+use ruro_proto::{NodeMetrics, NodeState, TimingMetrics};
 
-/// Most step durations kept per metrics window.
+/// Most samples kept per metrics window.
 const WINDOW_CAP: usize = 8192;
+
+/// A bounded set of samples for percentiles over one metrics window.
+struct Window {
+    samples: Mutex<Vec<u32>>,
+    count: AtomicU64,
+}
+
+impl Window {
+    fn new() -> Self {
+        Self {
+            samples: Mutex::new(Vec::with_capacity(256)),
+            count: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, v: u32) {
+        let n = self.count.fetch_add(1, Ordering::Relaxed);
+        let mut d = self.samples.lock();
+        if d.len() < WINDOW_CAP {
+            d.push(v);
+        } else {
+            // Overwrite pseudo-randomly so long windows stay representative.
+            d[(n as usize).wrapping_mul(2654435761) % WINDOW_CAP] = v;
+        }
+    }
+
+    /// `(p50, p99)` of the window, which is then cleared (keeping its buffer).
+    fn take_percentiles(&self) -> (f64, f64) {
+        let mut d = std::mem::take(&mut *self.samples.lock());
+        d.sort_unstable();
+        let pct = |p: f64| -> f64 {
+            if d.is_empty() {
+                0.0
+            } else {
+                d[((d.len() - 1) as f64 * p).round() as usize] as f64
+            }
+        };
+        let out = (pct(0.5), pct(0.99));
+        d.clear();
+        // Hand the buffer back unless samples arrived meanwhile.
+        let mut slot = self.samples.lock();
+        if slot.is_empty() {
+            *slot = d;
+        }
+        out
+    }
+}
 
 /// Live counters for one node, written by its thread and read by the metrics loop.
 pub struct NodeStats {
@@ -13,8 +61,16 @@ pub struct NodeStats {
     steps: AtomicU64,
     errors: AtomicU64,
     last_error: Mutex<Option<String>>,
-    durations_us: Mutex<Vec<u32>>,
+    durations_us: Window,
     tid: AtomicI32,
+    /// Timer wakeup lateness, for timer-driven nodes.
+    jitter_us: Window,
+    jitter_max_us: AtomicU64,
+    deadline_misses: AtomicU64,
+    /// Whether the node reports [`TimingMetrics`] (it has a timer or a deadline).
+    timed: AtomicBool,
+    /// Cycle overruns of the node's deterministic group, shared by its nodes.
+    overruns: Mutex<Option<Arc<AtomicU64>>>,
 }
 
 impl Default for NodeStats {
@@ -24,8 +80,13 @@ impl Default for NodeStats {
             steps: AtomicU64::new(0),
             errors: AtomicU64::new(0),
             last_error: Mutex::new(None),
-            durations_us: Mutex::new(Vec::with_capacity(256)),
+            durations_us: Window::new(),
             tid: AtomicI32::new(0),
+            jitter_us: Window::new(),
+            jitter_max_us: AtomicU64::new(0),
+            deadline_misses: AtomicU64::new(0),
+            timed: AtomicBool::new(false),
+            overruns: Mutex::new(None),
         }
     }
 }
@@ -48,17 +109,31 @@ impl NodeStats {
         self.tid.store(tid, Ordering::Relaxed);
     }
 
+    /// Makes the node report timing metrics.
+    pub fn set_timed(&self) {
+        self.timed.store(true, Ordering::Relaxed);
+    }
+
+    /// Shares the overrun counter of the node's deterministic group.
+    pub fn set_overruns(&self, counter: Arc<AtomicU64>) {
+        self.set_timed();
+        *self.overruns.lock() = Some(counter);
+    }
+
     pub fn record_step(&self, micros: u32) {
         self.steps.fetch_add(1, Ordering::Relaxed);
-        let mut d = self.durations_us.lock();
-        if d.len() < WINDOW_CAP {
-            d.push(micros);
-        } else {
-            // Overwrite pseudo-randomly so long windows stay representative.
-            let i =
-                (self.steps.load(Ordering::Relaxed) as usize).wrapping_mul(2654435761) % WINDOW_CAP;
-            d[i] = micros;
-        }
+        self.durations_us.record(micros);
+    }
+
+    /// Records how late a timer wakeup was.
+    pub fn record_jitter(&self, micros: u32) {
+        self.jitter_us.record(micros);
+        self.jitter_max_us
+            .fetch_max(micros as u64, Ordering::Relaxed);
+    }
+
+    pub fn record_deadline_miss(&self) {
+        self.deadline_misses.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_error(&self, err: String) {
@@ -68,6 +143,10 @@ impl NodeStats {
 
     pub fn steps(&self) -> u64 {
         self.steps.load(Ordering::Relaxed)
+    }
+
+    pub fn deadline_misses(&self) -> u64 {
+        self.deadline_misses.load(Ordering::Relaxed)
     }
 }
 
@@ -109,18 +188,20 @@ impl MetricsWindow {
             0
         };
 
-        let mut durations = std::mem::take(&mut *stats.durations_us.lock());
-        durations.sort_unstable();
-        let pct = |p: f64| -> f64 {
-            if durations.is_empty() {
-                0.0
-            } else {
-                durations[((durations.len() - 1) as f64 * p).round() as usize] as f64
-            }
-        };
-        let (p50, p99) = (pct(0.5), pct(0.99));
-        durations.clear();
-        *stats.durations_us.lock() = durations;
+        let (p50, p99) = stats.durations_us.take_percentiles();
+        let (j50, j99) = stats.jitter_us.take_percentiles();
+        let jmax = stats.jitter_max_us.swap(0, Ordering::Relaxed);
+        let timing = stats.timed.load(Ordering::Relaxed).then(|| TimingMetrics {
+            jitter_p50_us: j50,
+            jitter_p99_us: j99,
+            jitter_max_us: jmax as f64,
+            deadline_misses: stats.deadline_misses(),
+            overruns: stats
+                .overruns
+                .lock()
+                .as_ref()
+                .map_or(0, |c| c.load(Ordering::Relaxed)),
+        });
 
         let ages = age_count.saturating_sub(self.age_count);
         let metrics = NodeMetrics {
@@ -136,6 +217,7 @@ impl MetricsWindow {
             errors: stats.errors.load(Ordering::Relaxed),
             last_error: stats.last_error.lock().clone(),
             dropped,
+            timing,
         };
         *self = Self {
             at: now,
@@ -202,8 +284,28 @@ mod tests {
         assert_eq!(m.step_p99_us, 99.0);
         assert!(m.hz > 0.0);
         assert_eq!(m.input_age_ms, Some(1.0));
+        assert_eq!(m.timing, None, "untimed nodes report no timing");
         let m2 = w.sample("n", &stats, (2_000_000, 2), 0);
         assert_eq!(m2.input_age_ms, None);
         assert_eq!(m2.step_p99_us, 0.0);
+    }
+
+    #[test]
+    fn jitter_deadlines_and_overruns() {
+        let stats = NodeStats::default();
+        let overruns = Arc::new(AtomicU64::new(0));
+        stats.set_overruns(overruns.clone());
+        for us in [5, 10, 400, 7] {
+            stats.record_jitter(us);
+        }
+        stats.record_deadline_miss();
+        overruns.fetch_add(3, Ordering::Relaxed);
+        let mut w = MetricsWindow::new();
+        let t = w.sample("n", &stats, (0, 0), 0).timing.unwrap();
+        assert_eq!(t.jitter_max_us, 400.0);
+        assert_eq!(t.jitter_p50_us, 10.0);
+        assert_eq!((t.deadline_misses, t.overruns), (1, 3));
+        let t = w.sample("n", &stats, (0, 0), 0).timing.unwrap();
+        assert_eq!((t.jitter_max_us, t.deadline_misses), (0.0, 1));
     }
 }

@@ -180,6 +180,8 @@ pub fn node_metrics(metrics: &HashMap<String, NodeMetrics>, node: &GNode) -> Opt
         errors: inner.iter().map(|m| m.errors).sum(),
         last_error: inner.iter().find_map(|m| m.last_error.clone()),
         dropped: inner.iter().map(|m| m.dropped).sum(),
+        // Wakeup jitter is per timer, so it does not add up across nodes.
+        timing: None,
     })
 }
 

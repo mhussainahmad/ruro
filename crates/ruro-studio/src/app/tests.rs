@@ -968,6 +968,7 @@ fn daemon_status(name: &str, graph: Option<&str>) -> DaemonStatus {
         groups: vec![],
         recording: None,
         playback: None,
+        estopped: false,
     }
 }
 
@@ -1008,6 +1009,7 @@ fn camera_status(recording: Option<&str>, playback: Option<PlaybackStatus>) -> D
         ],
         recording: recording.map(Into::into),
         playback,
+        estopped: false,
     }
 }
 
@@ -1046,6 +1048,7 @@ fn simulate_live(h: &mut Harness<'static, Studio>) {
         errors: 0,
         last_error: None,
         dropped: 0,
+        timing: None,
     };
     ev(
         st,

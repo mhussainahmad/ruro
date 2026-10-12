@@ -106,14 +106,30 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
         status.pid,
         duration(status.uptime_s)
     );
+    if status.estopped {
+        println!("\x1b[1;31mEMERGENCY STOP ENGAGED\x1b[0m (release with `ruro estop --release`)");
+    }
+    if let Some(r) = &status.recording {
+        println!("recording to {r}");
+    }
+    if let Some(p) = &status.playback {
+        println!(
+            "playing {}  {:.1}/{:.1} s  x{}{}",
+            p.file,
+            p.position_s,
+            p.duration_s,
+            p.rate,
+            if p.paused { "  paused" } else { "" }
+        );
+    }
     let Some(graph) = &status.graph else {
         println!("no graph deployed");
         return;
     };
     println!("graph  {graph}\n");
     println!(
-        "{:<14} {:<10} {:>7} {:>9} {:>9} {:>9} {:>6} {:>7}",
-        "NODE", "STATE", "HZ", "P50", "P99", "AGE", "CPU", "ERRORS"
+        "{:<14} {:<10} {:>7} {:>9} {:>9} {:>9} {:>6} {:>7} {:>9}",
+        "NODE", "STATE", "HZ", "P50", "P99", "AGE", "CPU", "ERRORS", "JIT P99"
     );
     for g in &status.groups {
         let state = match g.state {
@@ -143,7 +159,7 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
                         NodeState::Stopped => "stopped",
                     };
                     println!(
-                        "  {:<12} {:<10} {:>7.1} {:>9} {:>9} {:>9} {:>5.1}% {:>7}",
+                        "  {:<12} {:<10} {:>7.1} {:>9} {:>9} {:>9} {:>5.1}% {:>7} {:>9}",
                         id,
                         state,
                         n.hz,
@@ -151,8 +167,22 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics]) {
                         micros(n.step_p99_us),
                         n.input_age_ms.map_or("-".into(), |a| micros(a * 1000.0)),
                         n.cpu_pct,
-                        n.errors
+                        n.errors,
+                        n.timing
+                            .as_ref()
+                            .map_or("-".into(), |t| micros(t.jitter_p99_us))
                     );
+                    if let Some(t) = &n.timing
+                        && (t.deadline_misses > 0 || t.overruns > 0)
+                    {
+                        println!(
+                            "  {:<12} jitter max {}  deadline misses {}  cycle overruns {}",
+                            "",
+                            micros(t.jitter_max_us),
+                            t.deadline_misses,
+                            t.overruns
+                        );
+                    }
                     if let Some(e) = &n.last_error {
                         println!("  {:<12} \x1b[31m{e}\x1b[0m", "");
                     }
@@ -174,7 +204,7 @@ fn micros(us: f64) -> String {
     }
 }
 
-fn duration(s: f64) -> String {
+pub fn duration(s: f64) -> String {
     let s = s as u64;
     match s {
         0..60 => format!("{s}s"),

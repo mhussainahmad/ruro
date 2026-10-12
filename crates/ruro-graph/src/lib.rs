@@ -12,8 +12,8 @@ mod validate;
 pub use composite::{COMPOSITE, GRAPH_PREFIX, composite_descriptor, is_composite_kind};
 pub use descriptor::{NodeDescriptor, ParamDesc, ParamKind, PortDesc, Registry};
 pub use spec::{
-    DEFAULT_GROUP, Graph, GraphError, GroupConfig, NodeInstance, PortList, PortRef, Realtime,
-    RestartPolicy, Wire,
+    ClockSource, DEFAULT_GROUP, Graph, GraphError, GroupConfig, NodeInstance, PortList, PortRef,
+    Realtime, RestartPolicy, Wire,
 };
 pub use validate::{Issue, validate, validate_in};
 

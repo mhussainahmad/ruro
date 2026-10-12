@@ -79,7 +79,7 @@ wires: [src.value -> gain.input, gain.output -> probe.input]
 "#,
     )
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     assert!(wait_until(Duration::from_secs(2), || PROBE.lock().len() > 10));
     assert!(
         PROBE.lock().iter().all(|&v| v == 6.0),
@@ -137,7 +137,7 @@ nodes:
 "#,
     )
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     let m = exec.metrics();
     let bad = m.nodes.iter().find(|n| n.id == "bad").unwrap();

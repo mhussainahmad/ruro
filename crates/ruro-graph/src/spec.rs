@@ -37,6 +37,10 @@ pub struct Graph {
     /// Exposed output name to the inner output port it carries.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub outputs: IndexMap<String, PortRef>,
+    /// Source of graph time. `sim` makes every host follow the graph's
+    /// `std/Clock` output instead of the wall clock.
+    #[serde(default, skip_serializing_if = "ClockSource::is_wall")]
+    pub clock: ClockSource,
     #[serde(default)]
     pub nodes: IndexMap<String, NodeInstance>,
     #[serde(default)]
@@ -71,6 +75,31 @@ pub struct Realtime {
     /// instead of one thread per node.
     #[serde(default)]
     pub deterministic: bool,
+    /// Cycle rate in Hz of a deterministic group. Defaults to the highest
+    /// rate of its nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    /// Step deadlines in microseconds, keyed by node id. A step that takes
+    /// longer is reported as an error and counted in the node's metrics.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub deadlines_us: IndexMap<String, u64>,
+}
+
+/// Where graph time comes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClockSource {
+    /// Wall-clock time.
+    #[default]
+    Wall,
+    /// Simulated time, published by the graph's one `std/Clock` output.
+    Sim,
+}
+
+impl ClockSource {
+    pub fn is_wall(&self) -> bool {
+        *self == ClockSource::Wall
+    }
 }
 
 /// One instance of a node type inside a graph.
@@ -462,5 +491,21 @@ mod group_config_tests {
         );
         assert_eq!(g.group_config("other"), GroupConfig::default());
         assert_eq!(Graph::from_yaml(&g.to_yaml().unwrap()).unwrap(), g);
+    }
+
+    #[test]
+    fn clock_rate_and_deadlines_parse() {
+        let g = Graph::from_yaml(
+            "name: sim\nclock: sim\ngroups:\n  c:\n    realtime: { deterministic: true, rate: 1000, deadlines_us: { a: 250 } }\nnodes:\n  a: { type: t/x, group: c }\n",
+        )
+        .unwrap();
+        assert_eq!(g.clock, ClockSource::Sim);
+        let rt = g.group_config("c").realtime.unwrap();
+        assert_eq!(rt.rate, Some(1000.0));
+        assert_eq!(rt.deadlines_us["a"], 250);
+        assert_eq!(Graph::from_yaml(&g.to_yaml().unwrap()).unwrap(), g);
+        let plain = Graph::from_yaml("name: p\n").unwrap();
+        assert_eq!(plain.clock, ClockSource::Wall);
+        assert!(!plain.to_yaml().unwrap().contains("clock"));
     }
 }

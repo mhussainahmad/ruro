@@ -241,7 +241,7 @@ wires: [cmd.command -> arm.command, arm.state -> probe.state]
         dev = dev.path
     ))
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     let reached = wait_until(Duration::from_secs(5), || {
         latest_state("probe").is_some_and(|s| {
             let goal = [0.1, -0.2, 0.3, 0.0, 0.0, 0.25];
@@ -278,7 +278,7 @@ wires: [cmd.command -> dxl.command, dxl.state -> dxl_probe.state]
         dev = dev.path
     ))
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     let reached = wait_until(Duration::from_secs(5), || {
         latest_state("dxl_probe").is_some_and(|s| {
             s.position.len() == 2
@@ -312,7 +312,7 @@ wires: [cmd.command -> odrv.command, odrv.state -> odrv_probe.state]
         dev = dev.path
     ))
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     let ok = wait_until(Duration::from_secs(5), || {
         latest_state("odrv_probe").is_some_and(|s| {
             s.position.len() == 2

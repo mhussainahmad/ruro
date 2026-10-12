@@ -36,3 +36,7 @@ ruro = { workspace = true }
 ruro-daemon = { workspace = true }
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
 sha2 = "0.10"
+
+[[bench]]
+name = "jitter"
+harness = false

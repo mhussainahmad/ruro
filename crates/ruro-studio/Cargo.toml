@@ -45,6 +45,7 @@ libc = { workspace = true }
 [dev-dependencies]
 egui_kittest = { version = "0.36", features = ["eframe", "wgpu", "snapshot"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+ruro-daemon = { workspace = true }
 ruro-node = { workspace = true }
 ruro-nodes-std = { workspace = true }
 ruro-nodes-ros2 = { workspace = true }

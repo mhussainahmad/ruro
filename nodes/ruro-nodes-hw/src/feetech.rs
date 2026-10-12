@@ -273,6 +273,10 @@ impl<T: Transport> Bus<T> {
             match parse_status(&self.rx) {
                 Ok((status, used)) => {
                     self.rx.drain(..used);
+                    if status.id == BROADCAST_ID {
+                        // A late echo of an earlier broadcast (sync write); servos never answer as 0xFE.
+                        continue;
+                    }
                     if status.id != id {
                         return Err(BusError::UnexpectedId {
                             expected: id,
@@ -705,6 +709,19 @@ mod tests {
             );
             assert!(matches!(bus.ping(9), Err(BusError::Timeout { id: 9 })));
         }
+    }
+
+    #[test]
+    fn late_broadcast_echo_is_skipped() {
+        // The echo of a sync write shows up only after the next request was sent.
+        let stale = sync_write(sts::GOAL_POSITION, 2, &[(1, &[0, 8])]);
+        let mut servos = VirtualServos::new(&[1]);
+        let mut bus = Bus::new(MockTransport::with_responder(move |p| {
+            let mut out = stale.clone();
+            out.extend(servos.handle(p));
+            out
+        }));
+        assert_eq!(bus.ping(1).unwrap(), 0);
     }
 
     #[test]

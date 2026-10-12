@@ -202,6 +202,7 @@ fn hardware_nodes_are_registered() {
         "hw/rplidar",
         "hw/livox",
         "hw/so100-arm",
+        "hw/joint-jog",
     ] {
         let d = reg.get(kind).unwrap_or_else(|| panic!("{kind} missing"));
         assert!(!d.doc.is_empty(), "{kind} has no documentation");

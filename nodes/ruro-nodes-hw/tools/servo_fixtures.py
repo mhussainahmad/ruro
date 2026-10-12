@@ -59,9 +59,13 @@ def dynamixel():
     show("dxl write goal_position=512 id1", port)
     ph.write1ByteTxOnly(port, 1, 64, 1)
     show("dxl write torque_enable=1 id1", port)
-    # Header-like payload, exercises byte stuffing.
-    ph.writeTxOnly(port, 1, 116, 4, [0xFF, 0xFF, 0xFD, 0x00])
-    show("dxl write stuffed id1", port)
+    # Header-like payload, exercises byte stuffing. The SDK's txPacket drops
+    # the stuffed copy it builds, so stuff explicitly and recompute the CRC.
+    p = ph.addStuffing([0xFF, 0xFF, 0xFD, 0x00, 1, 9, 0, 3, 116, 0, 0xFF, 0xFF, 0xFD, 0x00, 0, 0])
+    n = p[5] + p[6] * 256 + 7
+    crc = ph.updateCRC(0, p, n - 2)
+    p[n - 2:n] = [crc & 0xFF, crc >> 8]
+    print(f"dxl write stuffed id1: {bytes(p[:n]).hex(' ')}")
 
     sw = dxl.GroupSyncWrite(port, ph, 116, 4)
     sw.addParam(1, [0x96, 0x00, 0x00, 0x00])

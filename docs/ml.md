@@ -1,0 +1,90 @@
+# Machine learning and perception
+
+`nodes/ruro-nodes-ml` provides the `ml/*` nodes and two messages:
+
+- `ml/Tensor { shape: Vec<u32>, data: Vec<f32> }`, row-major.
+- `ml/Detections { header, boxes: Vec<Detection { x, y, w, h, score, class_id, label }> }`,
+  boxes in source-image pixels with `(x, y)` the top-left corner.
+
+## Always built
+
+- Image preprocessing: stretch or letterbox resize (bilinear), scaling, per-channel
+  mean/std, RGB or BGR, NCHW float32, plus the mapping back to image coordinates.
+- YOLO decoding for both common output layouts — v5/v7 `[1, N, 5 + C]` with objectness
+  and v8/v11 `[1, 4 + C, N]` without — with class-wise non-maximum suppression.
+- `ml/yolo-decode`: `ml/Tensor` → `ml/Detections`, for models run elsewhere.
+
+## ONNX Runtime (`--features ruro-nodes-ml/onnx`)
+
+Uses the `ort` crate, which downloads a CPU build of ONNX Runtime at build time and
+links it statically, which makes the host binary several tens of megabytes larger. GPU execution providers
+are not enabled.
+
+- `ml/onnx`: `std/Image` → model's first input; publishes the first output as
+  `ml/Tensor` and, with `postprocess: yolo`, `ml/Detections` mapped back through the
+  letterbox. Input size comes from the model unless `width`/`height` are set.
+- `ml/policy`: robot policies exported to ONNX (LeRobot ACT, diffusion, ...).
+  `std/JointState` (+ optional `std/Image`) → `std/JointCommand`. Input and output
+  names are parameters (LeRobot naming by default: `observation.state`,
+  `observation.image`). Models that output an action chunk `[1, K, D]` have the chunk
+  executed one action per step (or the first `actions_per_inference`) before running
+  again. Optional state normalisation and action de-normalisation (`state_mean`,
+  `state_std`, `action_mean`, `action_std`) for exports that leave them out.
+
+Both are tested end to end (`tests/onnx.rs`) with two models of a few hundred bytes
+built by `tools/make_test_models.py`: a detector whose output layout and NMS outcome
+are known, and a policy returning a two-step action chunk.
+
+Exporting a LeRobot policy to ONNX is done on the Python side (`torch.onnx.export` of
+the policy's `select_action`/model forward with fixed input shapes); recurrent or
+stateful samplers (diffusion denoising loops) must be exported as a single graph or
+unrolled.
+
+## LeRobot datasets (`--features ruro-nodes-ml/lerobot`)
+
+`ml/lerobot-recorder` writes LeRobot's v2.1 dataset format:
+
+```
+meta/info.json, meta/episodes.jsonl, meta/tasks.jsonl, meta/episodes_stats.jsonl
+data/chunk-000/episode_000000.parquet
+```
+
+with `observation.state`, `action`, `timestamp`, `frame_index`, `episode_index`,
+`index` and `task_index` columns and per-episode statistics computed as LeRobot does.
+Episodes start and stop with the `recording` input (or `auto_start` and
+`episode_seconds`); recording resumes an existing dataset if its features match.
+
+**Deviation:** camera frames are stored as PNG images inside the Parquet files
+(feature dtype `image`, the Hugging Face `Image` type) rather than as MP4 videos,
+because there is no pure-Rust MP4/AV1 encoder suitable here; `video_path` is null.
+LeRobot v2.1 supports image features stored this way. Datasets can be converted to
+video storage with LeRobot's own tools if size matters.
+
+**Validation.** `tests/lerobot.rs` reads the files back with the Rust Parquet reader.
+With `RURO_LEROBOT_PYTHON` pointing at a Python that has `datasets<=3.6`, `pandas` and
+`pillow`, it also runs `tools/check_lerobot_dataset.py`, which loads the data the way
+`LeRobotDataset.load_hf_dataset` does (Hugging Face `datasets`), compares the features
+with the ones LeRobot derives from `info.json`, decodes the images and checks indices,
+timestamps and statistics. Loading through `LeRobotDataset` itself was not tried,
+because it requires PyTorch.
+
+## GPU buffers (future work)
+
+Images and tensors currently live in CPU memory. The planned design for zero-copy GPU
+data is a message that carries a handle instead of pixels:
+
+- a `GpuBuffer` message with device id, size, layout (shape, dtype, pitch) and an
+  exportable handle: a CUDA IPC memory handle (`cudaIpcGetMemHandle`) on NVIDIA, or a
+  Vulkan external-memory file descriptor (`VK_KHR_external_memory_fd`, DMA-BUF) for
+  vendor-neutral sharing;
+- in-process wires pass the handle by reference count like any message; cross-process
+  wires send the handle once, the receiver imports it (`cudaIpcOpenMemHandle` /
+  `vkImportMemoryFdKHR`) and caches the mapping; a pool of buffers recycled by sequence
+  number keeps allocations off the hot path;
+- synchronisation with exported events/semaphores so consumers wait on the producer's
+  stream instead of the host;
+- ONNX Runtime would consume them through I/O binding with the CUDA or TensorRT
+  execution provider.
+
+None of this is implemented: there is no CUDA toolkit on the build machine, and
+shipping untested GPU code is worse than shipping none.

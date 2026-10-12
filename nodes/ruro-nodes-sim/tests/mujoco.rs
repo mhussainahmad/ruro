@@ -213,6 +213,35 @@ fn body_poses_match_ruro_urdf_kinematics() {
     }
 }
 
+/// The example SO-100 model loads in MuJoCo and its position actuators reach a target.
+#[test]
+fn example_arm_tracks_position_targets() {
+    if library().is_none() {
+        return;
+    }
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/models/so100.xml");
+    let mut sim = Sim::load(Api::load(None).unwrap(), &path).unwrap();
+    assert_eq!((sim.nq, sim.nu), (6, 6));
+    let target = [0.5, -0.4, 0.8, 0.3, -1.0, 0.6];
+    sim.ctrl_mut().copy_from_slice(&target);
+    while sim.time() < 3.0 {
+        sim.step();
+    }
+    for (q, t) in sim.qpos().iter().zip(target) {
+        assert!((q - t).abs() < 0.05, "{:?} vs {target:?}", sim.qpos());
+    }
+    // MuJoCo and ruro-urdf agree on where the hand is.
+    sim.forward();
+    let robot = Robot::from_file(&path).unwrap();
+    let fk = robot.forward_kinematics(sim.qpos()).unwrap();
+    let hand = sim.id(1, "hand").unwrap();
+    let ours = fk.link_pose("hand").unwrap().translation;
+    for (mj, o) in sim.xpos()[3 * hand..3 * hand + 3].iter().zip(ours) {
+        assert!((mj - o).abs() < 1e-9);
+    }
+}
+
 static TIMES: Mutex<Vec<f64>> = Mutex::new(Vec::new());
 static STATES: AtomicU64 = AtomicU64::new(0);
 

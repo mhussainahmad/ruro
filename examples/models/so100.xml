@@ -1,0 +1,69 @@
+<!--
+  A simplified 6-joint arm with the joint layout of the LeRobot SO-100/SO-101
+  (shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper).
+  Link lengths and masses are rough approximations built from primitives; use
+  the official model for anything that depends on accurate dynamics.
+  Joint angles are in radians and zero is the arm pointing straight up.
+-->
+<mujoco model="so100-approx">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" integrator="implicitfast"/>
+
+  <default>
+    <joint damping="0.5" armature="0.01"/>
+    <position kp="20" forcerange="-3 3"/>
+    <geom type="capsule" size="0.018" rgba="0.95 0.55 0.1 1" contype="0" conaffinity="0"/>
+  </default>
+
+  <worldbody>
+    <light pos="0 -1 2" dir="0 1 -2"/>
+    <geom name="floor" type="plane" size="1 1 0.05" rgba="0.3 0.3 0.3 1" contype="1" conaffinity="1"/>
+    <body name="base" pos="0 0 0">
+      <geom type="cylinder" size="0.05 0.025" pos="0 0 0.025" rgba="0.2 0.2 0.2 1"/>
+      <body name="shoulder" pos="0 0 0.05">
+        <joint name="shoulder_pan" axis="0 0 1" range="-2 2"/>
+        <inertial pos="0 0 0.02" mass="0.15" diaginertia="1e-4 1e-4 1e-4"/>
+        <geom fromto="0 0 0 0 0 0.04"/>
+        <body name="upper_arm" pos="0 0 0.04">
+          <joint name="shoulder_lift" axis="0 1 0" range="-1.8 1.8"/>
+          <inertial pos="0 0 0.055" mass="0.12" diaginertia="2e-4 2e-4 5e-5"/>
+          <geom fromto="0 0 0 0 0 0.11"/>
+          <body name="forearm" pos="0 0 0.11">
+            <joint name="elbow_flex" axis="0 1 0" range="-1.7 1.7"/>
+            <inertial pos="0 0 0.065" mass="0.1" diaginertia="2e-4 2e-4 4e-5"/>
+            <geom fromto="0 0 0 0 0 0.13"/>
+            <body name="wrist" pos="0 0 0.13">
+              <joint name="wrist_flex" axis="0 1 0" range="-1.8 1.8"/>
+              <inertial pos="0 0 0.025" mass="0.05" diaginertia="2e-5 2e-5 1e-5"/>
+              <geom fromto="0 0 0 0 0 0.05"/>
+              <body name="hand" pos="0 0 0.05">
+                <joint name="wrist_roll" axis="0 0 1" range="-3 3"/>
+                <inertial pos="0 0 0.03" mass="0.06" diaginertia="2e-5 2e-5 1e-5"/>
+                <geom type="box" size="0.02 0.012 0.03" pos="0 0 0.03"/>
+                <site name="tool" pos="0 0 0.09"/>
+                <body name="jaw" pos="0.02 0 0.03">
+                  <joint name="gripper" axis="0 1 0" range="0 1.5"/>
+                  <inertial pos="0 0 0.03" mass="0.02" diaginertia="5e-6 5e-6 2e-6"/>
+                  <geom type="box" size="0.004 0.01 0.03" pos="0 0 0.03"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="shoulder_pan" joint="shoulder_pan" ctrlrange="-2 2"/>
+    <position name="shoulder_lift" joint="shoulder_lift" ctrlrange="-1.8 1.8"/>
+    <position name="elbow_flex" joint="elbow_flex" ctrlrange="-1.7 1.7"/>
+    <position name="wrist_flex" joint="wrist_flex" ctrlrange="-1.8 1.8"/>
+    <position name="wrist_roll" joint="wrist_roll" ctrlrange="-3 3"/>
+    <position name="gripper" joint="gripper" ctrlrange="0 1.5"/>
+  </actuator>
+
+  <sensor>
+    <framepos name="tool_pos" objtype="site" objname="tool"/>
+  </sensor>
+</mujoco>

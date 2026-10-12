@@ -199,7 +199,16 @@ fn main() {
         .with_writer(std::io::stderr)
         .compact()
         .init();
-    if let Err(e) = run(Cli::parse()) {
+    let cli = Cli::parse();
+    // Rust ignores SIGPIPE, so printing into a closed pipe (`ruro status |
+    // head`) panics. Commands that only print get the default: they end
+    // quietly. Commands that may run a daemon keep ignoring it, so a peer
+    // closing a connection cannot kill the daemon.
+    if !matches!(cli.cmd, Cmd::Daemon { .. } | Cmd::Run { .. } | Cmd::Soak(_)) {
+        // SAFETY: no other thread exists yet.
+        unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+    }
+    if let Err(e) = run(cli) {
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }

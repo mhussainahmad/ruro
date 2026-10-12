@@ -423,6 +423,99 @@ fn parameters_are_checked_and_confirmed() {
     request(&s, &d.keys, Ctl::Stop, "").unwrap();
 }
 
+#[test]
+fn recording_and_replay_cover_every_machine() {
+    let d1 = TestDaemon::start("recleft", |_| {});
+    let peer = d1.endpoint.clone();
+    let d2 = TestDaemon::start("recright", |c| c.peers = vec![peer]);
+    let s = d1.client();
+    let start = Instant::now();
+    while ruro_proto::discover(&s, Some(d2.name()), Duration::from_millis(500)).is_err() {
+        assert!(start.elapsed() < TIMEOUT, "peer daemon not reachable");
+    }
+    // The source runs on the peer, the gain here.
+    let graph = format!(
+        r#"
+name: rec-span
+groups:
+  a: {{ machine: {right} }}
+nodes:
+  src: {{ type: std/sine, group: a, rate: 100, params: {{ frequency: 2.0 }} }}
+  gain: {{ type: std/gain, group: b, params: {{ k: 0.5 }} }}
+wires:
+  - {{ from: src.value, to: gain.input, depth: 16 }}
+"#,
+        right = d2.name()
+    );
+    request(&s, &d1.keys, Ctl::Deploy, &graph).unwrap();
+    wait_metrics(&s, &d1.keys, "b", |m| node_hz(m, "gain") > 50.0);
+
+    let first = tmp("span-first.mcap");
+    let reply = request(&s, &d1.keys, Ctl::Record, &first.display().to_string()).unwrap();
+    assert!(
+        reply.contains("recording 2 group(s)") && reply.contains(&format!("on `{}`: a", d2.name())),
+        "{reply}"
+    );
+    let peer_status = next_status(&s, &d2.keys);
+    assert!(
+        peer_status
+            .recording
+            .as_deref()
+            .unwrap_or_default()
+            .contains(d1.name()),
+        "{peer_status:?}"
+    );
+    std::thread::sleep(Duration::from_millis(1500));
+    let reply = request(&s, &d1.keys, Ctl::Record, "").unwrap();
+    assert!(
+        reply.contains("2 channel(s)") && reply.contains(&format!("from `{}`: a", d2.name())),
+        "{reply}"
+    );
+    let gain_first = values(&first, "gain.output");
+    assert!(values(&first, "src.value").len() > 100);
+    assert!(gain_first.len() > 100, "{}", gain_first.len());
+    wait_status(&s, &d2.keys, TIMEOUT, |st| st.recording.is_none());
+
+    // Replaying the source mutes it on the peer and feeds the gain here.
+    let replay = tmp("span-src-only.mcap");
+    filter(&first, &replay, &["src.value"]);
+    let second = tmp("span-second.mcap");
+    request(&s, &d1.keys, Ctl::Record, &second.display().to_string()).unwrap();
+    let start = PlaybackCommand::Start {
+        file: replay.display().to_string(),
+        rate: 2.0,
+    };
+    let reply = request(
+        &s,
+        &d1.keys,
+        Ctl::Playback,
+        &serde_json::to_string(&start).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        reply.contains("replaying src") && !reply.contains("not replayed"),
+        "{reply}"
+    );
+    wait_status(&s, &d1.keys, Duration::from_secs(3), |st| {
+        st.playback.is_some()
+    });
+    wait_status(&s, &d1.keys, TIMEOUT, |st| st.playback.is_none());
+    std::thread::sleep(Duration::from_millis(300));
+    request(&s, &d1.keys, Ctl::Record, "").unwrap();
+    let gain_second = values(&second, "gain.output");
+    let expected = &gain_first[..gain_first.len() - 1];
+    assert!(
+        gain_second.windows(expected.len()).any(|w| w == expected),
+        "replayed gain outputs differ: first run {} values, second run {}",
+        gain_first.len(),
+        gain_second.len()
+    );
+    // After the replay the source on the peer runs again.
+    wait_metrics(&s, &d2.keys, "a", |m| node_hz(m, "src") > 50.0);
+    request(&s, &d1.keys, Ctl::Stop, "").unwrap();
+    cleanup(&[&first, &replay, &second]);
+}
+
 /// A CA and a certificate for `localhost` signed by it, as PEM files.
 fn certificates(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let (ca, mut certs) = certificates_for(dir, &["localhost"]);

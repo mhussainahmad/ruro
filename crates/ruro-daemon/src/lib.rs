@@ -120,6 +120,9 @@ pub(crate) struct State {
     pub estop: AtomicBool,
     pub estop_latch: Mutex<estop::Latch>,
     pub recording: Mutex<Option<RecordSession>>,
+    /// This daemon's part of a peer's recording, until the peer fetches it:
+    /// `(peer, part)`.
+    pub record_part: Mutex<Option<(String, ruro_proto::RecordedPart)>>,
     pub playback: Mutex<Option<Playback>>,
     /// Daemons running groups of the graph deployed here.
     pub peers: Mutex<BTreeSet<String>>,
@@ -248,6 +251,7 @@ impl Daemon {
             estop: AtomicBool::new(false),
             estop_latch: Mutex::new(estop::Latch::default()),
             recording: Mutex::new(None),
+            record_part: Mutex::new(None),
             playback: Mutex::new(None),
             peers: Mutex::new(BTreeSet::new()),
             heartbeats: Mutex::new(HashMap::new()),
@@ -277,16 +281,21 @@ impl Daemon {
                         .payload()
                         .map(|p| p.to_bytes().into_owned())
                         .unwrap_or_default();
-                    let reply: CtlReply =
-                        handle(&ctl_state, &op, &payload).map_err(|e| format!("{e:#}"));
-                    if let Err(e) = &reply {
-                        tracing::warn!("{op}: {e}");
-                    }
+                    let bytes = if op == Ctl::RecordPart.as_str() {
+                        // Binary chunks of a recording, not a text reply.
+                        let reply: std::result::Result<Vec<u8>, String> =
+                            session::serve_part(&ctl_state, &payload).map_err(|e| format!("{e:#}"));
+                        ruro_proto::encode(&reply)
+                    } else {
+                        let reply: CtlReply =
+                            handle(&ctl_state, &op, &payload).map_err(|e| format!("{e:#}"));
+                        if let Err(e) = &reply {
+                            tracing::warn!("{op}: {e}");
+                        }
+                        ruro_proto::reply_bytes(&reply)
+                    };
                     let _ = query
-                        .reply(
-                            format!("ruro/{}/ctl/{op}", ctl_state.name),
-                            ruro_proto::reply_bytes(&reply),
-                        )
+                        .reply(format!("ruro/{}/ctl/{op}", ctl_state.name), bytes)
                         .wait();
                 }
             })?;
@@ -418,11 +427,7 @@ fn status(st: &State, started: Instant) -> DaemonStatus {
         uptime_s: started.elapsed().as_secs_f64(),
         graph: s.graph().map(|g| g.name.clone()),
         groups: s.status(),
-        recording: st
-            .recording
-            .lock()
-            .as_ref()
-            .map(|r| r.output.display().to_string()),
+        recording: st.recording.lock().as_ref().map(|r| r.describe()),
         playback: st.playback.lock().as_ref().map(Playback::status),
         estopped: st.estop.load(Ordering::Relaxed),
     }
@@ -446,10 +451,11 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
                 .filter_map(|c| c.machine.clone())
                 .collect();
             keep.insert(req.origin.clone());
-            stop_peers(st, std::mem::take(&mut *st.peers.lock()), &keep);
             session::stop_playback(st);
             st.sup.lock().stop_all();
+            // Before the peers stop: a recording collects their parts.
             session::finish_recording(st, false)?;
+            stop_peers(st, std::mem::take(&mut *st.peers.lock()), &keep);
             let n = st.sup.lock().deploy(graph)?;
             *st.deployed.lock() = Some(req.graph);
             *st.origin.lock() = Some(req.origin);
@@ -517,15 +523,7 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             st.sup.lock().kill(&group)?;
             Ok(format!("killed `{group}`"))
         }
-        "record" => {
-            let path = text();
-            let path = path.trim();
-            if path.is_empty() {
-                session::finish_recording(st, true)?.context("not recording")
-            } else {
-                session::start_recording(st, Path::new(path))
-            }
-        }
+        "record" => session::record(st, &text()),
         "playback" => {
             let cmd = serde_json::from_slice(payload).context("bad playback command")?;
             session::playback(st, cmd)

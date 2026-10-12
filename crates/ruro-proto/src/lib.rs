@@ -120,7 +120,10 @@ pub enum Ctl {
     /// Reply: the daemon name. Used for discovery.
     Ping,
     /// Payload: path of an MCAP file to record every wire of the running
-    /// graph into, or empty to stop recording. Reply: the path.
+    /// graph into, or empty to stop recording. Groups on peers are recorded
+    /// too: the daemon asks the peers it forwarded groups to (payload
+    /// `from <daemon>`) and collects their part when the recording stops
+    /// (`stop-from <daemon>`, reply: JSON [`RecordedPart`]).
     Record,
     /// Payload: JSON [`PlaybackCommand`]. Controls replay of a recording.
     Playback,
@@ -135,6 +138,10 @@ pub enum Ctl {
     /// refuse to deploy it (empty if none), checked against the hosts each
     /// group would run on, here and on peers.
     Validate,
+    /// Payload: JSON [`PartRequest`]. Reply (postcard, not a [`CtlReply`]):
+    /// `Result<Vec<u8>, String>`, a chunk of a peer's part of a recording;
+    /// empty at the end. Fetch with [`request_raw`].
+    RecordPart,
     /// Payload: JSON [`ParamRequest`]. Checks the value against the node's
     /// descriptor, has the node's host apply it and replies once the node
     /// has accepted it. Forwarded to the machine that runs the node.
@@ -157,6 +164,7 @@ impl Ctl {
             Ctl::Upload => "upload",
             Ctl::Validate => "validate",
             Ctl::Param => "param",
+            Ctl::RecordPart => "record-part",
         }
     }
 }
@@ -222,7 +230,33 @@ pub enum PlaybackCommand {
         rate: f64,
     },
     Stop,
+    /// Sent by the daemon replaying a recording to the peers that run some
+    /// of the replayed nodes: they stop stepping (empty: resume).
+    Mute {
+        nodes: Vec<String>,
+    },
 }
+
+/// A peer's part of a recording, waiting to be fetched with
+/// [`Ctl::RecordPart`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordedPart {
+    /// The file on the peer, if anything was recorded.
+    pub file: Option<String>,
+    pub size: u64,
+    /// Groups recorded on the peer.
+    pub groups: Vec<String>,
+}
+
+/// Payload of [`Ctl::RecordPart`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartRequest {
+    pub file: String,
+    pub offset: u64,
+}
+
+/// Largest chunk of a recording sent in one [`Ctl::RecordPart`] reply.
+pub const PART_CHUNK: usize = 1 << 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupStatus {
@@ -758,6 +792,29 @@ pub fn read_token_file(path: &std::path::Path) -> Result<String> {
         path.display()
     );
     Ok(token.to_owned())
+}
+
+/// Sends a request whose reply is binary (postcard `Result<Vec<u8>,
+/// String>`), such as [`Ctl::RecordPart`].
+pub fn request_raw(
+    session: &zenoh::Session,
+    key: &str,
+    payload: Vec<u8>,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>> {
+    use zenoh::Wait;
+    let replies = session
+        .get(key)
+        .payload(payload)
+        .timeout(timeout)
+        .wait()
+        .map_err(|e| anyhow!("request failed: {e}"))?;
+    let reply = replies.recv().map_err(|_| anyhow!("no reply from {key}"))?;
+    let sample = reply
+        .result()
+        .map_err(|e| anyhow!("daemon error: {:?}", e.payload().to_bytes()))?;
+    let body: std::result::Result<Vec<u8>, String> = decode(&sample.payload().to_bytes())?;
+    body.map_err(|e| anyhow!(e))
 }
 
 /// Finds the daemon behind a session. With `name` set, only checks that it answers.

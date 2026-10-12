@@ -9,7 +9,13 @@
 # absolute paths:
 #   cargo build --release -p ruro-host --features ruro-nodes-sim/mujoco,ruro-nodes-ml/lerobot
 #   RURO_MUJOCO_LIB=/path/to/libmujoco.so ruro run examples/arm-sim.yaml
+#
+# The graph runs on simulated time: `arm` publishes the MuJoCo clock on its
+# std/Clock output and every timer (jogging, the recorder's frame rate) steps
+# on it, so a slow or paused simulation slows the whole graph down with it.
+# arm-real.yaml runs on the wall clock.
 name: arm-sim
+clock: sim
 nodes:
   # --- robot: simulated ---
   arm:

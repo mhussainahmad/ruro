@@ -5,6 +5,7 @@ pub mod ffi;
 use std::path::Path;
 use std::time::Instant;
 
+use ruro::msg::Clock;
 use ruro::prelude::*;
 
 pub use ffi::{Api, LIB_ENV, Sim};
@@ -14,6 +15,18 @@ use crate::SensorReadings;
 /// MuJoCo physics. Loads an MJCF model, writes joint commands into the
 /// actuator controls, steps in (scaled) real time and publishes joint states,
 /// world poses of all bodies, sensor readings and the simulation time.
+///
+/// The simulation time goes out as a `std/Clock`, so a graph with
+/// `clock: sim` runs its timers on simulated time.
+///
+/// E-stop: the physics keeps running and commands are ignored while stopped.
+/// With `command_field: velocity` or `effort` the controls are set to zero.
+/// With `command_field: position` (position actuators, where zero would be a
+/// move to the zero pose) each actuator holds the present position of its
+/// joint, taking actuator i to drive the i-th hinge or slide joint; models
+/// with a different number of actuators and joints keep their last controls
+/// instead. After the release the controls stay until a command arrives
+/// after the release (commands sent during the stop are discarded).
 ///
 /// The MuJoCo shared library is loaded at run time from `library`, the
 /// `RURO_MUJOCO_LIB` environment variable or the system search path.
@@ -32,9 +45,9 @@ pub struct MuJoCo {
     /// All sensor readings.
     #[output]
     sensors: Output<SensorReadings>,
-    /// Simulation time in seconds.
+    /// Simulation time (graph time for `clock: sim`), sent after the other outputs.
     #[output]
-    sim_time: Output<Scalar>,
+    clock: Output<Clock>,
     /// MJCF model file.
     #[param(default = "")]
     model: String,
@@ -51,13 +64,40 @@ pub struct MuJoCo {
     #[param(default = "position")]
     command_field: String,
     sim: Option<Sim>,
-    clock: Option<(Instant, f64)>,
+    /// Wall-clock instant and simulation time the real-time pacing starts from.
+    anchor: Option<(Instant, f64)>,
     hinge_joints: Vec<(usize, usize)>,
     sensor_layout: Vec<(String, usize, usize)>,
     body_names: Vec<String>,
+    /// Stopped by the e-stop; commands are discarded until one arrives after the release.
+    held: bool,
 }
 
 impl MuJoCo {
+    /// Puts the controls in their e-stop state (see the node documentation).
+    fn engage(&mut self) {
+        self.held = true;
+        let Some(sim) = self.sim.as_mut() else {
+            return;
+        };
+        if self.command_field != "position" {
+            sim.ctrl_mut().fill(0.0);
+        } else if sim.nu == self.hinge_joints.len() {
+            let present: Vec<f64> = self
+                .hinge_joints
+                .iter()
+                .map(|&(q, _)| sim.qpos()[q])
+                .collect();
+            sim.ctrl_mut().copy_from_slice(&present);
+        } else {
+            warn!(
+                "e-stop: {} actuators for {} joints; keeping the last controls",
+                sim.nu,
+                self.hinge_joints.len()
+            );
+        }
+    }
+
     fn apply_command(&mut self, cmd: &JointCommand) -> Result {
         let values = match self.command_field.as_str() {
             "position" => &cmd.position,
@@ -117,7 +157,9 @@ impl MuJoCo {
                     .collect(),
             })?;
         }
-        self.sim_time.send(Scalar(sim.time()))
+        self.clock.send(Clock {
+            time_ns: (sim.time() * 1e9).round() as u64,
+        })
     }
 }
 
@@ -147,25 +189,32 @@ impl Node for MuJoCo {
         self.sensor_layout = sim.sensors();
         self.body_names = (0..sim.nbody).map(|b| sim.body_name(b)).collect();
         self.sim = Some(sim);
-        self.clock = None;
+        self.anchor = None;
         Ok(())
     }
 
-    fn step(&mut self, _ctx: &mut Ctx) -> Result {
-        if let Some(cmd) = self.command.latest() {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
+        if ctx.estopped() && !self.held {
+            self.engage();
+        }
+        if self.held {
+            // Commands queued while stopped are stale.
+            while self.command.recv().is_some() {}
+            self.held = ctx.estopped();
+        } else if let Some(cmd) = self.command.latest() {
             self.apply_command(&cmd)?;
         }
         let rtf = self.real_time_factor;
         let max_steps = self.max_steps;
         let sim = self.sim.as_mut().context("not started")?;
         let now = Instant::now();
-        let (wall0, sim0) = *self.clock.get_or_insert((now, sim.time()));
+        let (wall0, sim0) = *self.anchor.get_or_insert((now, sim.time()));
         let steps = if rtf > 0.0 {
             let target = sim0 + now.duration_since(wall0).as_secs_f64() * rtf;
             let behind = ((target - sim.time()) / sim.timestep()).floor().max(0.0) as u64;
             if behind > max_steps as u64 {
                 // Too slow to keep up: run what we can and re-anchor the clock.
-                self.clock = None;
+                self.anchor = None;
                 max_steps as u64
             } else {
                 behind
@@ -179,5 +228,9 @@ impl Node for MuJoCo {
         // mj_step leaves positions-dependent quantities one step behind.
         sim.forward();
         self.publish()
+    }
+
+    fn on_estop(&mut self, _ctx: &mut Ctx) {
+        self.engage();
     }
 }

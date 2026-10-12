@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
+use ruro::node::testing::Harness;
 use ruro::prelude::*;
 use ruro_graph::Graph;
 use ruro_host::{Executor, Remote};
@@ -249,7 +250,7 @@ static STATES: AtomicU64 = AtomicU64::new(0);
 #[node(kind = "test/sim-probe")]
 struct SimProbe {
     #[input]
-    time: Input<Scalar>,
+    time: Input<ruro::msg::Clock>,
     #[input]
     state: Input<JointState>,
 }
@@ -257,7 +258,7 @@ struct SimProbe {
 impl Node for SimProbe {
     fn step(&mut self, _ctx: &mut Ctx) -> Result {
         while let Some(t) = self.time.recv() {
-            TIMES.lock().push(t.0);
+            TIMES.lock().push(t.time_ns as f64 * 1e-9);
         }
         while let Some(s) = self.state.recv() {
             assert_eq!(s.position.len(), 1);
@@ -280,12 +281,12 @@ name: sim
 nodes:
   sim: {{ type: sim/mujoco, rate: 100, params: {{ model: "{}", real_time_factor: 2.0 }} }}
   probe: {{ type: test/sim-probe }}
-wires: [sim.sim_time -> probe.time, sim.state -> probe.state]
+wires: [sim.clock -> probe.time, sim.state -> probe.state]
 "#,
         path.display()
     ))
     .unwrap();
-    let mut exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
     let start = Instant::now();
     std::thread::sleep(Duration::from_millis(1000));
     let wall = start.elapsed().as_secs_f64();
@@ -300,4 +301,224 @@ wires: [sim.sim_time -> probe.time, sim.state -> probe.state]
         "sim time {last} after {wall} s"
     );
     assert!(STATES.load(Ordering::Relaxed) > 50);
+}
+
+/// Records the graph time and step of each tick.
+#[derive(Node)]
+#[node(kind = "test/sim-ticker")]
+struct SimTicker {
+    #[output]
+    out: Output<Scalar>,
+}
+
+static TICKS: Mutex<Vec<(u64, Duration)>> = Mutex::new(Vec::new());
+
+impl Node for SimTicker {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
+        TICKS.lock().push((ctx.now_ns(), ctx.dt()));
+        self.out.send(Scalar(0.0))
+    }
+}
+
+#[test]
+fn timers_follow_simulation_time() {
+    if library().is_none() {
+        return;
+    }
+    ruro_nodes_sim::link();
+    // Simulated time runs at twice wall speed, so a 50 Hz timer (on graph
+    // time) ticks about 100 times per wall second, 20 ms of graph time apart.
+    let path = write_model("clock.xml", &pendulum_xml(0.0));
+    let graph = Graph::from_yaml(&format!(
+        r#"
+name: sim-clock
+clock: sim
+nodes:
+  sim: {{ type: sim/mujoco, rate: 100, params: {{ model: "{}", real_time_factor: 2.0 }} }}
+  tick: {{ type: test/sim-ticker, rate: 50 }}
+"#,
+        path.display()
+    ))
+    .unwrap();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    let start = Instant::now();
+    std::thread::sleep(Duration::from_millis(1000));
+    let wall = start.elapsed().as_secs_f64();
+    let sim_now = exec.clock().now_ns();
+    let m = exec.metrics();
+    exec.stop();
+    let sim = m.nodes.iter().find(|n| n.id == "sim").unwrap();
+    assert!(sim.last_error.is_none(), "{:?}", sim.last_error);
+    let ticks = TICKS.lock().clone();
+    println!(
+        "{} ticks in {wall:.3} s wall, graph time {:.3} s",
+        ticks.len(),
+        sim_now as f64 * 1e-9
+    );
+    assert!(
+        (sim_now as f64 * 1e-9 - 2.0 * wall).abs() < 0.15,
+        "graph time is simulation time"
+    );
+    let expected = 100.0 * wall;
+    assert!(
+        (ticks.len() as f64 - expected).abs() < 15.0,
+        "{} ticks, expected about {expected:.0}",
+        ticks.len()
+    );
+    for w in ticks.windows(2).skip(1) {
+        assert_eq!(w[1].1, Duration::from_millis(20), "dt follows graph time");
+        assert_eq!(w[1].0 - w[0].0, 20_000_000, "now_ns is graph time");
+    }
+    assert!(ticks.last().unwrap().0 <= sim_now);
+}
+
+fn positions(h: &mut Harness) -> Vec<f64> {
+    let s: Vec<JointState> = h.take("state").unwrap();
+    s.last().unwrap().position.clone()
+}
+
+#[test]
+fn estop_zeroes_motor_controls_while_physics_runs() {
+    if library().is_none() {
+        return;
+    }
+    ruro_nodes_sim::link();
+    // Damped pendulum with a torque motor; each step simulates 1 s.
+    let path = write_model("estop-motor.xml", &pendulum_xml(0.5));
+    let mut h = Harness::new(
+        "sim/mujoco",
+        ruro::serde_json::json!({
+            "model": path.display().to_string(),
+            "real_time_factor": 0.0,
+            "max_steps": 2000,
+            "command_field": "effort",
+        }),
+    )
+    .unwrap();
+    let torque = |t: f64| JointCommand {
+        effort: vec![t],
+        ..Default::default()
+    };
+    // m g l sin θ = 5 Nm holds the pendulum about 0.5 rad out.
+    h.push("command", torque(5.0)).unwrap();
+    for _ in 0..20 {
+        h.step().unwrap();
+    }
+    let pushed = positions(&mut h)[0];
+    assert!(
+        (pushed.abs() - (5.0 / (M * G * L)).asin()).abs() < 0.02,
+        "{pushed}"
+    );
+
+    h.set_estop(true);
+    for _ in 0..20 {
+        h.push("command", torque(5.0)).unwrap();
+        h.step().unwrap();
+    }
+    let clocks: Vec<ruro::msg::Clock> = h.take("clock").unwrap();
+    assert!(
+        clocks.windows(2).all(|w| w[1].time_ns > w[0].time_ns),
+        "physics keeps running"
+    );
+    assert!(
+        positions(&mut h)[0].abs() < 0.02,
+        "zero torque: the pendulum hangs down"
+    );
+
+    h.push("command", torque(5.0)).unwrap();
+    h.set_estop(false);
+    for _ in 0..3 {
+        h.step().unwrap();
+    }
+    assert!(positions(&mut h)[0].abs() < 0.02, "stale command dropped");
+    h.push("command", torque(5.0)).unwrap();
+    for _ in 0..3 {
+        h.step().unwrap();
+    }
+    assert!(
+        positions(&mut h)[0].abs() > 0.3,
+        "fresh commands are followed"
+    );
+}
+
+#[test]
+fn estop_holds_position_actuators_where_the_arm_is() {
+    if library().is_none() {
+        return;
+    }
+    ruro_nodes_sim::link();
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/models/so100.xml");
+    // Each step simulates 0.1 s.
+    let mut h = Harness::new(
+        "sim/mujoco",
+        ruro::serde_json::json!({
+            "model": path.display().to_string(),
+            "real_time_factor": 0.0,
+            "max_steps": 50,
+        }),
+    )
+    .unwrap();
+    let target = [0.8, -0.6, 1.0, 0.5, -1.5, 1.0];
+    let goto = |p: &[f64]| JointCommand {
+        position: p.to_vec(),
+        ..Default::default()
+    };
+    h.push("command", goto(&target)).unwrap();
+    h.step().unwrap();
+    let at_stop = positions(&mut h);
+    let dist = |a: &[f64], b: &[f64]| {
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f64::max)
+    };
+    assert!(
+        dist(&at_stop, &target) > 0.2,
+        "still on the way: {at_stop:?}"
+    );
+
+    h.set_estop(true);
+    for _ in 0..30 {
+        h.push("command", goto(&target)).unwrap();
+        h.step().unwrap();
+    }
+    let held = positions(&mut h);
+    println!("stopped at {at_stop:?}, settled at {held:?}");
+    assert!(
+        dist(&held, &at_stop) < 0.15,
+        "holds near where it was: {at_stop:?} -> {held:?}"
+    );
+    assert!(dist(&held, &target) > 0.2, "did not go on to the target");
+    assert!(dist(&held, &[0.0; 6]) > 0.1, "did not go to the zero pose");
+
+    h.push("command", goto(&target)).unwrap();
+    h.set_estop(false);
+    for _ in 0..10 {
+        h.step().unwrap();
+    }
+    assert!(
+        dist(&positions(&mut h), &held) < 0.05,
+        "stale command dropped"
+    );
+    h.push("command", goto(&target)).unwrap();
+    for _ in 0..30 {
+        h.step().unwrap();
+    }
+    assert!(
+        dist(&positions(&mut h), &target) < 0.05,
+        "fresh commands are followed"
+    );
+}
+
+/// The simulated example graph follows the MuJoCo clock.
+#[test]
+fn example_graph_runs_on_the_simulation_clock() {
+    ruro_nodes_sim::link();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arm-sim.yaml");
+    let graph = Graph::load(path).unwrap();
+    assert_eq!(
+        ruro_host::clock_port(&graph).unwrap(),
+        Some(ruro_graph::PortRef::new("arm", "clock"))
+    );
 }

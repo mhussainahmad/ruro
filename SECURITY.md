@@ -34,9 +34,16 @@ investigate and fix the issue, and credit you in the advisory unless you prefer 
 
 ## Deployment notes
 
-ruro's control protocol (Zenoh, port 7447 by default) is not authenticated or encrypted. A
-client that can reach a daemon can deploy graphs, which run code from the node types linked
-into the daemon's host, and change parameters of running nodes. By default the daemon only
-listens on `127.0.0.1`. If you make it listen on a network interface (`--listen
-tcp/0.0.0.0:7447`), do so only on trusted networks, such as the robot's own network or a VPN,
-and restrict access with a firewall.
+A client that can reach a ruro daemon (Zenoh, port 7447 by default) can deploy graphs, which
+run code from the node types linked into the daemon's hosts, change parameters of running
+nodes and upload host binaries.
+
+- By default the daemon only listens on `127.0.0.1`, without encryption or authentication.
+- To accept remote clients, listen on `tls/...` with a certificate and key, and set a shared
+  token (`--token` or `RURO_TOKEN`); add `--tls-ca` to require client certificates. See the
+  [Security](book/src/security.md) page of the book.
+- A plain `tcp/` listener on a network interface accepts anyone who can reach it. Use one
+  only on trusted networks, such as the robot's own network or a VPN, and restrict access
+  with a firewall.
+- The studio cannot use TLS or tokens yet; reach protected robots through an SSH tunnel.
+- The ROS 2 bridge nodes connect to their Zenoh router without TLS or authentication.

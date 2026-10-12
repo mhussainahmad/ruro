@@ -7,37 +7,60 @@ with zero-copy messaging between nodes in the same process and shared-memory tra
 between processes. Design, run and inspect graphs in **ruro studio**, or drive everything from
 the `ruro` CLI.
 
-![ruro studio running a camera pipeline](docs/images/studio.png)
+![ruro studio running a camera pipeline](book/src/images/studio.png)
 
-- **Fast.** In-process wires move messages in about 150 ns, whether the message is a number or a
-  1080p frame, because messages are shared rather than copied. Cross-process wires use iceoryx2
-  shared memory: a few microseconds per hop.
-- **Isolated when you want it.** Every node has a *process group*. Nodes in one group share a
-  process; separate groups run as separate OS processes, supervised and restarted on crash.
-  Regrouping needs no rebuild.
-- **Typed.** Ports carry typed messages. Invalid wires are rejected in the editor and before
-  deployment.
-- **Observable.** Every node reports its rate, step latency (p50/p99), CPU, input age, drops and
-  errors. Any output can be watched live: images, plots, values, point clouds and transform
-  trees in 3D. Watching costs nothing while nobody is looking.
-- **Composable.** Group nodes into subgraphs, reuse them across graphs from their own files,
-  and compare versions of a graph node by node.
-- **Remote-ready.** The daemon is a Zenoh router: point the studio at a robot on the network
-  and work with it as if it were local.
-- **Native.** The studio is a single native Linux binary built with egui. No browser, no
-  Electron, no runtime to install.
+## Features
 
-> ruro is early. The core runtime, node SDK, CLI and studio work end to end; bridges to ROS 2,
-> simulators and hardware are next. See [Roadmap](#roadmap).
+- **Fast messaging.** In-process wires move a message in about 150 ns, whatever its size,
+  because messages are shared rather than copied. Cross-process wires use iceoryx2 shared
+  memory: a few microseconds per hop. Pooled sends avoid allocation in hot loops.
+- **Process groups.** Nodes in one group share a process; separate groups are separate OS
+  processes, supervised and restarted on crash. Regrouping needs no rebuild.
+- **Typed graphs.** YAML graph files, typed ports, validation before deployment, composite
+  nodes (subgraphs), and message schemas with compatibility checks.
+- **Observability.** Per-node rate, latency, CPU, input age, drops, errors and timer jitter;
+  live views of any output as an image, plot, value or 3D scene.
+- **Studio.** A native egui editor: tabs, undo/redo, subgraphs, comparing versions, live
+  parameter tuning, recording and replay timeline, fleet view, ROS 2 topic browser, light
+  and dark themes, plugins.
+- **Real-time tier.** `SCHED_FIFO` priority, CPU pinning, memory locking, deterministic
+  single-thread groups and per-node deadlines; simulated graph time; a software e-stop.
+- **Record and replay.** MCAP recordings of every output, replay into a running graph, and
+  import of ROS 2 bags.
+- **Multi-machine.** Daemons connect as peers; one graph can span several computers, with
+  TLS, mutual TLS and token authentication.
+- **Node SDKs.** Rust (`#[derive(Node)]`, `ruro new`, `ruro build`) and Python (with
+  NumPy views of images and hot reload).
+- **ROS 2 bridge.** Publish and subscribe ROS 2 topics over rmw_zenoh, without a ROS
+  installation on the ruro side.
+- **Node libraries.** Cameras (V4L2, MJPEG over HTTP), serial, CAN, GPIO, I2C, gamepads,
+  Dynamixel and Feetech servos (SO-100 arm), ODrive, WitMotion IMUs, RPLidar and Livox
+  lidars; MuJoCo simulation and URDF/MJCF kinematics; ONNX inference, YOLO decoding, policy
+  execution and LeRobot dataset recording.
+
+## Status
+
+ruro is early: version 0.1.0, not released, interfaces may change. The runtime, SDKs, CLI,
+daemon, studio, ROS 2 bridge (against an in-process router) and record/replay are covered
+by tests that run in CI. Other parts are implemented to their specifications but not yet
+verified against the real thing:
+
+- the **hardware drivers** are tested only against protocol fixtures and simulated devices
+  on pseudo-terminals, never against the physical devices;
+- **MuJoCo** support is tested against MuJoCo 3.15.0 outside CI;
+- **ROS 2 interop** has not been tested in CI against a running ROS 2 system;
+- **multi-machine graphs** have been tested with two daemons on one machine.
+
+The book's [project status](book/src/status.md) page has the details and the known gaps.
 
 ## Quick start
 
-Requires Rust 1.95+ on Linux.
+Requires Linux, Rust 1.95 or newer and a C compiler.
 
 ```sh
 git clone https://github.com/mhussainahmad/ruro
 cd ruro
-cargo build --release
+cargo build --release -p ruro-cli -p ruro-host -p ruro-studio
 
 # Open the studio. It starts a local daemon automatically.
 ./target/release/ruro-studio examples/camera.yaml
@@ -57,32 +80,12 @@ Or from a terminal:
 ./target/release/ruro kill camera                # crash a process; watch it come back
 ```
 
-## The studio
+Building the whole workspace (`cargo build` without `-p`), including the Python host, also
+needs Python 3.11 or newer with its shared library (`python3-dev` on Debian and Ubuntu).
+See [Installation](book/src/installation.md) for the Debian package, AppImage, Flatpak and
+Docker image.
 
-Graphs open as tabs with full undo and redo. Copy and paste nodes as YAML, group them into
-subgraphs, start from templates, and compare a graph with its saved version. While a graph runs,
-watch any output as an image, a plot or a 3D scene, record it, and replay recordings on a
-timeline. A fleet view lists every daemon on the network. Dark and light themes.
-
-| | |
-|---|---|
-| ![Point cloud and transform tree in the 3D view](docs/images/studio-3d.png) | ![The light theme](docs/images/studio-light.png) |
-| ![Comparing a graph with its saved version](docs/images/studio-compare.png) | ![A subgraph open in its own tab](docs/images/studio-subgraph.png) |
-
-The [studio guide](book/src/studio.md) covers every feature, and
-[studio plugins](book/src/studio-plugins.md) shows how to add visualizers and panels.
-
-## Concepts
-
-| | |
-|---|---|
-| **Node** | A struct with typed input and output ports and parameters. Implements `step`. |
-| **Graph** | Node instances and wires, stored as YAML. The studio and the CLI read and write the same file. |
-| **Process group** | Nodes that share an OS process. Same group: zero-copy. Different groups: shared memory, crash isolation. |
-| **Host** | The binary that runs a group. Every node crate linked into it is available to graphs. |
-| **Daemon** | One per machine. Validates and deploys graphs, supervises hosts, serves metrics, logs and live values. |
-
-A graph:
+## A graph and a node
 
 ```yaml
 name: camera-demo
@@ -95,15 +98,10 @@ wires:
   - blur.out -> stats.image
 ```
 
-Nodes run on a timer (`rate`) or whenever an input receives data. Each input keeps the newest
-message by default; set `depth` on a wire to queue more.
-
-## Writing a node
-
 ```rust
 use ruro::prelude::*;
 
-/// Multiplies a signal by a constant.
+/// Multiplies every sample by a gain.
 #[derive(Node)]
 #[node(kind = "my_robot/gain")]
 pub struct Gain {
@@ -111,7 +109,6 @@ pub struct Gain {
     input: Input<Scalar>,
     #[output]
     output: Output<Scalar>,
-    /// Multiplier applied to every sample.
     #[param(default = 2.0, min = -10, max = 10)]
     k: f64,
 }
@@ -126,90 +123,37 @@ impl Node for Gain {
 }
 ```
 
-The derive generates the node's descriptor: ports, parameter ranges and docs from doc comments.
-That is what the studio uses for its library, port colours, type checks and parameter editors.
-Custom messages are plain structs:
+`ruro new package my_nodes` scaffolds a package like this with a test, and `ruro build`
+builds a host that links it.
 
-```rust
-#[derive(Message, Serialize, Deserialize, Clone)]
-#[message(name = "my_robot/Detection")]
-pub struct Detection { pub x: f32, pub y: f32, pub score: f32 }
-```
+## Documentation
 
-To make your nodes available, build a host that links them and point the daemon at it:
+The user guide is an [mdBook](https://rust-lang.github.io/mdBook/) in [`book/`](book/src/SUMMARY.md)
+(`mdbook serve book` to read it locally):
 
-```rust
-// my-host/src/main.rs
-fn main() {
-    my_robot_nodes::link();
-    ruro_host::main();
-}
-```
-
-```sh
-ruro daemon --host target/release/my-host
-```
-
-## Standard nodes
-
-`std/fake-camera`, `std/blur`, `std/grayscale`, `std/image-stats`, `std/sine`, `std/gain`,
-`std/pid`, `std/fake-arm`. They need no hardware and are useful for trying ruro, testing and
-benchmarking. Run `ruro nodes -v` for their ports and parameters.
-
-## Performance
-
-Measured with `cargo bench` on a 16-thread x86-64 Linux machine:
-
-| Path | Payload | Time per hop |
-|---|---|---|
-| In-process | `Scalar` | 143 ns |
-| In-process | 1080p RGB image (shared) | 191 ns |
-| Shared memory | 8 B | 4.5 µs |
-| Shared memory | 640×480 RGB | 26 µs |
-| Shared memory | 1080p RGB | 0.7 ms |
-
-```sh
-cargo bench -p ruro-node -p ruro-transport
-```
-
-## Architecture
-
-```
-crates/
-  ruro            facade crate for node authors: derives, prelude
-  ruro-msg        Message trait and standard types (Image, PointCloud, Pose, JointState, ...)
-  ruro-macros     #[derive(Node)], #[derive(Message)]
-  ruro-node       ports, queues, parameters, link-time node registry
-  ruro-graph      graph YAML, node descriptors, validation
-  ruro-transport  iceoryx2 shared-memory topics
-  ruro-proto      control protocol over Zenoh (deploy, metrics, taps, params, logs)
-  ruro-host       executes one process group: a thread per node, wiring, metrics
-  ruro-daemon     per-machine supervisor and Zenoh router
-  ruro-cli        `ruro`
-  ruro-studio     `ruro-studio`, the desktop editor
-nodes/
-  ruro-nodes-std  standard node library
-```
-
-## Roadmap
-
-- ROS 2 bridge (topics and messages both ways)
-- Python node SDK
-- Record and replay with a timeline in the studio
-- Simulator bridges (MuJoCo, Gazebo) and hardware drivers
-- Deterministic real-time executor for kHz control loops
-- Multi-machine graphs
+- [Installation](book/src/installation.md), [Quick start](book/src/quick-start.md),
+  [Concepts](book/src/concepts.md)
+- [Writing nodes in Rust](book/src/writing-nodes.md),
+  [Node packages and hosts](book/src/packages.md), [Python nodes](book/src/python.md)
+- [Studio](book/src/studio.md), [Studio plugins](book/src/studio-plugins.md)
+- [Runtime features](book/src/runtime.md), [Real-time scheduling](book/src/realtime.md),
+  [Record and replay](book/src/record-replay.md)
+- [Hardware drivers](book/src/hardware.md), [Simulation](book/src/simulation.md),
+  [Machine learning](book/src/ml.md), [ROS 2 bridge](book/src/ros2.md)
+- [Deploying on robots](book/src/deployment.md),
+  [Multi-machine graphs](book/src/multi-machine.md), [Security](book/src/security.md)
+- [Command line](book/src/reference/cli.md), [Graph files](book/src/reference/graph-yaml.md),
+  [Architecture](book/src/architecture.md), [Performance](book/src/performance.md)
 
 ## Development
 
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-# The documentation book (needs mdbook):
-mdbook serve book
-# Re-render the studio screenshots headlessly (into docs/images):
-RURO_SCREENSHOTS=docs/images cargo test -p ruro-studio screenshots
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full set of checks CI runs, and
+[SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
 ## License
 

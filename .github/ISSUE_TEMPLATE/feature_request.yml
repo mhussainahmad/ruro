@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the suggestion. Please check the roadmap in the README and existing issues first.
+        Thanks for the suggestion. Please check the project status page of the book (book/src/status.md) and existing issues first.
   - type: textarea
     id: problem
     attributes:

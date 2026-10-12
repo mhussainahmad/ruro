@@ -16,13 +16,17 @@ for in a pull request.
 
 ## Development setup
 
-You need Linux, a recent stable Rust toolchain from [rustup](https://rustup.rs) (the studio's
-GUI dependencies need Rust 1.95 or newer) and the windowing development libraries for the
-studio. On Debian and Ubuntu:
+You need Linux, Rust 1.95 or newer from [rustup](https://rustup.rs), a C compiler, and
+Python 3.11 or newer with its shared library (the Python host embeds it). On Debian and
+Ubuntu:
 
 ```sh
-sudo apt-get install libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+sudo apt-get install build-essential python3-dev
 ```
+
+If your default `python3` is older than 3.11, point `PYO3_PYTHON` at a newer interpreter.
+No windowing development libraries are needed to build the studio; running it needs a
+Wayland or X11 session with OpenGL.
 
 Then:
 
@@ -52,15 +56,31 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+CI also checks the optional node features, the minimum Rust version and the Python
+package. If you touch `nodes/ruro-nodes-ml` or `nodes/ruro-nodes-sim`, or `crates/ruro-py`:
+
+```sh
+cargo clippy -p ruro-nodes-ml -p ruro-nodes-sim --all-targets \
+    --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco -- -D warnings
+cargo test -p ruro-nodes-ml -p ruro-nodes-sim \
+    --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco
+
+python3 -m venv .venv && source .venv/bin/activate
+pip install 'maturin>=1.9,<2'
+maturin develop -m crates/ruro-py/Cargo.toml --extras test
+(cd crates/ruro-py && pytest)
+```
+
 - Add tests for new behaviour and bug fixes. Unit tests live next to the code; the studio has
   headless UI tests in `crates/ruro-studio/src/app/tests.rs`.
 - Update the documentation when behaviour changes: the [README](README.md), the book in
-  `book/` (build it with `mdbook build book` or preview with `mdbook serve book`) and
+  `book/` (build it with `mdbook build book` or preview with `mdbook serve book`; CI uses
+  mdBook 0.4.52), including its [project status](book/src/status.md) page, and
   [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]`.
 - If you change the studio's appearance, re-render the screenshots headlessly:
 
   ```sh
-  RURO_SCREENSHOTS=docs/images cargo test -p ruro-studio screenshots
+  RURO_SCREENSHOTS=book/src/images cargo test -p ruro-studio screenshots
   ```
 
 - If you touch performance-sensitive code (ports, queues, transport), compare benchmarks

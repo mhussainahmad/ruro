@@ -34,8 +34,14 @@ body:
         - daemon
         - ruro-host / runtime
         - studio
-        - node SDK (derive macros, ports, messages)
+        - node SDK (derive macros, ports, messages, ruro new/build)
+        - Python nodes (ruro-host-py, Python package)
         - standard nodes
+        - hardware drivers
+        - simulation (MuJoCo, URDF/MJCF)
+        - machine learning (ONNX, LeRobot)
+        - ROS 2 bridge
+        - record and replay
         - packaging (.deb, AppImage, Flatpak, Docker)
         - documentation
         - other

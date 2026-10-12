@@ -442,8 +442,24 @@ fn releases_lift_the_stops_of_their_own_origin_wherever_they_went() {
     wait_status(&session, &robot, |s| !s.estopped);
     wait_status(&session, &laptop, |s| !s.estopped);
 
+    // A machine that left the graph and then went away does not make the
+    // release fail; it is noted.
+    request_to(&laptop, Ctl::Deploy, &spanning);
+    request_to(&laptop, Ctl::Estop, "engage");
+    request_to(
+        &laptop,
+        Ctl::Deploy,
+        "name: alone\nnodes:\n  a: { type: t/x, rate: 1 }\n",
+    );
+    drop(robot_daemon);
+    let reply = request_to(&laptop, Ctl::Estop, "release");
+    assert!(
+        reply.starts_with("e-stop released") && reply.contains("no longer in the graph"),
+        "{reply}"
+    );
+
     request_to(&laptop, Ctl::Stop, "");
-    drop((robot_daemon, laptop_daemon));
+    drop(laptop_daemon);
     for name in [&robot, &laptop] {
         let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
     }

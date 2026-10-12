@@ -185,21 +185,37 @@ pub fn handle(st: &Arc<State>, text: &str) -> Result<String> {
             }
         }
     }
-    let failed: Vec<String> = results
-        .iter()
-        .filter_map(|(p, r)| r.as_ref().err().map(|e| format!("`{p}` ({e:#})")))
-        .collect();
+    // Machines of the graph must follow; one that has left it and cannot
+    // be reached is only noted (and tried again on the next release).
+    let current = st.peers.lock().clone();
+    let (mut failed, mut gone) = (Vec::new(), Vec::new());
+    for (p, r) in &results {
+        if let Err(e) = r {
+            let note = format!("`{p}` ({e:#})");
+            if current.contains(p) {
+                failed.push(note);
+            } else {
+                gone.push(note);
+            }
+        }
+    }
     if !failed.is_empty() {
         bail!("{done} here, but not on {}", failed.join(", "));
     }
-    Ok(std::iter::once(done)
+    let mut reply: Vec<String> = std::iter::once(done)
         .chain(
             results
                 .into_iter()
                 .filter_map(|(p, r)| Some(format!("{p}: {}", r.ok()?))),
         )
-        .collect::<Vec<_>>()
-        .join("; "))
+        .collect();
+    if !gone.is_empty() {
+        reply.push(format!(
+            "not reached, no longer in the graph: {}",
+            gone.join(", ")
+        ));
+    }
+    Ok(reply.join("; "))
 }
 
 /// Before a deploy forwards groups to `machines`: if this daemon is

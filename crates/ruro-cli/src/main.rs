@@ -258,8 +258,7 @@ impl Client {
 fn run(cli: Cli) -> Result<()> {
     let security = cli.security.security()?;
     let connect = |name: Option<&str>| -> Result<Client> {
-        let session = ruro_proto::connect_with(&cli.connect, &security)
-            .context("start one with `ruro daemon`")?;
+        let session = ruro_proto::connect_with(&cli.connect, &security)?;
         let keys = ruro_proto::discover(&session, name.or(cli.daemon.as_deref()), DISCOVERY)?;
         Ok(Client { session, keys })
     };
@@ -337,8 +336,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Status => status(&client()?),
         Cmd::Fleet => {
-            let session = ruro_proto::connect_with(&cli.connect, &security)
-                .context("start one with `ruro daemon`")?;
+            let session = ruro_proto::connect_with(&cli.connect, &security)?;
             fleet::fleet(&session)
         }
         Cmd::Nodes { verbose } => {
@@ -467,6 +465,14 @@ pub fn connect_or_start(
 ) -> Result<(Option<ruro_daemon::Daemon>, Client)> {
     let (daemon, session) = match ruro_proto::connect_with(endpoint, security) {
         Ok(session) => (None, session),
+        // A daemon that refuses the session (wrong certificate or token)
+        // is reported; starting another on its endpoint would fail anyway.
+        Err(e)
+            if ruro_proto::ConnectError::failure_of(&e)
+                != Some(ruro_proto::ConnectFailure::NoDaemon) =>
+        {
+            return Err(e);
+        }
         Err(_) => {
             let mut config = ruro_daemon::Config::new();
             config.listen = endpoint.to_owned();

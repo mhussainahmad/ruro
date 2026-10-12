@@ -422,12 +422,26 @@ fn tls_and_token_protect_the_daemon() {
     request(&s, &d.keys, Ctl::Deploy, graph).unwrap();
     wait_metrics(&s, &d.keys, "main", |m| node_hz(m, "src") > 20.0);
 
-    let reject = |security: Security, why: &str| {
-        let ok = d
-            .client_with(&security)
-            .and_then(|s| request(&s, &d.keys, Ctl::Ping, ""))
-            .is_ok();
-        assert!(!ok, "a client {why} was let in");
+    // Refused sessions are reported as such, not as a missing daemon.
+    let reject = |security: Security, why: &str, hint: &str| {
+        let err = match d.client_with(&security) {
+            Ok(s) => match request(&s, &d.keys, Ctl::Ping, "") {
+                Ok(_) => panic!("a client {why} was let in"),
+                Err(e) => e,
+            },
+            Err(e) => e,
+        };
+        let failure = ruro_proto::ConnectError::failure_of(&err);
+        assert_eq!(
+            failure,
+            Some(ruro_proto::ConnectFailure::Refused),
+            "{why}: {err:#}"
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains(hint) && !msg.contains("ruro daemon`"),
+            "{why}: {msg}"
+        );
     };
     reject(
         Security {
@@ -435,6 +449,7 @@ fn tls_and_token_protect_the_daemon() {
             ..Default::default()
         },
         "without the token",
+        "token",
     );
     reject(
         Security {
@@ -443,6 +458,7 @@ fn tls_and_token_protect_the_daemon() {
             ..Default::default()
         },
         "with a wrong token",
+        "token",
     );
     reject(
         Security {
@@ -450,7 +466,19 @@ fn tls_and_token_protect_the_daemon() {
             ..Default::default()
         },
         "that does not trust the daemon's certificate",
+        "--tls-ca",
     );
+    let (other_ca, _) = certificates_for(&tmp("tls-other"), &["localhost"]);
+    reject(
+        Security {
+            ca: Some(other_ca),
+            token: Some("correct horse".into()),
+            ..Default::default()
+        },
+        "that trusts another CA",
+        "--tls-ca",
+    );
+    cleanup(&[&tmp("tls-other")]);
     request(&s, &d.keys, Ctl::Stop, "").unwrap();
     cleanup(&[&tmp("tls")]);
 }
@@ -482,11 +510,11 @@ fn mutual_tls_requires_client_certificates() {
         ca: Some(ca),
         ..Default::default()
     };
-    let ok = d
+    let err = d
         .client_with(&without)
         .and_then(|s| request(&s, &d.keys, Ctl::Ping, ""))
-        .is_ok();
-    assert!(!ok, "a client without a certificate was let in");
+        .expect_err("a client without a certificate was let in");
+    assert!(format!("{err:#}").contains("client certificate"), "{err:#}");
     cleanup(&[&tmp("mtls")]);
 }
 

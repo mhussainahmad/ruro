@@ -587,12 +587,132 @@ pub fn connect(endpoint: &str) -> Result<zenoh::Session> {
     connect_with(endpoint, &Security::default())
 }
 
-/// Opens a client session with TLS and token authentication.
+/// Opens a client session with TLS and token authentication. On failure
+/// the error is a [`ConnectError`], which tells a daemon that is not
+/// running from one that refused the session.
 pub fn connect_with(endpoint: &str, security: &Security) -> Result<zenoh::Session> {
     use zenoh::Wait;
-    zenoh::open(client_config_with(endpoint, security)?)
-        .wait()
-        .map_err(|e| anyhow!("no ruro daemon reachable at {endpoint} ({e})"))
+    let config = client_config_with(endpoint, security)?;
+    zenoh::open(config).wait().map_err(|e| {
+        let detail = e.to_string();
+        anyhow::Error::new(ConnectError {
+            endpoint: endpoint.to_owned(),
+            failure: probe(endpoint),
+            tls: endpoint.starts_with("tls/"),
+            has_ca: security.ca.is_some(),
+            has_token: security.token.is_some(),
+            detail,
+        })
+    })
+}
+
+/// Why a client could not open a session with a daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectFailure {
+    /// Nothing listens at the endpoint, or its address cannot be resolved
+    /// or reached.
+    NoDaemon,
+    /// Something listens there but refused the session: a TLS certificate
+    /// that is not trusted, a missing or wrong client certificate or token,
+    /// or a service that is not a ruro daemon.
+    Refused,
+    /// The endpoint's protocol cannot be probed.
+    Unknown,
+}
+
+/// A failure of [`connect_with`].
+#[derive(Debug, Clone)]
+pub struct ConnectError {
+    pub endpoint: String,
+    pub failure: ConnectFailure,
+    tls: bool,
+    has_ca: bool,
+    has_token: bool,
+    /// Zenoh's description of the failure.
+    pub detail: String,
+}
+
+impl std::fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let endpoint = &self.endpoint;
+        match self.failure {
+            ConnectFailure::NoDaemon => write!(
+                f,
+                "no ruro daemon is listening at {endpoint} (start one with `ruro daemon`)"
+            ),
+            ConnectFailure::Refused => {
+                let hint = if self.tls && !self.has_ca {
+                    "a tls/ endpoint needs --tls-ca with the CA that signed the daemon's certificate"
+                        .to_owned()
+                } else {
+                    let mut checks = Vec::new();
+                    if self.tls {
+                        checks.push(
+                            "that --tls-ca signed the daemon's certificate and the certificate \
+                             names the host you connect to",
+                        );
+                        checks.push("the client certificate, if the daemon requires one");
+                    } else {
+                        checks.push("whether the daemon listens on tls/ rather than tcp/");
+                    }
+                    checks.push(if self.has_token {
+                        "that the token is the daemon's"
+                    } else {
+                        "whether the daemon requires a token (--token-file or RURO_TOKEN)"
+                    });
+                    format!("check {}", checks.join(", "))
+                };
+                write!(
+                    f,
+                    "the daemon at {endpoint} refused the connection; {hint} ({})",
+                    self.detail
+                )
+            }
+            ConnectFailure::Unknown => {
+                write!(f, "cannot connect to {endpoint} ({})", self.detail)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConnectError {}
+
+impl ConnectError {
+    /// The failure behind an error returned by [`connect_with`], if it is one.
+    pub fn failure_of(e: &anyhow::Error) -> Option<ConnectFailure> {
+        e.downcast_ref::<ConnectError>().map(|c| c.failure)
+    }
+}
+
+/// Checks whether anything accepts connections at a Zenoh endpoint.
+fn probe(endpoint: &str) -> ConnectFailure {
+    use std::net::ToSocketAddrs;
+    let Some((proto, rest)) = endpoint.split_once('/') else {
+        return ConnectFailure::Unknown;
+    };
+    // Endpoints may carry `?metadata` and `#config` after the address.
+    let addr = rest.split(['?', '#']).next().unwrap_or_default();
+    match proto {
+        "tcp" | "tls" => {
+            let Ok(addrs) = addr.to_socket_addrs() else {
+                return ConnectFailure::NoDaemon;
+            };
+            let timeout = std::time::Duration::from_secs(1);
+            if addrs
+                .into_iter()
+                .any(|a| std::net::TcpStream::connect_timeout(&a, timeout).is_ok())
+            {
+                ConnectFailure::Refused
+            } else {
+                ConnectFailure::NoDaemon
+            }
+        }
+        "unixsock-stream" => match std::os::unix::net::UnixStream::connect(addr) {
+            Ok(_) => ConnectFailure::Refused,
+            Err(_) => ConnectFailure::NoDaemon,
+        },
+        _ => ConnectFailure::Unknown,
+    }
 }
 
 /// Reads an access token from a file: its first line, without surrounding
@@ -722,6 +842,41 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         assert_eq!(json, r#"{"cmd":"mute","nodes":["src"]}"#);
         assert_eq!(serde_json::from_str::<HostCommand>(&json).unwrap(), c);
+    }
+
+    #[test]
+    fn a_missing_daemon_is_told_apart_from_a_refused_session() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let endpoint = format!("tcp/127.0.0.1:{port}");
+        assert_eq!(probe(&endpoint), ConnectFailure::NoDaemon);
+        let err = connect(&endpoint).expect_err("nothing listens");
+        assert_eq!(
+            ConnectError::failure_of(&err),
+            Some(ConnectFailure::NoDaemon)
+        );
+        assert!(format!("{err:#}").contains("ruro daemon"), "{err:#}");
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert_eq!(probe(&format!("tls/{addr}")), ConnectFailure::Refused);
+        assert_eq!(
+            probe("tcp/no-such-host.invalid:7447"),
+            ConnectFailure::NoDaemon
+        );
+        assert_eq!(probe("udp/127.0.0.1:1"), ConnectFailure::Unknown);
+        let refused = ConnectError {
+            endpoint: format!("tls/{addr}"),
+            failure: ConnectFailure::Refused,
+            tls: true,
+            has_ca: false,
+            has_token: false,
+            detail: String::new(),
+        };
+        assert!(refused.to_string().contains("--tls-ca"), "{refused}");
     }
 
     #[test]

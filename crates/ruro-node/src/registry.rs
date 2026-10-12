@@ -11,6 +11,8 @@ pub trait DynNode: Send {
     fn step(&mut self, ctx: &mut Ctx) -> Result;
     fn stop(&mut self, ctx: &mut Ctx);
     fn set_param(&mut self, name: &str, value: &serde_json::Value) -> Result;
+    /// See [`Node::on_estop`].
+    fn on_estop(&mut self, _ctx: &mut Ctx) {}
 }
 
 impl<T: Node + NodeSpec> DynNode for T {
@@ -28,6 +30,10 @@ impl<T: Node + NodeSpec> DynNode for T {
 
     fn set_param(&mut self, name: &str, value: &serde_json::Value) -> Result {
         NodeSpec::set_param(self, name, value)
+    }
+
+    fn on_estop(&mut self, ctx: &mut Ctx) {
+        Node::on_estop(self, ctx)
     }
 }
 

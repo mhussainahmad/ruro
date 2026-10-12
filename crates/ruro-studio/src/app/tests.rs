@@ -873,6 +873,33 @@ fn record_and_replay_controls_send_requests() {
 }
 
 #[test]
+fn recording_notifications_show_what_the_daemon_did() {
+    let mut h = harness(None);
+    let ctx = h.ctx.clone();
+    let reply = |op, msg: &str| Event::Reply {
+        op,
+        result: Ok(msg.into()),
+    };
+    let st = h.state_mut();
+    st.handle_event(&ctx, reply("record", "recording 2 group(s) to /d/run.mcap"));
+    st.handle_event(
+        &ctx,
+        reply(
+            "stop recording",
+            "recorded 297 message(s) on 4 channel(s) over 5.8 s to /d/run.mcap",
+        ),
+    );
+    let texts: Vec<&str> = st.toasts.iter().map(|t| t.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "Recording 2 group(s) to /d/run.mcap",
+            "Recorded 297 message(s) on 4 channel(s) over 5.8 s to /d/run.mcap"
+        ]
+    );
+}
+
+#[test]
 fn fleet_lists_daemons_and_switches() {
     let mut h = harness(None);
     let ctx = h.ctx.clone();

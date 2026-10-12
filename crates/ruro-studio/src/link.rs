@@ -341,7 +341,7 @@ fn handle(
             }
         }
         Command::Record(path) => emit.emit(Event::Reply {
-            op: "record",
+            op: record_op(&path),
             result: request(Ctl::Record, &path),
         }),
         Command::Playback(c) => emit.emit(Event::Reply {
@@ -366,7 +366,7 @@ fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) -> Option<S
             Command::Deploy(_) => "deploy",
             Command::Stop => "stop",
             Command::Kill(_) => "kill",
-            Command::Record(_) => "record",
+            Command::Record(path) => record_op(&path),
             Command::Playback(_) => "playback",
             Command::SwitchDaemon(name) => {
                 switch = Some(name);
@@ -380,6 +380,15 @@ fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) -> Option<S
         });
     }
     switch
+}
+
+/// Reply operation of a record request: an empty path stops recording.
+fn record_op(path: &str) -> &'static str {
+    if path.is_empty() {
+        "stop recording"
+    } else {
+        "record"
+    }
 }
 
 fn is_local(endpoint: &str) -> bool {

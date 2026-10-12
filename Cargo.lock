@@ -4823,6 +4823,7 @@ version = "0.1.0"
 dependencies = [
  "jpeg-encoder",
  "libc",
+ "parking_lot",
  "ruro",
  "ruro-graph",
  "ruro-host",

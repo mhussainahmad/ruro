@@ -17,6 +17,7 @@ zune-jpeg = { workspace = true }
 
 [dev-dependencies]
 jpeg-encoder = "0.7"
+parking_lot = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-host = { workspace = true }
 serde_json = { workspace = true }

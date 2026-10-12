@@ -44,6 +44,16 @@ use ruro_ros2::rmw::{
 /// Forces this crate to be linked so its nodes are registered.
 pub fn link() {}
 
+/// The credentials in this process's environment, read once: settings are
+/// compared on every step.
+fn env_credentials() -> Result<Credentials> {
+    static ENV: std::sync::OnceLock<std::result::Result<Credentials, String>> =
+        std::sync::OnceLock::new();
+    ENV.get_or_init(|| Credentials::from_env().map_err(|e| format!("{e:#}")))
+        .clone()
+        .map_err(|e| anyhow::anyhow!(e))
+}
+
 /// Connection settings a bridge node was started with.
 #[derive(Debug, Clone, PartialEq)]
 struct Settings {
@@ -78,7 +88,7 @@ impl Settings {
         };
         let reliability: Reliability = qos.parse()?;
         // Hosts of a daemon started with a token find it in RURO_TOKEN.
-        let mut credentials = Credentials::from_env()?;
+        let mut credentials = env_credentials()?;
         let token_from_env = token.is_empty() && credentials.token.is_some();
         if !token.is_empty() {
             credentials.token = Some(token.to_owned());

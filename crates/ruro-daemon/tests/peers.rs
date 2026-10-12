@@ -166,3 +166,69 @@ fn a_second_daemon_with_the_same_name_leaves_the_first_running() {
     let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_unreachable_peer_does_not_keep_the_emergency_stop_from_the_others() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-gone-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let ports = [free_port(), free_port(), free_port()];
+    let tag = std::process::id();
+    // Peers are contacted in name order: the one that goes away comes first.
+    let (gone, robot, laptop) = (
+        format!("arm{tag}"),
+        format!("base{tag}"),
+        format!("console{tag}"),
+    );
+    let gone_daemon = daemon(&gone, ports[0], Vec::new(), &host);
+    let robot_daemon = daemon(&robot, ports[1], Vec::new(), &host);
+    let laptop_daemon = daemon(
+        &laptop,
+        ports[2],
+        ports[..2]
+            .iter()
+            .map(|p| format!("tcp/127.0.0.1:{p}"))
+            .collect(),
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{}", ports[2])).unwrap();
+    let keys = Keys::new(&laptop);
+    let graph = format!(
+        "name: three\ngroups:\n  a: {{ machine: {gone} }}\n  b: {{ machine: {robot} }}\nnodes:\n  x: {{ type: t/x, group: a, rate: 1 }}\n  y: {{ type: t/x, group: b, rate: 1 }}\n  z: {{ type: t/x, rate: 1 }}\n"
+    );
+    ruro_proto::request(
+        &session,
+        &keys,
+        Ctl::Deploy,
+        &graph,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    // One machine goes away while the laptop still runs the graph.
+    drop(gone_daemon);
+    let start = Instant::now();
+    let reply = ruro_proto::request(
+        &session,
+        &keys,
+        Ctl::Estop,
+        "engage",
+        Duration::from_secs(10),
+    );
+    let err = format!("{:#}", reply.expect_err("one machine did not get the stop"));
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(err.contains("engaged here") && err.contains(&gone), "{err}");
+    assert!(!err.contains(&robot), "{err}");
+    wait_status(&session, &laptop, |s| s.estopped);
+    wait_status(&session, &robot, |s| s.estopped);
+
+    drop((robot_daemon, laptop_daemon));
+    for name in [&gone, &robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

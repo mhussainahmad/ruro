@@ -32,6 +32,8 @@ pub const DEFAULT_PORT: u16 = 7447;
 
 /// How long control requests to hosts and peer daemons may take.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a peer gets to confirm a forwarded e-stop.
+const FORWARD_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -500,16 +502,45 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             } else {
                 FORWARDED_RELEASE
             };
-            let replies: Vec<String> = peers
+            // All at once, and briefly: a peer that does not answer must not
+            // hold the stop back from the others, nor outlast the client.
+            let results: Vec<(&String, Result<String>)> = std::thread::scope(|s| {
+                let pending: Vec<_> = peers
+                    .iter()
+                    .map(|p| {
+                        let ask = || {
+                            ruro_proto::request(
+                                &st.session,
+                                &Keys::new(p),
+                                Ctl::Estop,
+                                op,
+                                FORWARD_TIMEOUT,
+                            )
+                        };
+                        (p, s.spawn(ask))
+                    })
+                    .collect();
+                pending
+                    .into_iter()
+                    .map(|(p, h)| {
+                        let r = h.join().unwrap_or_else(|_| Err(anyhow!("request failed")));
+                        (p, r)
+                    })
+                    .collect()
+            });
+            let failed: Vec<String> = results
                 .iter()
-                .map(|p| match st.peer_request(p, Ctl::Estop, op) {
-                    Ok(reply) => Ok(format!("{p}: {reply}")),
-                    Err(e) => Err(format!("{e:#}")),
-                })
-                .collect::<Result<_, _>>()
-                .map_err(|e| anyhow!("{done} here, but not on {e}"))?;
+                .filter_map(|(p, r)| r.as_ref().err().map(|e| format!("`{p}` ({e:#})")))
+                .collect();
+            if !failed.is_empty() {
+                bail!("{done} here, but not on {}", failed.join(", "));
+            }
             Ok(std::iter::once(done.to_owned())
-                .chain(replies)
+                .chain(
+                    results
+                        .into_iter()
+                        .filter_map(|(p, r)| Some(format!("{p}: {}", r.ok()?))),
+                )
                 .collect::<Vec<_>>()
                 .join("; "))
         }

@@ -82,7 +82,11 @@ pub fn load_labels(spec: &str) -> Result<Vec<String>> {
     let path = std::path::Path::new(spec);
     if !spec.contains(',') && path.is_file() {
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {spec}"))?;
-        return Ok(text.lines().map(|l| l.trim().to_owned()).filter(|l| !l.is_empty()).collect());
+        return Ok(text
+            .lines()
+            .map(|l| l.trim().to_owned())
+            .filter(|l| !l.is_empty())
+            .collect());
     }
     Ok(spec.split(',').map(|s| s.trim().to_owned()).collect())
 }
@@ -163,7 +167,9 @@ mod tests {
         assert_eq!(Detections::decode(&d.to_bytes()).unwrap(), d);
         let t = Tensor::new(vec![2, 2], vec![0.0, -1.0, 2.0, 3.0]);
         assert_eq!(Tensor::decode(&t.to_bytes()).unwrap(), t);
-        let Preview::Text(p) = t.preview() else { panic!() };
+        let Preview::Text(p) = t.preview() else {
+            panic!()
+        };
         assert!(p.contains("[-1, 3]"), "{p}");
     }
 
@@ -173,7 +179,10 @@ mod tests {
         assert!(load_labels("").unwrap().is_empty());
         let path = std::env::temp_dir().join(format!("ruro-labels-{}.txt", std::process::id()));
         std::fs::write(&path, "person\nbicycle\n\ncar\n").unwrap();
-        assert_eq!(load_labels(path.to_str().unwrap()).unwrap(), ["person", "bicycle", "car"]);
+        assert_eq!(
+            load_labels(path.to_str().unwrap()).unwrap(),
+            ["person", "bicycle", "car"]
+        );
         std::fs::remove_file(path).unwrap();
     }
 }

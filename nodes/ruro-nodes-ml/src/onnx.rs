@@ -38,7 +38,11 @@ impl Model {
             .map_err(|e| anyhow!("loading {path}: {e}"))?;
         let port = |o: &ort::value::Outlet| Port {
             name: o.name().to_owned(),
-            shape: o.dtype().tensor_shape().map(|s| s.to_vec()).unwrap_or_default(),
+            shape: o
+                .dtype()
+                .tensor_shape()
+                .map(|s| s.to_vec())
+                .unwrap_or_default(),
         };
         let inputs = session.inputs().iter().map(port).collect();
         let outputs = session.outputs().iter().map(port).collect();
@@ -54,11 +58,17 @@ impl Model {
     }
 
     /// Runs the model on float32 inputs and returns every output as a tensor.
-    pub fn run(&mut self, inputs: Vec<(String, Vec<i64>, Vec<f32>)>) -> Result<Vec<(String, Tensor)>> {
+    pub fn run(
+        &mut self,
+        inputs: Vec<(String, Vec<i64>, Vec<f32>)>,
+    ) -> Result<Vec<(String, Tensor)>> {
         let mut values = Vec::with_capacity(inputs.len());
         for (name, shape, data) in inputs {
             let t = OrtTensor::from_array((shape, data)).map_err(ort_err)?;
-            values.push((std::borrow::Cow::from(name), ort::session::SessionInputValue::from(t)));
+            values.push((
+                std::borrow::Cow::from(name),
+                ort::session::SessionInputValue::from(t),
+            ));
         }
         let outputs = self.session.run(values).map_err(ort_err)?;
         let mut result = Vec::new();
@@ -83,7 +93,8 @@ fn model_hw(port: &Port) -> Option<(usize, usize)> {
 
 fn triple(s: &str, what: &str) -> Result<[f32; 3]> {
     let v = parse_floats(s)?;
-    v.try_into().map_err(|_| anyhow!("{what} needs three comma separated values"))
+    v.try_into()
+        .map_err(|_| anyhow!("{what} needs three comma separated values"))
 }
 
 /// Runs an ONNX image model (classification, detection, segmentation...) on
@@ -169,10 +180,19 @@ impl Onnx {
 
 impl Node for Onnx {
     fn start(&mut self, _ctx: &mut Ctx) -> Result {
-        ensure!(!self.model.is_empty(), "set the `model` parameter to an .onnx file");
+        ensure!(
+            !self.model.is_empty(),
+            "set the `model` parameter to an .onnx file"
+        );
         let net = Model::load(&self.model, self.threads as usize)?;
-        ensure!(!net.inputs.is_empty() && !net.outputs.is_empty(), "model has no inputs or outputs");
-        info!("{}: inputs {:?}, outputs {:?}", self.model, net.inputs, net.outputs);
+        ensure!(
+            !net.inputs.is_empty() && !net.outputs.is_empty(),
+            "model has no inputs or outputs"
+        );
+        info!(
+            "{}: inputs {:?}, outputs {:?}",
+            self.model, net.inputs, net.outputs
+        );
         self.net = Some(net);
         self.names = load_labels(&self.labels)?;
         self.preprocess()?;
@@ -313,7 +333,11 @@ impl Policy {
                 ..Default::default()
             };
             let (data, _) = pre.run(self.last_image.as_ref().unwrap())?;
-            inputs.push((self.image_input.clone(), vec![1, 3, h as i64, w as i64], data));
+            inputs.push((
+                self.image_input.clone(),
+                vec![1, 3, h as i64, w as i64],
+                data,
+            ));
         }
         let outputs = net.run(inputs)?;
         let out = if self.action_output.is_empty() {
@@ -342,7 +366,10 @@ impl Policy {
 
 impl Node for Policy {
     fn start(&mut self, _ctx: &mut Ctx) -> Result {
-        ensure!(!self.model.is_empty(), "set the `model` parameter to an .onnx file");
+        ensure!(
+            !self.model.is_empty(),
+            "set the `model` parameter to an .onnx file"
+        );
         let net = Model::load(&self.model, self.threads as usize)?;
         ensure!(
             net.input(&self.state_input).is_some(),
@@ -350,7 +377,10 @@ impl Node for Policy {
             self.state_input,
             net.inputs
         );
-        info!("{}: inputs {:?}, outputs {:?}", self.model, net.inputs, net.outputs);
+        info!(
+            "{}: inputs {:?}, outputs {:?}",
+            self.model, net.inputs, net.outputs
+        );
         self.net = Some(net);
         Ok(())
     }

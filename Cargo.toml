@@ -59,6 +59,7 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "
 arrow-array = "57"
 arrow-schema = "57"
 parquet = { version = "57", default-features = false, features = ["arrow", "snap"] }
+png = "0.18"
 
 [profile.release]
 lto = "thin"

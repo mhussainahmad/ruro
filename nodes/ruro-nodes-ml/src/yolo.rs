@@ -60,7 +60,11 @@ pub fn decode(shape: &[usize], data: &[f32], cfg: &Config) -> Result<Vec<Detecti
         [] | [_] => return Ok(Vec::new()),
         other => bail!("expected a [1, A, B] output, got {other:?}"),
     };
-    ensure!(data.len() == a * b, "tensor has {} values for shape {shape:?}", data.len());
+    ensure!(
+        data.len() == a * b,
+        "tensor has {} values for shape {shape:?}",
+        data.len()
+    );
     // v8 has far fewer rows (4 + classes) than anchors; v5 rows hold at least 6 values.
     let layout = match cfg.layout {
         Layout::Auto if a < b || b < 6 => Layout::V8,
@@ -109,7 +113,10 @@ fn best(scores: &[f32]) -> (usize, f32) {
         .iter()
         .copied()
         .enumerate()
-        .fold((0, f32::NEG_INFINITY), |acc, (i, s)| if s > acc.1 { (i, s) } else { acc })
+        .fold(
+            (0, f32::NEG_INFINITY),
+            |acc, (i, s)| if s > acc.1 { (i, s) } else { acc },
+        )
 }
 
 fn make(cx: f32, cy: f32, w: f32, h: f32, score: f32, class: usize) -> Detection {
@@ -252,9 +259,9 @@ mod tests {
     fn decodes_v5_layout_with_objectness() {
         // [1, N=8, 5 + 2]
         let mut rows = vec![
-            [50.0, 60.0, 10.0, 20.0, 0.9, 0.2, 0.8],  // conf 0.72 class 1
-            [50.0, 60.0, 10.0, 20.0, 0.2, 1.0, 0.0],  // objectness too low
-            [10.0, 10.0, 4.0, 4.0, 0.5, 0.4, 0.1],    // conf 0.2 < 0.25
+            [50.0, 60.0, 10.0, 20.0, 0.9, 0.2, 0.8], // conf 0.72 class 1
+            [50.0, 60.0, 10.0, 20.0, 0.2, 1.0, 0.0], // objectness too low
+            [10.0, 10.0, 4.0, 4.0, 0.5, 0.4, 0.1],   // conf 0.2 < 0.25
         ];
         rows.resize(8, [0.0; 7]);
         let data: Vec<f32> = rows.iter().flatten().copied().collect();
@@ -263,7 +270,17 @@ mod tests {
         assert!((out[0].score - 0.72).abs() < 1e-6);
         assert_eq!((out[0].class_id, out[0].x, out[0].y), (1, 45.0, 50.0));
         // Forcing the wrong layout does not panic.
-        assert!(decode(&[1, 8, 7], &data, &Config { layout: Layout::V8, ..Default::default() }).is_ok());
+        assert!(
+            decode(
+                &[1, 8, 7],
+                &data,
+                &Config {
+                    layout: Layout::V8,
+                    ..Default::default()
+                }
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -274,13 +291,25 @@ mod tests {
             pad_x: 0.0,
             pad_y: 140.0,
         };
-        let mut boxes = vec![det(100.0, 150.0, 50.0, 30.0, 0.9, 2), det(600.0, 100.0, 100.0, 100.0, 0.5, 0)];
+        let mut boxes = vec![
+            det(100.0, 150.0, 50.0, 30.0, 0.9, 2),
+            det(600.0, 100.0, 100.0, 100.0, 0.5, 0),
+        ];
         to_source(&mut boxes, &map, 1280, 720);
-        assert_eq!((boxes[0].x, boxes[0].y, boxes[0].w, boxes[0].h), (200.0, 20.0, 100.0, 60.0));
+        assert_eq!(
+            (boxes[0].x, boxes[0].y, boxes[0].w, boxes[0].h),
+            (200.0, 20.0, 100.0, 60.0)
+        );
         // Second box starts in the top padding and runs off the right edge: clipped.
-        assert_eq!((boxes[1].x, boxes[1].y, boxes[1].w, boxes[1].h), (1200.0, 0.0, 80.0, 120.0));
+        assert_eq!(
+            (boxes[1].x, boxes[1].y, boxes[1].w, boxes[1].h),
+            (1200.0, 0.0, 80.0, 120.0)
+        );
         label(&mut boxes, &["person".into(), "bike".into()]);
-        assert_eq!((boxes[0].label.as_str(), boxes[1].label.as_str()), ("class2", "person"));
+        assert_eq!(
+            (boxes[0].label.as_str(), boxes[1].label.as_str()),
+            ("class2", "person")
+        );
     }
 
     #[test]

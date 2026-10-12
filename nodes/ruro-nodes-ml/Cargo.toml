@@ -14,7 +14,7 @@ default = []
 # ONNX Runtime at build time.
 onnx = ["dep:ort"]
 # LeRobot dataset recording (`ml/lerobot-recorder`), writes Parquet.
-lerobot = ["dep:arrow-array", "dep:arrow-schema", "dep:parquet"]
+lerobot = ["dep:arrow-array", "dep:arrow-schema", "dep:parquet", "dep:png"]
 
 [dependencies]
 ruro = { workspace = true }
@@ -24,8 +24,12 @@ ort = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
 
 [dev-dependencies]
+arrow-array = { workspace = true }
+parquet = { workspace = true }
+png = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-host = { workspace = true }
 parking_lot = { workspace = true }

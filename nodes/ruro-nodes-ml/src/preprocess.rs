@@ -40,7 +40,10 @@ impl Mapping {
 
     /// Source-image coordinates of model-input point `(x, y)`.
     pub fn to_source(&self, x: f32, y: f32) -> (f32, f32) {
-        ((x - self.pad_x) / self.scale_x, (y - self.pad_y) / self.scale_y)
+        (
+            (x - self.pad_x) / self.scale_x,
+            (y - self.pad_y) / self.scale_y,
+        )
     }
 }
 
@@ -113,7 +116,8 @@ impl Preprocess {
         let mut out = vec![0f32; 3 * plane];
         let norm: [(f32, f32); 3] = std::array::from_fn(|c| (self.mean[c], 1.0 / self.std[c]));
         let order: [usize; 3] = if self.bgr { [2, 1, 0] } else { [0, 1, 2] };
-        let pad: [f32; 3] = std::array::from_fn(|c| (self.pad_value * self.scale - norm[c].0) * norm[c].1);
+        let pad: [f32; 3] =
+            std::array::from_fn(|c| (self.pad_value * self.scale - norm[c].0) * norm[c].1);
 
         // Precompute horizontal sample positions.
         let xs: Vec<Option<(usize, usize, f32)>> = (0..tw)
@@ -137,8 +141,10 @@ impl Preprocess {
                 for (dst_c, &src_c) in order.iter().enumerate() {
                     let v = match (inside_y, sample) {
                         (true, Some((x0, x1, wx))) => {
-                            let top = pixel(*x0, y0, src_c) * (1.0 - wx) + pixel(*x1, y0, src_c) * wx;
-                            let bot = pixel(*x0, y1, src_c) * (1.0 - wx) + pixel(*x1, y1, src_c) * wx;
+                            let top =
+                                pixel(*x0, y0, src_c) * (1.0 - wx) + pixel(*x1, y0, src_c) * wx;
+                            let bot =
+                                pixel(*x0, y1, src_c) * (1.0 - wx) + pixel(*x1, y1, src_c) * wx;
                             let v = top * (1.0 - wy) + bot * wy;
                             (v * self.scale - norm[src_c].0) * norm[src_c].1
                         }
@@ -231,7 +237,11 @@ mod tests {
 
     #[test]
     fn bilinear_upsampling_interpolates() {
-        let img = image(2, 1, |x, _| if x == 0 { [0, 0, 0] } else { [100, 100, 100] });
+        let img = image(
+            2,
+            1,
+            |x, _| if x == 0 { [0, 0, 0] } else { [100, 100, 100] },
+        );
         let p = Preprocess {
             width: 4,
             height: 1,

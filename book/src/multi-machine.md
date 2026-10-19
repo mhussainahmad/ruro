@@ -74,8 +74,8 @@ ruro deploy --to robot --host-binary target/release/my-host
 uploads a host binary (checked against its SHA-256) that groups select with
 `groups.<name>.host: my-host`. `--host-name` stores it under another name (a valid
 identifier); a graph can be given in the same command. Uploads live in the daemon's
-runtime directory and are lost on reboot. Updating the daemon itself remotely is not
-supported.
+runtime directory and are lost on reboot. To update the daemon itself, and its default
+host, see [Updating daemons](updates.md).
 
 An uploaded [Python host](python.md) needs the `ruro` Python package installed on the
 target machine.

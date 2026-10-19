@@ -43,7 +43,10 @@ The unit:
   are resolved there);
 - raises `LimitRTPRIO` and `LimitMEMLOCK` so real-time process groups can use them;
 - applies systemd hardening that leaves shared memory (`/dev/shm`) and real-time scheduling
-  available to the host processes.
+  available to the host processes;
+- restarts the daemon when it exits with status 75 after installing an update. Updating the
+  daemon over the network takes a drop-in that runs it from a directory it can write; see
+  [Updating daemons](updates.md#restarting).
 
 Hardware access is granted through groups. Add the `ruro` user to the groups that own your
 devices (`dialout` for serial ports, `video` for cameras, `input` for gamepads, and the
@@ -139,6 +142,9 @@ CI builds the ARM binaries on every push.
 
 - [ ] Daemon enabled as a service, listening on the robot's network with TLS and a token.
 - [ ] Custom host installed and `RURO_HOST` set, if you have your own nodes.
+- [ ] To update over the network: a signing key, its public key in the daemon's
+  `--update-keys` file, and the daemon run from a directory it can write
+  ([Updating daemons](updates.md)).
 - [ ] Service user in the device groups (`dialout`, `video`, ...).
 - [ ] Graph validated against the robot's daemon: `ruro --connect tcp/robot:7447 check graph.yaml`.
 - [ ] Restart policies set on nodes that must stay up.

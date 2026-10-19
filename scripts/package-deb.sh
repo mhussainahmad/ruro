@@ -116,6 +116,9 @@ install -Dm644 packaging/systemd/ruro-daemon.service \
     "$stage/lib/systemd/system/ruro-daemon.service"
 install -Dm644 packaging/systemd/user/ruro-daemon.service \
     "$stage/usr/lib/systemd/user/ruro-daemon.service"
+# Drop-in that enables `ruro update`, for the administrator to install.
+install -Dm644 packaging/systemd/ruro-daemon-updates.conf \
+    "$stage/usr/share/ruro/systemd/ruro-daemon-updates.conf"
 
 # Documentation and examples.
 doc="$stage/usr/share/doc/ruro"

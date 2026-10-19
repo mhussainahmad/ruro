@@ -335,11 +335,10 @@ fn update_one(
             st.update.as_deref().unwrap_or("no reason given")
         );
     }
-    println!(
-        "`{name}` runs {} {}",
-        st.version,
-        st.update.as_deref().unwrap_or_default()
-    );
+    match &st.update {
+        Some(note) => println!("`{name}` runs {} ({note})", st.version),
+        None => println!("`{name}` runs {}", st.version),
+    }
     Ok(())
 }
 

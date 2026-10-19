@@ -26,6 +26,7 @@
 - [Deploying on robots](deployment.md)
   - [Multi-machine graphs](multi-machine.md)
   - [Security](security.md)
+  - [Updating daemons](updates.md)
 
 # Reference
 

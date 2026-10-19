@@ -25,6 +25,10 @@ KillMode=mixed
 TimeoutStopSec=10
 Restart=on-failure
 RestartSec=2
+# After `ruro update` installs a new binary the daemon exits with status 75
+# for systemd to start it.
+Environment=RURO_RESTART=exit
+RestartForceExitStatus=75
 
 [Install]
 WantedBy=default.target

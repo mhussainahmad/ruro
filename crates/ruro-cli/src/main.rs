@@ -812,7 +812,7 @@ mod tests {
         let top = dir.join("top.yaml");
         std::fs::write(
             &top,
-            "name: top\nnodes:\n  src: { type: std/sine, rate: 10 }\n  g: { type: std/gain }\nwires: [src.value -> g.input]\noverlays:\n  file:\n    nodes:\n      src: { type: graph:parts/source.yaml }\n  fast:\n    clock: sim\n    nodes:\n      g: { params: { gain: 3 } }\n",
+            "name: top\nnodes:\n  src: { type: std/sine, rate: 10 }\n  g: { type: std/gain }\nwires: [src.value -> g.input]\noverlays:\n  file:\n    nodes:\n      src: { type: graph:parts/source.yaml }\n  fast:\n    clock: sim\n    nodes:\n      g: { params: { k: 3 } }\n",
         )
         .unwrap();
         let load = |overlays: &[&str]| {
@@ -826,7 +826,7 @@ mod tests {
         let flat = load(&["file", "fast"]).unwrap();
         let ids: Vec<&str> = flat.nodes.keys().map(String::as_str).collect();
         assert_eq!(ids, ["src__s", "g"]);
-        assert_eq!(flat.nodes["g"].params["gain"], serde_json::json!(3));
+        assert_eq!(flat.nodes["g"].params["k"], serde_json::json!(3));
         assert_eq!(flat.clock, ruro_graph::ClockSource::Sim);
         let e = format!("{:#}", load(&["slow"]).unwrap_err());
         assert!(

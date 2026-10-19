@@ -36,9 +36,10 @@ pub fn title_bar(s: &mut Studio, ui: &mut Ui) {
 
             // Command center, centred in the window like VS Code's, and
             // narrow enough to leave the run controls room on small windows.
+            let controls_w = run_controls_width(s);
             let w = 440.0_f32
                 .min(full.width() * 0.34)
-                .min((full.width() / 2.0 - RUN_CONTROLS_W - 12.0) * 2.0)
+                .min((full.width() / 2.0 - controls_w - 12.0) * 2.0)
                 .max(160.0);
             let rect = Rect::from_center_size(full.center(), vec2(w, 24.0));
             let resp = ui.interact(rect, ui.id().with("command-center"), Sense::click());
@@ -83,8 +84,7 @@ pub fn title_bar(s: &mut Studio, ui: &mut Ui) {
             }
 
             // Run controls on the right.
-            let right =
-                Rect::from_min_max(pos2(full.right() - RUN_CONTROLS_W, full.top()), full.max);
+            let right = Rect::from_min_max(pos2(full.right() - controls_w, full.top()), full.max);
             ui.scope_builder(
                 egui::UiBuilder::new()
                     .max_rect(right)
@@ -99,6 +99,73 @@ pub fn title_bar(s: &mut Studio, ui: &mut Ui) {
 
 /// Room for the run controls at the right of the title bar.
 const RUN_CONTROLS_W: f32 = 400.0;
+/// Extra room for the overlay picker, shown for graphs with overlays.
+const VARIANT_PICKER_W: f32 = 170.0;
+
+fn run_controls_width(s: &Studio) -> f32 {
+    if has_overlays(s) {
+        RUN_CONTROLS_W + VARIANT_PICKER_W
+    } else {
+        RUN_CONTROLS_W
+    }
+}
+
+fn has_overlays(s: &Studio) -> bool {
+    s.doc.parent.is_none() && !s.base_doc().overlays.is_empty()
+}
+
+/// Label of the overlay picker: what the canvas shows and Run deploys.
+pub fn variant_label(s: &Studio) -> String {
+    match s.variant_names() {
+        [] => "Base graph".to_owned(),
+        names => names.join(" + "),
+    }
+}
+
+/// Picks the overlays applied to the graph on the canvas and when it runs.
+fn variant_picker(s: &mut Studio, ui: &mut Ui) {
+    let label = widgets::truncate(&variant_label(s), 18);
+    let resp = widgets::button(ui, Some(icons::LAYERS), &label, ButtonKind::Secondary)
+        .on_hover_text("Overlay: the variant of the graph that is shown and run");
+    let names: Vec<String> = s.base_doc().overlays.keys().cloned().collect();
+    let selected = s.variant_names().to_vec();
+    let mut choice = None;
+    egui::Popup::menu(&resp).show(|ui| {
+        ui.set_min_width(200.0);
+        if widgets::list_row(
+            ui,
+            icons::WORKFLOW,
+            TEXT_DIM(),
+            "Base graph",
+            "",
+            selected.is_empty(),
+        )
+        .clicked()
+        {
+            choice = Some(Vec::new());
+            ui.close();
+        }
+        ui.separator();
+        for name in &names {
+            let on = selected.contains(name);
+            let detail = if on { "applied" } else { "" };
+            if widgets::list_row(ui, icons::LAYERS, TEXT_DIM(), name, detail, on).clicked() {
+                // Overlays combine: a click adds or removes one.
+                let mut next = selected.clone();
+                if on {
+                    next.retain(|n| n != name);
+                } else {
+                    next.push(name.clone());
+                }
+                choice = Some(next);
+                ui.close();
+            }
+        }
+    });
+    if let Some(names) = choice {
+        s.push(Cmd::SetVariant(names));
+    }
+}
 
 fn logo(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
@@ -413,6 +480,9 @@ fn run_controls(s: &mut Studio, ui: &mut Ui) {
                 path: s.default_recording(),
             });
         }
+    }
+    if has_overlays(s) {
+        variant_picker(s, ui);
     }
 }
 
@@ -809,6 +879,38 @@ pub fn banners(s: &mut Studio, ui: &mut Ui) {
         .is_some()
         {
             s.push(Cmd::CloseCompare);
+        }
+    }
+    if let Some(v) = &s.variant {
+        let d = &v.diff;
+        let mut parts = vec![format!(
+            "Showing overlay {} (read-only)",
+            v.names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(" + ")
+        )];
+        for (n, what) in [
+            (d.changed.len(), "changed"),
+            (d.added.len(), "added"),
+            (d.removed.len(), "removed"),
+        ] {
+            if n > 0 {
+                parts.push(format!("{n} {what}"));
+            }
+        }
+        parts.extend(d.graph.iter().cloned());
+        if banner(
+            ui,
+            icons::LAYERS,
+            ACCENT_TEXT(),
+            &parts.join(" · "),
+            &[("Edit base graph", ButtonKind::Secondary)],
+        )
+        .is_some()
+        {
+            s.push(Cmd::SetVariant(Vec::new()));
         }
     }
     if let Some((parent, node)) = s.doc.parent.clone() {

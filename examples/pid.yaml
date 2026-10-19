@@ -1,5 +1,6 @@
 # Closed-loop control: a PID controller makes a simulated joint follow a sine
-# wave. Tune kp/ki/kd live from the studio or with `ruro param`.
+# wave. Tune kp/ki/kd live from the studio or with `ruro param`. The overlays
+# are variants of the loop: `ruro run examples/pid.yaml --overlay stiff`.
 name: pid-demo
 nodes:
   target:
@@ -20,3 +21,16 @@ wires:
   - target.value -> pid.setpoint
   - arm.position -> pid.measured
   - pid.command -> arm.velocity
+overlays:
+  # A stiffer controller: the same graph with other gains.
+  stiff:
+    nodes:
+      pid: { params: { kp: 12.0, kd: 0.3 } }
+  # Halves the target through a gain node and limits the joint's speed.
+  scaled:
+    nodes:
+      half: { type: std/gain, params: { k: 0.5 }, pos: [190, 200] }
+      arm: { params: { max_speed: 1.0 } }
+    wires:
+      remove: [target.value -> pid.setpoint]
+      add: [target.value -> half.input, half.output -> pid.setpoint]

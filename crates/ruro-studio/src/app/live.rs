@@ -111,6 +111,7 @@ impl Studio {
             Event::Reply { op, result } => match (op, result) {
                 ("deploy", Ok(_)) => {
                     self.deployed_rev = self.pending_deploy.take();
+                    self.deployed_variant = std::mem::take(&mut self.pending_variant);
                     self.toast(Severity::Success, format!("Running {}", self.doc.name));
                 }
                 ("stop", Ok(_)) => {
@@ -158,6 +159,7 @@ impl Studio {
                     self.new_tab(doc);
                     self.doc.reset_history(true);
                     self.deployed_rev = Some(rev);
+                    self.deployed_variant.clear();
                     self.toast(
                         Severity::Info,
                         format!("Attached to running graph {}", graph.name),
@@ -213,6 +215,8 @@ impl Studio {
                 }
                 self.link.send(Command::Deploy(yaml));
                 self.pending_deploy = Some(self.doc.structure_rev);
+                // With an overlay shown, the canvas is the graph with it applied.
+                self.pending_variant = self.variant_names().to_vec();
                 self.deployed_graph = Some(graph.name);
             }
             Err(e) => self.toast(Severity::Error, e.to_string()),

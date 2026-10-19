@@ -8,8 +8,8 @@ use egui::{Pos2, pos2};
 use egui_snarl::{InPinId, NodeId, OutPinId, Snarl};
 use indexmap::IndexMap;
 use ruro_graph::{
-    Graph, GroupConfig, NodeDescriptor, NodeInstance, PortList, PortRef, Registry, RestartPolicy,
-    Wire,
+    ClockSource, Graph, GroupConfig, NodeDescriptor, NodeInstance, Overlay, PortList, PortRef,
+    Registry, RestartPolicy, Wire,
 };
 use serde_json::Value;
 
@@ -82,11 +82,15 @@ pub struct Snapshot {
     inputs: IndexMap<String, PortList>,
     outputs: IndexMap<String, PortRef>,
     depths: BTreeMap<(PortRef, PortRef), usize>,
+    clock: ClockSource,
+    overlays: IndexMap<String, Overlay>,
 }
 
 impl Snapshot {
     fn same(&self, other: &Snapshot) -> bool {
         if self.name != other.name
+            || self.clock != other.clock
+            || self.overlays != other.overlays
             || self.groups != other.groups
             || self.inputs != other.inputs
             || self.outputs != other.outputs
@@ -146,6 +150,9 @@ pub struct Doc {
     pub outputs: IndexMap<String, PortRef>,
     /// Queue depth of wires that set one.
     pub depths: BTreeMap<(PortRef, PortRef), usize>,
+    pub clock: ClockSource,
+    /// Named variants of the graph, kept as they are in the file.
+    pub overlays: IndexMap<String, Overlay>,
     /// Differs from the file on disk (or has never been saved).
     pub dirty: bool,
     /// Bumped by edits that change what would be deployed (not layout or parameters).
@@ -170,6 +177,8 @@ impl Doc {
             inputs: IndexMap::new(),
             outputs: IndexMap::new(),
             depths: BTreeMap::new(),
+            clock: ClockSource::Wall,
+            overlays: IndexMap::new(),
         };
         let mut doc = Self {
             uid: NEXT_UID.fetch_add(1, Ordering::Relaxed),
@@ -180,6 +189,8 @@ impl Doc {
             inputs: IndexMap::new(),
             outputs: IndexMap::new(),
             depths: BTreeMap::new(),
+            clock: ClockSource::Wall,
+            overlays: IndexMap::new(),
             dirty: false,
             structure_rev: 0,
             composites: HashMap::new(),
@@ -215,6 +226,8 @@ impl Doc {
         self.groups = graph.groups.clone();
         self.inputs = graph.inputs.clone();
         self.outputs = graph.outputs.clone();
+        self.clock = graph.clock;
+        self.overlays = graph.overlays.clone();
         self.depths = graph
             .wires
             .iter()
@@ -365,6 +378,8 @@ impl Doc {
         graph.groups = self.groups.clone();
         graph.inputs = self.inputs.clone();
         graph.outputs = self.outputs.clone();
+        graph.clock = self.clock;
+        graph.overlays = self.overlays.clone();
         let mut entries: Vec<(NodeId, Pos2, &GNode)> = self.snarl.nodes_pos_ids().collect();
         entries.sort_by_key(|(id, _, _)| *id);
         for (_, pos, n) in entries {
@@ -476,6 +491,8 @@ impl Doc {
             inputs: self.inputs.clone(),
             outputs: self.outputs.clone(),
             depths: self.depths.clone(),
+            clock: self.clock,
+            overlays: self.overlays.clone(),
         }
     }
 
@@ -556,6 +573,8 @@ impl Doc {
         self.inputs = s.inputs;
         self.outputs = s.outputs;
         self.depths = s.depths;
+        self.clock = s.clock;
+        self.overlays = s.overlays;
         self.structure_rev += 1;
         self.update_dirty();
     }
@@ -625,6 +644,7 @@ pub(crate) mod tests {
 
     const ROUNDTRIP: &str = r#"
 name: rt
+clock: sim
 groups:
   g1: { machine: robot, realtime: { priority: 50 } }
 nodes:
@@ -642,6 +662,12 @@ wires:
   - a.x -> b.i
   - { from: a.y, to: b.j, depth: 4 }
   - a.x -> c.i
+overlays:
+  real:
+    clock: wall
+    nodes:
+      a: { params: { k: 2 } }
+      b: null
 "#;
 
     #[test]

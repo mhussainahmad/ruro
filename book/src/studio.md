@@ -159,6 +159,21 @@ named as a group's `machine` that report running the same graph), so nodes on th
 show live rates too. Watching an output or tuning a parameter of such a node goes to the
 daemon that runs it.
 
+### Overlays
+
+A graph with [overlays](sim-to-real.md#overlays) gets an overlay picker to the left of the
+run controls. It starts at **Base graph**. Picking an overlay shows the graph with it
+applied: nodes it adds have a green border, nodes it changes an amber one, and nodes it
+removes appear as dashed outlines. Picking a second overlay applies both, in the order the
+file lists them. The Problems panel checks the graph as shown, and **Run** deploys it.
+
+The graph with overlays applied is read-only. You can move nodes and inspect them, but any
+edit (adding a node, undo, paste) first switches back to the base graph and applies there.
+Saving writes the file with its overlays as they were, and the overlay stays selected.
+Choosing another overlay while the graph runs turns **Run** into **Apply changes**.
+
+![The PID example with its `scaled` overlay applied](images/studio-overlay.png)
+
 The **Output** panel shows logs from every process, with a filter. **Timing** ranks running
 nodes by step time. The **Processes** view lists process groups with their PIDs, restarts and
 last exit, and can kill a process to test supervision.

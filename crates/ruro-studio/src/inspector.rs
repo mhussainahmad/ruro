@@ -59,12 +59,15 @@ pub fn show(s: &mut Studio, ui: &mut Ui) -> f32 {
                             bottom: 16,
                         })
                         .show(ui, |ui| {
-                            let selected = s.selected_nodes();
-                            match s.focused.filter(|&id| s.doc.snarl.get_node(id).is_some()) {
-                                _ if selected.len() > 1 => selection(s, ui, selected.len()),
-                                Some(id) => node(s, ui, id),
-                                None => graph(s, ui),
-                            }
+                            // An overlay on the canvas is shown, not edited.
+                            ui.add_enabled_ui(s.variant.is_none(), |ui| {
+                                let selected = s.selected_nodes();
+                                match s.focused.filter(|&id| s.doc.snarl.get_node(id).is_some()) {
+                                    _ if selected.len() > 1 => selection(s, ui, selected.len()),
+                                    Some(id) => node(s, ui, id),
+                                    None => graph(s, ui),
+                                }
+                            });
                         });
                 });
         })

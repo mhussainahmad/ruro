@@ -24,6 +24,10 @@
 //! | `Text` | `std_msgs/String` | `ros2/sub-string`, `ros2/pub-string` |
 //! | `Flag` | `std_msgs/Bool` | `ros2/sub-bool`, `ros2/pub-bool` |
 //!
+//! Messages of any other type go through the generic `ros2/sub` and
+//! `ros2/pub` nodes as `ros2/Any`, unchanged; `ros2/field` and `ros2/decode`
+//! read them (see [`generic`]).
+//!
 //! Limitations: durability is always volatile, so a `ros2/sub-tf` on
 //! `/tf_static` only sees static transforms published after it starts, and a
 //! `ros2/pub-tf` on `/tf_static` is not latched for late ROS subscribers.
@@ -32,6 +36,7 @@
 //! the messages they send.
 
 pub mod convert;
+pub mod generic;
 
 use std::sync::Arc;
 

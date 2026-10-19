@@ -21,7 +21,7 @@
 //!    daemon` process then executes the new binary in place with the same
 //!    arguments or, under a service manager (`RURO_RESTART=exit`), exits
 //!    with [`EXIT_RESTART`] for it to start the new binary.
-//! 5. A handoff file in the runtime directory tells the new process what
+//! 5. A handoff file next to the executable tells the new process what
 //!    happened and carries the e-stop over. If the new process cannot
 //!    start, it puts the previous binaries back and starts them.
 
@@ -518,7 +518,9 @@ fn sync_dir(path: &Path) -> Result<()> {
 }
 
 /// Passed from a daemon that installed an update to the process that runs
-/// it, in the runtime directory.
+/// it, in a file next to the executable: service managers may remove the
+/// runtime directory when the daemon exits to be restarted (systemd's
+/// `RuntimeDirectory=`), and the update could write there anyway.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Handoff {
     from: String,
@@ -531,23 +533,27 @@ pub struct Handoff {
     note: Option<String>,
 }
 
-fn handoff_file(name: &str) -> PathBuf {
-    runtime_dir(name).join("update-handoff.json")
+/// `.ruro.handoff-<name>.json` next to the daemon's executable `exe`.
+pub fn handoff_file(exe: &Path, name: &str) -> PathBuf {
+    let file = exe.file_name().unwrap_or_default().to_string_lossy();
+    exe.with_file_name(format!(".{file}.handoff-{name}.json"))
 }
 
 impl Handoff {
-    /// Leaves the handoff for the next start of the daemon called `name`.
-    pub fn save(&self, name: &str) -> Result<()> {
-        let path = handoff_file(name);
+    /// Leaves the handoff for the next start of the daemon called `name`
+    /// from `exe`.
+    pub fn save(&self, exe: &Path, name: &str) -> Result<()> {
+        let path = handoff_file(exe, name);
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, serde_json::to_vec(self)?)?;
+        std::fs::File::open(&tmp)?.sync_all()?;
         std::fs::rename(&tmp, &path)?;
-        Ok(())
+        sync_dir(&path)
     }
 
     /// Takes the handoff left for the daemon called `name`, if any.
-    pub fn take(name: &str) -> Option<Self> {
-        let path = handoff_file(name);
+    pub fn take(exe: &Path, name: &str) -> Option<Self> {
+        let path = handoff_file(exe, name);
         let text = std::fs::read_to_string(&path).ok()?;
         let _ = std::fs::remove_file(&path);
         serde_json::from_str(&text)
@@ -583,7 +589,7 @@ impl Handoff {
         tracing::error!("{note}");
         self.replaced.clear();
         self.note = Some(note.clone());
-        if let Err(e) = self.save(&config.name) {
+        if let Err(e) = self.save(&config.executable, &config.name) {
             tracing::warn!("{e:#}");
         }
         if restart_by_exit() {
@@ -619,7 +625,7 @@ impl Restart {
     /// [`EXIT_RESTART`]. Returns only if that failed, after putting the
     /// previous binaries back.
     pub fn exec(self) -> anyhow::Error {
-        if let Err(e) = self.handoff.save(&self.name) {
+        if let Err(e) = self.handoff.save(&self.exe, &self.name) {
             restore(&self.handoff.replaced);
             return e.context("saving the update handoff; the previous binaries are back");
         }
@@ -636,7 +642,7 @@ impl Restart {
             .env_remove(VERSION_ENV)
             .exec();
         restore(&self.handoff.replaced);
-        let _ = std::fs::remove_file(handoff_file(&self.name));
+        let _ = std::fs::remove_file(handoff_file(&self.exe, &self.name));
         anyhow!(
             "cannot start {}: {e}; the previous binaries are back",
             self.exe.display()

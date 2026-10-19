@@ -51,8 +51,11 @@ that refused it.
 accepts an update only if it was started with `--update-keys <file>` (or
 `RURO_UPDATE_KEYS`) and the binary carries an Ed25519 signature by one of the public keys in
 that file. The token and TLS decide who may send an update; the signature decides what may
-be installed, so a leaked token alone cannot replace the daemon. Keep the secret signing key
-(`ruro keygen`) off the robots, and the keys file writable only by root.
+be installed, so a leaked token alone cannot install a binary you did not sign. It can
+install an older release you did sign, because `--allow-downgrade` comes from the client:
+to retire old releases, sign new ones with a new key and remove the old key from the
+daemons. Keep the secret signing key (`ruro keygen`) off the robots, and the keys file
+writable only by root.
 
 A plain `tcp/` listener on a network interface accepts anyone who can reach the port. If
 you must use one, do so only on a network you trust (the robot's own network, a VPN), and

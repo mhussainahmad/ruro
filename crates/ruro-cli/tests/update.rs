@@ -250,8 +250,7 @@ fn an_updated_daemon_that_cannot_start_puts_the_previous_binary_back() {
     let mut installed = previous.clone();
     installed.push(0);
     std::fs::write(&bin, &installed).unwrap();
-    let handoff = ruro_daemon::runtime_dir(&f.name).join("update-handoff.json");
-    std::fs::create_dir_all(handoff.parent().unwrap()).unwrap();
+    let handoff = ruro_daemon::update::handoff_file(&bin, &f.name);
     let json = serde_json::json!({
         "from": OLD, "to": VERSION, "estop": false,
         "replaced": [[bin, prev]], "note": null,
@@ -318,6 +317,8 @@ fn under_a_service_manager_the_daemon_exits_to_be_restarted() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert_eq!(status.code(), Some(ruro_daemon::update::EXIT_RESTART));
+    // systemd removes the runtime directory (`RuntimeDirectory=`) in between.
+    std::fs::remove_dir_all(ruro_daemon::runtime_dir(&f.name)).unwrap();
     f.start(None, &service);
 
     let out = update.wait_with_output().unwrap();

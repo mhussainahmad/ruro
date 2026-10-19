@@ -431,7 +431,7 @@ fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
     if let Some(trial) = Trial::from_env() {
         return trial.run(config);
     }
-    let handoff = Handoff::take(&config.name);
+    let handoff = Handoff::take(&config.executable, &config.name);
     if let Some(h) = &handoff {
         h.configure(&mut config);
     }
@@ -443,7 +443,7 @@ fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
             Some(h) if h.is_pending() => return Err(h.roll_back(&config, e)),
             // The report of a rollback waits for a start that succeeds.
             Some(h) => {
-                if let Err(e) = h.save(&config.name) {
+                if let Err(e) = h.save(&config.executable, &config.name) {
                     tracing::warn!("{e:#}");
                 }
                 return Err(e);

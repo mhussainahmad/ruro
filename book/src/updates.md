@@ -108,7 +108,9 @@ last, because the others are reached through it. Each update goes through these 
    `robot` runs 0.2.0 (updated from 0.1.0 to 0.2.0)
    ```
 
-A host binary updated on its own needs no restart: groups use it from the next deploy.
+A host binary updated on its own needs no restart: groups use it from the next deploy. Your
+own host (`RURO_HOST`) may print its own crate version for `--version`; sign it with
+`--binary-version` set to the daemon version it goes with.
 
 After an update the daemon runs no graph; deploy it again. If the e-stop was engaged, the
 new daemon starts with it engaged, as if engaged there: release it with
@@ -118,7 +120,9 @@ daemon's version and target triple, and how its last update went.
 ## Restarting
 
 A daemon run from a terminal or a script executes the new binary in place: same process id,
-same arguments and environment.
+same arguments and environment. Before it restarts, it leaves `.ruro.handoff-<name>.json`
+next to the binary: the new process reads it to report the update, to start with the e-stop
+engaged if it was, and to know which binaries to put back if it cannot start.
 
 Under a service manager, set `RURO_RESTART=exit`: the daemon then exits with status 75 and
 the service manager starts the new binary. The packaged systemd units set it, with

@@ -1,0 +1,8 @@
+# Count up to a target.
+int32 target
+string label
+---
+int32 reached
+float64[] times
+---
+int32 current

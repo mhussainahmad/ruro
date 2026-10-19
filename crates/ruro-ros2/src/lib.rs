@@ -12,16 +12,21 @@
 //!   `RMW_IMPLEMENTATION=rmw_zenoh_cpp` see ruro as just another node.
 //! - [`discovery`] lists the topics of a ROS 2 system from its liveliness
 //!   tokens.
+//! - [`dynamic`] encodes and decodes messages of any type at run time from
+//!   their definitions, which [`search`] finds in `AMENT_PREFIX_PATH`, in
+//!   user directories or among the bundled ones.
 
 pub mod cdr;
 pub mod cli;
 pub mod codegen;
 pub mod discovery;
+pub mod dynamic;
 pub mod hash;
 pub mod idl;
 #[rustfmt::skip]
 pub mod msgs;
 pub mod rmw;
+pub mod search;
 pub mod time;
 
 pub use discovery::{TopicInfo, bridge_kinds, list_topics};

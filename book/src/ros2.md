@@ -369,19 +369,15 @@ service and action types included, are checked against the ones Jazzy publishes.
 run real ROS 2 nodes against ruro. They are skipped unless `RURO_ROS2_CONTAINER` names a
 script that runs a shell command in a ROS 2 Jazzy environment with rmw_zenoh_cpp,
 `demo_nodes_cpp`, `action_tutorials_cpp` and `tf2_ros`, using host networking and the
-Zenoh router given in `ZENOH_ROUTER`. For example, around a container image:
+Zenoh router given in `ZENOH_ROUTER`. `scripts/ros2/` has an image with all of these and
+such a script:
 
 ```sh
-#!/bin/sh
-# ros2-run.sh: runs "$*" in ROS 2 Jazzy, connected to $ZENOH_ROUTER.
-exec podman run --rm --network host -e RMW_IMPLEMENTATION=rmw_zenoh_cpp \
-  -e ZENOH_CONFIG_OVERRIDE="connect/endpoints=[\"$ZENOH_ROUTER\"];scouting/multicast/enabled=false" \
-  my-ros-jazzy-zenoh-image bash -c "source /opt/ros/jazzy/setup.bash; $*"
-```
-
-```sh
-RURO_ROS2_CONTAINER=$PWD/ros2-run.sh cargo test -p ruro-ros2 --test ros2_interop
-RURO_ROS2_CONTAINER=$PWD/ros2-run.sh cargo test -p ruro-nodes-ros2 --test ros2_interop
+podman build -t ruro-ros2-jazzy scripts/ros2
+RURO_ROS2_CONTAINER=$PWD/scripts/ros2/run.sh cargo test -p ruro-ros2 --test ros2_interop
+RURO_ROS2_CONTAINER=$PWD/scripts/ros2/run.sh cargo test -p ruro-nodes-ros2 --test ros2_interop
+RURO_ROS2_CONTAINER=$PWD/scripts/ros2/run.sh cargo test -p ruro-nodes-ros2 --test generic_interop
+RURO_ROS2_CONTAINER=$PWD/scripts/ros2/run.sh scripts/ros2-e2e.sh
 ```
 
 Each test starts a Zenoh router in the test process. They check that:

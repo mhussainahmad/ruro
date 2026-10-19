@@ -50,11 +50,12 @@ These were checked against the real software on a development machine, with opt-
 that skip in CI:
 
 - **ROS 2 interop** with ROS 2 Jazzy and rmw_zenoh_cpp 0.2.11 in a container
-  (`RURO_ROS2_CONTAINER`): services in both directions, actions with feedback and cancel in
-  both directions, `/tf_static` latching both ways, the generic `ros2/sub` and `ros2/pub`
-  bridges with types ruro does not bundle (byte-identical with what crossed the router),
-  type hashes of all 380 message and 310 `.idl` types installed there, and demo nodes run
-  from their launch file through `ros2/node`. See [ROS 2 bridge](ros2.md).
+  (`RURO_ROS2_CONTAINER`; image and script in `scripts/ros2/`): services in both
+  directions, actions with feedback and cancel in both directions, `/tf_static` latching
+  both ways, the generic `ros2/sub` and `ros2/pub` bridges with types ruro does not bundle
+  (byte-identical with what crossed the router), type hashes of all 380 message and 310
+  `.idl` types installed there, and demo nodes run from their launch file through
+  `ros2/node`. See [ROS 2 bridge](ros2.md).
 - **Gazebo Harmonic** through the ROS 2 bridge, headless in a container
   (`RURO_GAZEBO_CONTAINER`): lidar scans and odometry reach the graph and velocity commands
   move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).

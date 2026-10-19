@@ -120,6 +120,18 @@ def test_image_outputs_accept_numpy_arrays():
         ruro.Image(2, 2, "rgb8", b"\x00" * 3)
 
 
+def test_depth_images_are_uint16_views():
+    depth = np.array([[0, 1, 1000], [65535, 42, 7]], dtype="<u2")
+    got = roundtrip("Image", ruro.Image(3, 2, "mono16", depth.tobytes()))
+    assert (got.encoding, got.shape) == ("mono16", (2, 3, 1))
+    view = got.array()
+    assert view.dtype == np.dtype("<u2")
+    np.testing.assert_array_equal(view[:, :, 0], depth)
+    assert np.shares_memory(view, got.array())
+    with pytest.raises(ValueError, match="mono16"):
+        ruro.Image.from_array(np.zeros((2, 3), dtype=np.uint8), "mono16")
+
+
 def test_point_cloud_is_a_zero_copy_numpy_view():
     pts = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float32)
     got = roundtrip("PointCloud", pts)

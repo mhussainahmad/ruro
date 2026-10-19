@@ -5,7 +5,7 @@
 # import` is replayed into ros2/sub outputs and published back to ROS.
 #
 #   cargo build -p ruro-cli -p ruro-host
-#   RURO_ROS2_CONTAINER=path/to/run-in-ros.sh scripts/ros2-e2e.sh
+#   RURO_ROS2_CONTAINER=$PWD/scripts/ros2/run.sh scripts/ros2-e2e.sh
 #
 # RURO_ROS2_CONTAINER runs a shell command in a ROS 2 Jazzy environment with
 # rmw_zenoh, host networking and the directory ROS_MOUNT mounted at the same

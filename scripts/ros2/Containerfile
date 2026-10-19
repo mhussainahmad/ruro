@@ -1,0 +1,15 @@
+# ROS 2 Jazzy with rmw_zenoh and the nodes the ROS 2 interop tests run.
+#
+#   podman build -t ruro-ros2-jazzy scripts/ros2
+#
+# Rootless podman without subuid ranges cannot unpack ROS images; there, build
+# with `--storage-opt vfs.ignore_chown_errors=true --storage-driver vfs` and
+# `--build-arg APT_OPTS="-o APT::Sandbox::User=root"`.
+FROM docker.io/library/ros:jazzy-ros-base
+ARG APT_OPTS=""
+RUN apt-get $APT_OPTS update \
+    && apt-get $APT_OPTS install -y --no-install-recommends \
+       ros-jazzy-rmw-zenoh-cpp ros-jazzy-demo-nodes-cpp ros-jazzy-demo-nodes-py \
+       ros-jazzy-example-interfaces ros-jazzy-action-tutorials-cpp \
+       ros-jazzy-action-tutorials-py \
+    && rm -rf /var/lib/apt/lists/*

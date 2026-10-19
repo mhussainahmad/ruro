@@ -38,14 +38,16 @@ the `ruro` CLI.
   signed over-the-air daemon updates with automatic rollback.
 - **Node SDKs.** Rust (`#[derive(Node)]`, `ruro new`, `ruro build`) and Python (with
   NumPy views of images and hot reload).
-- **ROS 2, all of it.** Topics, services and actions with full QoS over rmw_zenoh, without
-  a ROS installation on the ruro side. Messages of any type pass through byte for byte;
-  `ruro ros2 import` turns launch files into graphs, and `ros2/node` runs your existing
-  ROS 2 nodes under ruro's supervision, so a ROS 2 system can move over piece by piece.
-- **Node libraries.** Cameras (V4L2, MJPEG over HTTP, RTSP, Intel RealSense), serial, CAN, GPIO, I2C, gamepads,
-  Dynamixel and Feetech servos (SO-100 arm), ODrive, WitMotion IMUs, RPLidar and Livox
-  lidars; MuJoCo simulation, Gazebo and Isaac Sim examples, and URDF/MJCF kinematics; ONNX
-  inference, YOLO decoding, policy execution and LeRobot dataset recording.
+- **ROS 2 topics, services and actions, any message type, and your launch files.** Over
+  rmw_zenoh with ROS 2 QoS, without a ROS installation on the ruro side. Messages of any
+  type pass through byte for byte; `ruro ros2 import` turns launch files into graphs, and
+  `ros2/node` runs your existing ROS 2 nodes under ruro's supervision, so a ROS 2 system
+  can move over piece by piece.
+- **Node libraries.** Cameras (V4L2, MJPEG over HTTP, RTSP, Intel RealSense), serial, CAN,
+  GPIO, I2C, gamepads, Dynamixel and Feetech servos (SO-100 arm), ODrive, WitMotion IMUs,
+  RPLidar and Livox lidars; MuJoCo simulation, Gazebo and Isaac Sim examples, and URDF/MJCF
+  kinematics; ONNX inference, YOLO decoding, policy execution and LeRobot dataset
+  recording.
 
 ## Status
 

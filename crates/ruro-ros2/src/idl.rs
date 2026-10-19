@@ -1,4 +1,4 @@
-//! Parser for ROS 2 `.msg` and `.srv` interface definitions.
+//! Parser for ROS 2 `.msg`, `.srv` and `.action` interface definitions.
 //!
 //! Follows `rosidl_adapter`: one field or constant per line, `#` starts a
 //! comment, `type name [default]` declares a field and `TYPE NAME=value` a
@@ -128,11 +128,29 @@ pub struct FieldType {
     pub array: Array,
 }
 
+impl FieldType {
+    /// A single value of another message type.
+    pub fn named(name: TypeName) -> Self {
+        Self {
+            base: BaseType::Named(name),
+            array: Array::None,
+        }
+    }
+
+    /// A single primitive value.
+    pub fn primitive(p: Primitive) -> Self {
+        Self {
+            base: BaseType::Primitive(p),
+            array: Array::None,
+        }
+    }
+}
+
 /// A message name qualified by its package, e.g. `geometry_msgs/msg/Twist`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TypeName {
     pub package: String,
-    /// `msg` or `srv`.
+    /// `msg`, `srv` or `action`.
     pub namespace: String,
     pub name: String,
 }
@@ -158,6 +176,15 @@ impl TypeName {
             }),
             [pkg, name] => Some(Self::msg(*pkg, *name)),
             _ => None,
+        }
+    }
+
+    /// `<name>_<suffix>` in the same package and namespace, e.g.
+    /// `Fibonacci_Goal` for `Fibonacci`.
+    pub fn suffixed(&self, suffix: &str) -> Self {
+        Self {
+            name: format!("{}_{suffix}", self.name),
+            ..self.clone()
         }
     }
 
@@ -201,6 +228,17 @@ pub struct Field {
     pub default: Option<String>,
 }
 
+impl Field {
+    /// A field without a default value.
+    pub fn new(name: &str, ty: FieldType) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            default: None,
+        }
+    }
+}
+
 /// A constant declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Constant {
@@ -225,6 +263,184 @@ pub struct ServiceSpec {
     pub name: TypeName,
     pub request: MessageSpec,
     pub response: MessageSpec,
+}
+
+impl ServiceSpec {
+    /// A service from its request and response, which must be named
+    /// `<name>_Request` and `<name>_Response`.
+    pub fn new(name: TypeName, request: MessageSpec, response: MessageSpec) -> Self {
+        Self {
+            name,
+            request,
+            response,
+        }
+    }
+
+    /// `<Srv>_Event`, the service introspection message every ROS 2 service
+    /// type carries: event info plus at most one request and one response.
+    pub fn event(&self) -> MessageSpec {
+        let bounded = |t: &TypeName| FieldType {
+            base: BaseType::Named(t.clone()),
+            array: Array::Bounded(1),
+        };
+        MessageSpec {
+            name: self.name.suffixed("Event"),
+            fields: vec![
+                Field::new(
+                    "info",
+                    FieldType::named(TypeName::msg("service_msgs", "ServiceEventInfo")),
+                ),
+                Field::new("request", bounded(&self.request.name)),
+                Field::new("response", bounded(&self.response.name)),
+            ],
+            constants: Vec::new(),
+        }
+    }
+
+    /// The type description of the service itself, as `rosidl` hashes it:
+    /// a message with the fields `request_message`, `response_message` and
+    /// `event_message`. Its RIHS01 hash goes in rmw_zenoh key expressions.
+    pub fn description(&self) -> MessageSpec {
+        MessageSpec {
+            name: self.name.clone(),
+            fields: vec![
+                Field::new(
+                    "request_message",
+                    FieldType::named(self.request.name.clone()),
+                ),
+                Field::new(
+                    "response_message",
+                    FieldType::named(self.response.name.clone()),
+                ),
+                Field::new(
+                    "event_message",
+                    FieldType::named(self.name.suffixed("Event")),
+                ),
+            ],
+            constants: Vec::new(),
+        }
+    }
+
+    /// Every message the service defines: request, response, event and the
+    /// description.
+    pub fn messages(&self) -> Vec<MessageSpec> {
+        vec![
+            self.request.clone(),
+            self.response.clone(),
+            self.event(),
+            self.description(),
+        ]
+    }
+}
+
+/// A parsed action (`.action`): goal, result and feedback messages named
+/// `<Action>_Goal`, `<Action>_Result` and `<Action>_Feedback` in the
+/// `action` namespace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionSpec {
+    pub name: TypeName,
+    pub goal: MessageSpec,
+    pub result: MessageSpec,
+    pub feedback: MessageSpec,
+}
+
+impl ActionSpec {
+    fn uuid() -> FieldType {
+        FieldType::named(TypeName::msg("unique_identifier_msgs", "UUID"))
+    }
+
+    /// `<Action>_SendGoal`: request `{goal_id, goal}`, response
+    /// `{accepted, stamp}`.
+    pub fn send_goal(&self) -> ServiceSpec {
+        let name = self.name.suffixed("SendGoal");
+        ServiceSpec::new(
+            name.clone(),
+            MessageSpec {
+                name: name.suffixed("Request"),
+                fields: vec![
+                    Field::new("goal_id", Self::uuid()),
+                    Field::new("goal", FieldType::named(self.goal.name.clone())),
+                ],
+                constants: Vec::new(),
+            },
+            MessageSpec {
+                name: name.suffixed("Response"),
+                fields: vec![
+                    Field::new("accepted", FieldType::primitive(Primitive::Bool)),
+                    Field::new(
+                        "stamp",
+                        FieldType::named(TypeName::msg("builtin_interfaces", "Time")),
+                    ),
+                ],
+                constants: Vec::new(),
+            },
+        )
+    }
+
+    /// `<Action>_GetResult`: request `{goal_id}`, response `{status, result}`.
+    pub fn get_result(&self) -> ServiceSpec {
+        let name = self.name.suffixed("GetResult");
+        ServiceSpec::new(
+            name.clone(),
+            MessageSpec {
+                name: name.suffixed("Request"),
+                fields: vec![Field::new("goal_id", Self::uuid())],
+                constants: Vec::new(),
+            },
+            MessageSpec {
+                name: name.suffixed("Response"),
+                fields: vec![
+                    Field::new("status", FieldType::primitive(Primitive::Int8)),
+                    Field::new("result", FieldType::named(self.result.name.clone())),
+                ],
+                constants: Vec::new(),
+            },
+        )
+    }
+
+    /// `<Action>_FeedbackMessage`: `{goal_id, feedback}`, published on the
+    /// feedback topic.
+    pub fn feedback_message(&self) -> MessageSpec {
+        MessageSpec {
+            name: self.name.suffixed("FeedbackMessage"),
+            fields: vec![
+                Field::new("goal_id", Self::uuid()),
+                Field::new("feedback", FieldType::named(self.feedback.name.clone())),
+            ],
+            constants: Vec::new(),
+        }
+    }
+
+    /// The type description of the action itself, as `rosidl` hashes it.
+    pub fn description(&self) -> MessageSpec {
+        let nested = |suffix: &str| FieldType::named(self.name.suffixed(suffix));
+        MessageSpec {
+            name: self.name.clone(),
+            fields: vec![
+                Field::new("goal", nested("Goal")),
+                Field::new("result", nested("Result")),
+                Field::new("feedback", nested("Feedback")),
+                Field::new("send_goal_service", nested("SendGoal")),
+                Field::new("get_result_service", nested("GetResult")),
+                Field::new("feedback_message", nested("FeedbackMessage")),
+            ],
+            constants: Vec::new(),
+        }
+    }
+
+    /// Every message the action defines, its two services' included.
+    pub fn messages(&self) -> Vec<MessageSpec> {
+        let mut m = vec![
+            self.goal.clone(),
+            self.result.clone(),
+            self.feedback.clone(),
+            self.feedback_message(),
+            self.description(),
+        ];
+        m.extend(self.send_goal().messages());
+        m.extend(self.get_result().messages());
+        m
+    }
 }
 
 fn parse_type(s: &str, package: &str) -> Result<FieldType, String> {
@@ -345,35 +561,89 @@ pub fn parse_message(name: TypeName, text: &str, file: &str) -> Result<MessageSp
     Ok(spec)
 }
 
+/// Splits a `.srv` or `.action` text at its `---` lines into sections, each
+/// with the number of lines before it.
+fn sections(text: &str) -> Vec<(usize, String)> {
+    let mut out = vec![(0, String::new())];
+    for (i, line) in text.lines().enumerate() {
+        if line.trim() == "---" {
+            out.push((i + 1, String::new()));
+        } else {
+            let cur = &mut out.last_mut().expect("one section").1;
+            cur.push_str(line);
+            cur.push('\n');
+        }
+    }
+    out
+}
+
+/// Parses one section, reporting errors at their line in the whole file.
+fn parse_section(
+    name: TypeName,
+    (offset, text): &(usize, String),
+    file: &str,
+) -> Result<MessageSpec, ParseError> {
+    parse_message(name, text, file).map_err(|mut e| {
+        e.line += offset;
+        e
+    })
+}
+
 /// Parses the text of a `.srv` file.
 pub fn parse_service(name: TypeName, text: &str, file: &str) -> Result<ServiceSpec, ParseError> {
-    let mut parts = text.splitn(2, "\n---");
-    let req = parts.next().unwrap_or_default();
-    let resp = match parts.next() {
-        Some(r) => r.split_once('\n').map_or("", |(_, rest)| rest),
-        None => {
-            return Err(ParseError {
-                file: file.into(),
-                line: 1,
-                msg: "service has no `---` separator".into(),
-            });
-        }
-    };
-    let sub = |suffix: &str| TypeName {
-        name: format!("{}_{suffix}", name.name),
-        ..name.clone()
-    };
+    let parts = sections(text);
+    if parts.len() != 2 {
+        return Err(ParseError {
+            file: file.into(),
+            line: 1,
+            msg: format!(
+                "a service needs exactly one `---` separator, found {}",
+                parts.len() - 1
+            ),
+        });
+    }
     Ok(ServiceSpec {
-        request: parse_message(sub("Request"), req, file)?,
-        response: parse_message(sub("Response"), resp, file)?,
+        request: parse_section(name.suffixed("Request"), &parts[0], file)?,
+        response: parse_section(name.suffixed("Response"), &parts[1], file)?,
         name,
     })
 }
 
-/// A set of parsed messages, keyed by name.
+/// Parses the text of a `.action` file.
+pub fn parse_action(name: TypeName, text: &str, file: &str) -> Result<ActionSpec, ParseError> {
+    let parts = sections(text);
+    if parts.len() != 3 {
+        return Err(ParseError {
+            file: file.into(),
+            line: 1,
+            msg: format!(
+                "an action needs exactly two `---` separators, found {}",
+                parts.len() - 1
+            ),
+        });
+    }
+    Ok(ActionSpec {
+        goal: parse_section(name.suffixed("Goal"), &parts[0], file)?,
+        result: parse_section(name.suffixed("Result"), &parts[1], file)?,
+        feedback: parse_section(name.suffixed("Feedback"), &parts[2], file)?,
+        name,
+    })
+}
+
+/// A set of parsed interfaces, keyed by name.
+///
+/// `messages` holds every message type, including the request, response
+/// and event messages of services and the messages actions are made of, as
+/// well as the type descriptions of services and actions themselves (so
+/// [`type_hash`](crate::hash::type_hash) works for `pkg/srv/X` and
+/// `pkg/action/X`). `services` and `actions` record which names are
+/// services and actions; the `SendGoal` and `GetResult` services of an
+/// action are in `services` too.
 #[derive(Debug, Clone, Default)]
 pub struct Interfaces {
     pub messages: BTreeMap<TypeName, MessageSpec>,
+    pub services: BTreeMap<TypeName, ServiceSpec>,
+    pub actions: BTreeMap<TypeName, ActionSpec>,
 }
 
 impl Interfaces {
@@ -382,39 +652,90 @@ impl Interfaces {
         self.messages.insert(spec.name.clone(), spec);
     }
 
-    /// Loads every `msg/*.msg` and `srv/*.srv` under a package directory
-    /// (whose name is the package name).
+    /// Adds a service and its messages.
+    pub fn add_service(&mut self, spec: ServiceSpec) {
+        for m in spec.messages() {
+            self.add(m);
+        }
+        self.services.insert(spec.name.clone(), spec);
+    }
+
+    /// Adds an action, its messages and its services.
+    pub fn add_action(&mut self, spec: ActionSpec) {
+        for m in spec.messages() {
+            self.add(m);
+        }
+        for s in [spec.send_goal(), spec.get_result()] {
+            self.services.insert(s.name.clone(), s);
+        }
+        self.actions.insert(spec.name.clone(), spec);
+    }
+
+    /// Whether `name` is the type description of a service or an action
+    /// rather than a message that goes on the wire.
+    pub fn is_description(&self, name: &TypeName) -> bool {
+        self.services.contains_key(name) || self.actions.contains_key(name)
+    }
+
+    /// Removes everything defined by `package`.
+    pub fn remove_package(&mut self, package: &str) {
+        self.messages.retain(|t, _| t.package != package);
+        self.services.retain(|t, _| t.package != package);
+        self.actions.retain(|t, _| t.package != package);
+    }
+
+    /// Parses and adds the text of a `.msg`, `.srv` or `.action` file of
+    /// kind `msg`, `srv` or `action`.
+    pub fn add_text(
+        &mut self,
+        package: &str,
+        kind: &str,
+        name: &str,
+        text: &str,
+        file: &str,
+    ) -> Result<(), ParseError> {
+        let ty = TypeName {
+            package: package.into(),
+            namespace: kind.into(),
+            name: name.into(),
+        };
+        match kind {
+            "msg" => self.add(parse_message(ty, text, file)?),
+            "srv" => self.add_service(parse_service(ty, text, file)?),
+            "action" => self.add_action(parse_action(ty, text, file)?),
+            other => {
+                return Err(ParseError {
+                    file: file.into(),
+                    line: 0,
+                    msg: format!("unknown interface kind `{other}`"),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Loads every `msg/*.msg`, `srv/*.srv` and `action/*.action` under a
+    /// package directory (whose name is the package name).
     pub fn load_package(&mut self, dir: &Path) -> anyhow::Result<()> {
         let package = dir
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| anyhow::anyhow!("bad package directory {}", dir.display()))?
             .to_owned();
-        for (sub, ext) in [("msg", "msg"), ("srv", "srv")] {
-            let Ok(entries) = std::fs::read_dir(dir.join(sub)) else {
+        for kind in ["msg", "srv", "action"] {
+            let Ok(entries) = std::fs::read_dir(dir.join(kind)) else {
                 continue;
             };
             let mut files: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
             files.sort();
             for path in files
                 .into_iter()
-                .filter(|p| p.extension().is_some_and(|e| e == ext))
+                .filter(|p| p.extension().is_some_and(|e| e == kind))
             {
                 let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
                 let text = std::fs::read_to_string(&path)?;
                 let file = path.display().to_string();
-                if ext == "msg" {
-                    self.add(parse_message(TypeName::msg(&package, stem), &text, &file)?);
-                } else {
-                    let name = TypeName {
-                        package: package.clone(),
-                        namespace: "srv".into(),
-                        name: stem,
-                    };
-                    let srv = parse_service(name, &text, &file)?;
-                    self.add(srv.request);
-                    self.add(srv.response);
-                }
+                self.add_text(&package, kind, &stem, &text, &file)?;
             }
         }
         Ok(())
@@ -518,6 +839,81 @@ mod tests {
         assert_eq!(s.request.name.name, "AddTwoInts_Request");
         assert_eq!(s.request.fields.len(), 2);
         assert_eq!(s.response.fields[0].name, "sum");
+
+        // std_srvs/Trigger: an empty request, the separator on line 1.
+        let name = |n: &str| TypeName {
+            package: "std_srvs".into(),
+            namespace: "srv".into(),
+            name: n.into(),
+        };
+        let t = parse_service(
+            name("Trigger"),
+            "---\nbool success # ok\nstring message\n",
+            "Trigger.srv",
+        )
+        .unwrap();
+        assert!(t.request.fields.is_empty());
+        assert_eq!(t.response.fields.len(), 2);
+        let e = parse_service(name("Empty"), "---\n", "Empty.srv").unwrap();
+        assert!(e.request.fields.is_empty() && e.response.fields.is_empty());
+        assert!(parse_service(name("X"), "int32 a\n", "X.srv").is_err());
+        let err = parse_service(name("X"), "int32 a\n---\nint32 Bad\n", "X.srv").unwrap_err();
+        assert_eq!(err.line, 3, "lines count from the top of the file");
+
+        let event = t.event();
+        assert_eq!(event.name.to_string(), "std_srvs/srv/Trigger_Event");
+        assert_eq!(event.fields[1].ty.array, Array::Bounded(1));
+        let d = t.description();
+        assert_eq!(d.name.to_string(), "std_srvs/srv/Trigger");
+        assert_eq!(d.fields[2].name, "event_message");
+    }
+
+    #[test]
+    fn actions_have_goal_result_feedback_and_services() {
+        let name = TypeName {
+            package: "p".into(),
+            namespace: "action".into(),
+            name: "Fibonacci".into(),
+        };
+        let a = parse_action(
+            name.clone(),
+            "int32 order\n---\nint32[] sequence\n---\nint32[] partial_sequence\n",
+            "Fibonacci.action",
+        )
+        .unwrap();
+        assert_eq!(a.goal.name.to_string(), "p/action/Fibonacci_Goal");
+        assert_eq!(a.feedback.fields[0].name, "partial_sequence");
+        assert!(parse_action(name.clone(), "int32 a\n---\n", "f").is_err());
+
+        let mut i = Interfaces::default();
+        i.add_action(a);
+        for t in [
+            "Fibonacci",
+            "Fibonacci_Goal",
+            "Fibonacci_Result",
+            "Fibonacci_Feedback",
+            "Fibonacci_FeedbackMessage",
+            "Fibonacci_SendGoal",
+            "Fibonacci_SendGoal_Request",
+            "Fibonacci_SendGoal_Response",
+            "Fibonacci_SendGoal_Event",
+            "Fibonacci_GetResult",
+            "Fibonacci_GetResult_Request",
+            "Fibonacci_GetResult_Response",
+            "Fibonacci_GetResult_Event",
+        ] {
+            let t = TypeName {
+                name: t.into(),
+                ..name.clone()
+            };
+            assert!(i.get(&t).is_some(), "{t}");
+        }
+        assert_eq!(i.messages.len(), 13);
+        assert!(i.is_description(&name));
+        assert!(i.is_description(&name.suffixed("SendGoal")));
+        assert!(!i.is_description(&name.suffixed("Goal")));
+        i.remove_package("p");
+        assert!(i.messages.is_empty() && i.services.is_empty() && i.actions.is_empty());
     }
 
     #[test]

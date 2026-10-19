@@ -16,5 +16,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 zenoh = { workspace = true, features = ["transport_tls", "auth_usrpwd"] }
+zenoh-ext = { workspace = true }
+serde-saphyr = { workspace = true }
 clap = { workspace = true }
 xxhash-rust = { workspace = true }

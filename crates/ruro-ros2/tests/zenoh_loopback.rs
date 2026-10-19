@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use ruro_ros2::msgs::std_msgs::msg::String as RosString;
-use ruro_ros2::rmw::{Endpoint, EndpointConfig, Qos, Reliability, parse_attachment};
+use ruro_ros2::rmw::{Endpoint, EndpointConfig, Qos, parse_attachment};
 use ruro_ros2::{RosMessage, discovery};
 use zenoh::Wait;
 
@@ -63,13 +63,7 @@ fn publish_subscribe_and_discover() {
         })
         .unwrap();
     let publisher = talker
-        .publisher::<RosString>(
-            "/chatter",
-            Qos {
-                reliability: Reliability::BestEffort,
-                depth: 5,
-            },
-        )
+        .publisher::<RosString>("/chatter", Qos::sensor_data())
         .unwrap();
     assert_eq!(
         publisher.raw().key(),

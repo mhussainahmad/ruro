@@ -16,8 +16,12 @@ pub struct Findings {
 /// Checks the graph at `path`. With a daemon to ask (`daemon`), against the
 /// hosts each group would run on, including peers and uploaded hosts;
 /// otherwise against this machine's default host.
-pub fn check(path: &Path, daemon: Option<(&zenoh::Session, &Keys)>) -> Result<()> {
-    let graph = Graph::load(path).with_context(|| format!("loading {}", path.display()))?;
+pub fn check(
+    path: &Path,
+    overlays: &[String],
+    daemon: Option<(&zenoh::Session, &Keys)>,
+) -> Result<()> {
+    let graph = crate::load_graph(path, overlays)?;
     let base = crate::base_dir(path);
     // Composites are expanded first: their own problems are reported with
     // the node that uses them, and the summary counts the nodes that run.

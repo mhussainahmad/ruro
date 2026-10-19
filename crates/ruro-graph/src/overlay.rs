@@ -142,6 +142,70 @@ impl Graph {
 }
 
 impl Overlay {
+    /// One line per change, for listings: `clock sim`, `arm: type hw/arm,
+    /// params`, `camera: removed`, `+ wire a.x -> b.y`.
+    pub fn summary(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(clock) = self.clock {
+            out.push(format!(
+                "clock {}",
+                if clock.is_wall() { "wall" } else { "sim" }
+            ));
+        }
+        for (group, patch) in &self.groups {
+            match patch {
+                None => out.push(format!("group {group}: settings removed")),
+                Some(p) => {
+                    let mut what = Vec::new();
+                    if let Some(m) = &p.machine {
+                        what.push(format!("machine {m}"));
+                    }
+                    if let Some(h) = &p.host {
+                        what.push(format!("host {h}"));
+                    }
+                    if p.realtime.is_some() {
+                        what.push("realtime".into());
+                    }
+                    out.push(format!("group {group}: {}", what.join(", ")));
+                }
+            }
+        }
+        for wire in &self.wires.remove {
+            out.push(format!("- wire {wire}"));
+        }
+        for (id, patch) in &self.nodes {
+            let Some(p) = patch else {
+                out.push(format!("{id}: removed"));
+                continue;
+            };
+            let mut what = Vec::new();
+            if let Some(k) = &p.kind {
+                what.push(format!("type {k}"));
+            }
+            if let Some(g) = &p.group {
+                what.push(format!("group {g}"));
+            }
+            if let Some(r) = p.rate {
+                what.push(format!("rate {r}"));
+            }
+            if !p.params.is_empty() {
+                let keys: Vec<&str> = p.params.keys().map(String::as_str).collect();
+                what.push(format!("params {}", keys.join(", ")));
+            }
+            if p.restart.is_some() {
+                what.push("restart".into());
+            }
+            if p.graph.is_some() {
+                what.push("subgraph".into());
+            }
+            out.push(format!("{id}: {}", what.join("; ")));
+        }
+        for wire in &self.wires.add {
+            out.push(format!("+ wire {wire}"));
+        }
+        out
+    }
+
     /// Applies this overlay, named `name` in errors, to `g`.
     pub fn apply(&self, name: &str, g: &mut Graph) -> Result<(), GraphError> {
         if let Some(clock) = self.clock {
@@ -401,6 +465,28 @@ overlays:
     fn error(yaml_overlay: &str, select: &[&str]) -> String {
         let g = Graph::from_yaml(&format!("{ROBOT}  broken:\n{yaml_overlay}")).unwrap();
         g.with_overlays(select).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn summaries_list_every_change() {
+        let g = robot();
+        assert_eq!(
+            g.overlays["real"].summary(),
+            [
+                "clock wall",
+                "group robot: machine robot-pi",
+                "arm: type hw/arm; params device",
+                "recorder: params fps, root",
+            ]
+        );
+        assert_eq!(
+            g.overlays["bench"].summary(),
+            [
+                "camera: removed",
+                "viewer: type std/image-stats",
+                "+ wire jog.command -> viewer.image"
+            ]
+        );
     }
 
     #[test]

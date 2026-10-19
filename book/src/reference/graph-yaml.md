@@ -36,6 +36,7 @@ wires:
 | `groups` | map of name to [group settings](#groups) | no | Per-process-group settings. |
 | `clock` | `wall` or `sim` | no | Graph time. Default `wall`; `sim` follows the graph's one `std/Clock` output (see [Graph time](../runtime.md#graph-time-and-simulation)). |
 | `inputs`, `outputs` | map | no | Ports exposed when this graph is used as a [composite node](composites.md). |
+| `overlays` | map of name to [overlay](#overlays) | no | Named variants of the graph, selected with `--overlay`. |
 
 ### Identifiers
 
@@ -135,6 +136,61 @@ groups:
 | `realtime.deadlines_us` | map of node id to µs | Step deadlines; a longer step is reported as an error. |
 
 See [Real-time scheduling](../realtime.md) for how these behave.
+
+## Overlays
+
+An overlay is a named variant of the graph: a patch applied on top of it when selected.
+`ruro run`, `deploy`, `check`, `play --graph` and `soak` take `--overlay <name>` (repeatable),
+`ruro overlays <graph>` lists them, and the studio has a picker next to **Run**. Overlays
+apply in the order given, before composite nodes are flattened and before validation. See
+[Switching between simulation and the real robot](../sim-to-real.md) for an example.
+
+```yaml
+overlays:
+  real:
+    clock: wall
+    groups:
+      robot: { machine: robot-pi }
+    nodes:
+      arm: { type: hw/so100-arm, params: { device: /dev/ttyACM0 } }
+      recorder: { params: { root: datasets/real, episode_seconds: null } }
+      viewer: null
+      stats: { type: std/image-stats }
+    wires:
+      remove: [camera.image -> recorder.image]
+      add: [camera.image -> stats.image]
+```
+
+| Field | Meaning |
+|---|---|
+| `clock` | Replaces the graph's `clock`. |
+| `groups` | Per group: the fields given (`machine`, `host`, `realtime` as a whole) replace the group's settings; `null` removes the group's settings. |
+| `nodes` | Per node: `null` removes the node, an entry for a node that does not exist adds it, any other entry patches the node. |
+| `wires.remove` | Wires to remove, matched by their two ports (`depth` is ignored). |
+| `wires.add` | Wires to append, in the [usual forms](#wires). |
+
+Each overlay is applied in this order: `clock`, `groups`, `wires.remove`, `nodes` (in the
+order listed), `wires.add`. The rules for a node entry:
+
+- **Remove** (`viewer: null`): the node is removed together with every wire that touches it.
+- **Add** (an id that is not in the graph): the entry is a normal [node](#nodes) and must have
+  a `type`. `null` parameter values are left out.
+- **Patch**: `group`, `rate`, `restart`, `pos` and `graph` replace the base values when given;
+  fields left out keep them.
+  - If `type` names a **different type**, the node's `params` (and inline `graph`) are
+    replaced by the overlay's: the base parameters belong to the old type.
+  - Otherwise `params` are **merged** key by key, and a `null` value removes a key (the node
+    then uses the type's default).
+
+A `rate` can be set but not removed. Overlays act on the graph's own nodes; to change a node
+inside a composite, patch the composite's `inner.param` parameters. Overlays in a subgraph
+file are not applied, and validation reports them.
+
+These are errors: selecting an overlay the graph does not have, patching a node that does not
+exist without a `type`, removing a node or wire that is not there, and removing the settings
+of a group that has none. Validation (`ruro check`, the studio) checks that every overlay
+applies to the base graph, whether or not it is selected; with `--overlay`, `ruro check`
+validates the graph with the overlays applied.
 
 ## Validation
 

@@ -103,12 +103,7 @@ pub fn validate_in(graph: &Graph, registry: &Registry, base: &Path) -> Vec<Issue
             },
         });
     }
-    // Overlays are validated when selected; here only that each applies.
-    for name in graph.overlays.keys() {
-        if let Err(e) = graph.with_overlays(&[name]) {
-            issues.push(Issue::graph(e.to_string()));
-        }
-    }
+    issues.extend(graph.overlay_issues());
     let desc = |id: &str, kind: &str| -> Option<&NodeDescriptor> {
         composites.get(id).or_else(|| registry.get(kind))
     };

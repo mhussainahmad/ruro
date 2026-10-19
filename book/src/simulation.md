@@ -69,7 +69,7 @@ export RURO_MUJOCO_LIB=$(ls ~/.venvs/mujoco/lib/python3*/site-packages/mujoco/li
 With [`clock: sim`](runtime.md#graph-time-and-simulation) in the graph, the `clock`
 output drives graph time: every timer-driven node steps on simulated time, so a slow or
 paused simulation slows the whole graph down with it. No wire is needed; the runtime finds
-the graph's one `std/Clock` output. `examples/arm-sim.yaml` runs this way. Message stamps,
+the graph's one `std/Clock` output. `examples/arm.yaml` runs this way. Message stamps,
 including those of `bodies`, stay wall time.
 
 **Emergency stop.** The physics keeps running and commands are ignored while stopped. With

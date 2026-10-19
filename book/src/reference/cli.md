@@ -39,6 +39,7 @@ Other environment variables:
 | [`deploy`](#ruro-deploy) | Deploy a graph to the daemon and return; upload host binaries. |
 | [`stop`](#ruro-stop) | Stop the running graph. |
 | [`check`](#ruro-check) | Validate a graph against the available node types. |
+| [`overlays`](#ruro-overlays) | List the overlays of a graph file and what each changes. |
 | [`status`](#ruro-status) | Show the daemon, its groups and live node metrics. |
 | [`fleet`](#ruro-fleet) | List every daemon reachable through the connected one. |
 | [`nodes`](#ruro-nodes) | List available node types. |
@@ -62,13 +63,17 @@ Other environment variables:
 ### ruro run
 
 ```text
-ruro run <GRAPH>
+ruro run <GRAPH> [--overlay <NAME>]...
 ```
 
 Deploys the graph file (with its subgraph files expanded), prints the graph's logs and stays
 in the foreground until <kbd>Ctrl</kbd>+<kbd>C</kbd>, then stops the graph. If no daemon is
 reachable at `--connect`, `run` starts one in-process, listening on that endpoint (named
 after `--daemon` or the hostname, with the default host), and shuts it down on exit.
+
+`--overlay` (short `-o`) applies one of the graph's [overlays](graph-yaml.md#overlays) before
+deploying; repeat it to apply several, in the order given. `deploy`, `check`, `play --graph`
+and `soak` take it too. An unknown overlay name is an error.
 
 ### ruro daemon
 
@@ -93,7 +98,8 @@ connect to, the token file, uploaded host binaries and recording segments.
 ### ruro deploy
 
 ```text
-ruro deploy [GRAPH] [--to <NAME>] [--host-binary <PATH>] [--host-name <NAME>]
+ruro deploy [GRAPH] [--overlay <NAME>]... [--to <NAME>] [--host-binary <PATH>]
+            [--host-name <NAME>]
 ```
 
 Sends the graph to the daemon (with its subgraph files expanded), which validates it and
@@ -113,18 +119,41 @@ Stops the running graph, on every machine it spans.
 ### ruro check
 
 ```text
-ruro check <GRAPH>
+ruro check <GRAPH> [--overlay <NAME>]...
 ```
 
 Validates the graph: node ids, types, parameters and their ranges, rates, wires and message
 types, and composite nodes. The node types come from the daemon if one is reachable,
 otherwise from the local host binary. Prints a summary and exits with status 0 if the graph
 is valid; otherwise prints each problem and exits with status 1. Some checks only happen at
-deployment (see [Validation](graph-yaml.md#validation)).
+deployment (see [Validation](graph-yaml.md#validation)). With `--overlay`, the graph is
+checked with the overlays applied; without, the base graph is checked, along with whether
+each overlay applies to it.
 
 ```text
 $ ruro check examples/camera.yaml
 examples/camera.yaml: ok (4 nodes, 3 wires, 2 process groups)
+```
+
+### ruro overlays
+
+```text
+ruro overlays <GRAPH>
+```
+
+Lists the graph's [overlays](graph-yaml.md#overlays) and, under each, what it changes. Works
+without a daemon.
+
+```text
+$ ruro overlays examples/pid.yaml
+stiff
+    pid: params kd, kp
+scaled
+    - wire target.value -> pid.setpoint
+    half: type std/gain; params k
+    arm: params max_speed
+    + wire target.value -> half.input
+    + wire half.output -> pid.setpoint
 ```
 
 ### ruro status
@@ -219,7 +248,7 @@ machines of a multi-machine graph) into an MCAP file on the daemon's machine, or
 ### ruro play
 
 ```text
-ruro play <FILE> [--rate <RATE>] [--graph <GRAPH>]
+ruro play <FILE> [--rate <RATE>] [--graph <GRAPH> [--overlay <NAME>]...]
 ```
 
 Replays a recording into the running graph (or deploys `--graph` first): the recorded nodes
@@ -313,7 +342,7 @@ type such as `geometry_msgs/msg/Twist`. See [ROS 2 bridge](../ros2.md).
 ### ruro soak
 
 ```text
-ruro soak <GRAPH> [--duration <S>] [--warmup <S>] [--interval <S>]
+ruro soak <GRAPH> [--overlay <NAME>]... [--duration <S>] [--warmup <S>] [--interval <S>]
                   [--max-rss-growth-mb <MIB>] [--csv <FILE>]
 ```
 

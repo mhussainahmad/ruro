@@ -120,6 +120,16 @@ impl Graph {
         self.overlays.keys().map(String::as_str).collect()
     }
 
+    /// One issue for each overlay that does not apply to the graph on its
+    /// own. What an overlay produces is validated when it is selected.
+    pub fn overlay_issues(&self) -> Vec<crate::Issue> {
+        self.overlays
+            .keys()
+            .filter_map(|name| self.with_overlays(&[name]).err())
+            .map(|e| crate::Issue::graph(e.to_string()))
+            .collect()
+    }
+
     /// The graph with the overlays `names` applied in order. The result has
     /// no overlays of its own; with no names it is the base graph.
     pub fn with_overlays<S: AsRef<str>>(&self, names: &[S]) -> Result<Graph, GraphError> {

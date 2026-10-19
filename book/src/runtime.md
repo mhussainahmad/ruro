@@ -57,7 +57,7 @@ the clock over shared memory (or the network), so every process follows the same
   output, and so does `ruro check` when it can reach a daemon.
 
 The MuJoCo node (`sim/mujoco`) publishes its simulation time as a `std/Clock`; see
-`examples/arm-sim.yaml`. Flattening composite nodes keeps the graph's `clock` setting.
+`examples/arm.yaml`, whose `real` overlay switches the graph back to the wall clock. Flattening composite nodes keeps the graph's `clock` setting.
 
 ## Emergency stop
 

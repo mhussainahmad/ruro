@@ -461,7 +461,7 @@ fn deploy(c: &Client, path: &Path, overlays: &[String]) -> Result<String> {
 }
 
 /// Loads a graph file and applies `overlays` to it, in order.
-pub fn load_graph(path: &Path, overlays: &[String]) -> Result<Graph> {
+fn load_graph(path: &Path, overlays: &[String]) -> Result<Graph> {
     let graph = Graph::load(path).with_context(|| format!("loading {}", path.display()))?;
     graph
         .with_overlays(overlays)

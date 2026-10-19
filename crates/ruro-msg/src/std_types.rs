@@ -92,6 +92,9 @@ pub enum Encoding {
     Rgb8 = 0,
     Rgba8 = 1,
     Mono8 = 2,
+    /// One 16-bit little-endian channel, ROS `16UC1`/`mono16`. Depth cameras
+    /// publish depth in millimetres this way (0 means no measurement).
+    Mono16 = 3,
 }
 
 impl Encoding {
@@ -99,7 +102,15 @@ impl Encoding {
         match self {
             Encoding::Rgb8 => 3,
             Encoding::Rgba8 => 4,
-            Encoding::Mono8 => 1,
+            Encoding::Mono8 | Encoding::Mono16 => 1,
+        }
+    }
+
+    /// Bytes per pixel: the channel count times the channel width.
+    pub fn bytes_per_pixel(self) -> usize {
+        match self {
+            Encoding::Mono16 => 2,
+            e => e.channels(),
         }
     }
 
@@ -108,6 +119,7 @@ impl Encoding {
             0 => Ok(Encoding::Rgb8),
             1 => Ok(Encoding::Rgba8),
             2 => Ok(Encoding::Mono8),
+            3 => Ok(Encoding::Mono16),
             other => Err(DecodeError::Invalid(format!(
                 "unknown image encoding {other}"
             ))),
@@ -115,7 +127,7 @@ impl Encoding {
     }
 }
 
-/// A dense, row-major 8-bit image.
+/// A dense, row-major image, 8 bits per channel except for [`Encoding::Mono16`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Image {
     pub width: u32,
@@ -127,7 +139,7 @@ pub struct Image {
 impl Image {
     /// Allocates a zeroed image.
     pub fn new(width: u32, height: u32, encoding: Encoding) -> Self {
-        let len = width as usize * height as usize * encoding.channels();
+        let len = width as usize * height as usize * encoding.bytes_per_pixel();
         Self {
             width,
             height,
@@ -138,7 +150,7 @@ impl Image {
 
     /// Bytes per row.
     pub fn stride(&self) -> usize {
-        self.width as usize * self.encoding.channels()
+        self.width as usize * self.encoding.bytes_per_pixel()
     }
 
     /// Changes the size and layout, keeping the pixel buffer's allocation
@@ -148,8 +160,10 @@ impl Image {
         self.width = width;
         self.height = height;
         self.encoding = encoding;
-        self.data
-            .resize(width as usize * height as usize * encoding.channels(), 0);
+        self.data.resize(
+            width as usize * height as usize * encoding.bytes_per_pixel(),
+            0,
+        );
     }
 
     /// Validates an encoded image header and returns `(width, height, encoding)`.
@@ -166,7 +180,7 @@ impl Image {
         // Checked: a corrupt header must not overflow (and so panic) here.
         let need = (width as usize)
             .checked_mul(height as usize)
-            .and_then(|n| n.checked_mul(encoding.channels()))
+            .and_then(|n| n.checked_mul(encoding.bytes_per_pixel()))
             .and_then(|n| n.checked_add(IMAGE_HEADER))
             .ok_or_else(|| {
                 DecodeError::Invalid(format!("image size {width}x{height} overflows"))
@@ -228,8 +242,21 @@ impl Message for Image {
         let scale = (self.width.max(self.height) as f32 / PREVIEW_MAX_EDGE as f32).max(1.0);
         let pw = ((self.width as f32 / scale) as u32).max(1);
         let ph = ((self.height as f32 / scale) as u32).max(1);
-        let ch = self.encoding.channels();
+        let ch = self.encoding.bytes_per_pixel();
         let stride = self.stride();
+        // 16-bit images are shown scaled to their largest value.
+        let max16 = if self.encoding == Encoding::Mono16 {
+            self.data
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| u16::from_le_bytes(*p))
+                .max()
+                .unwrap_or(0)
+                .max(1) as u32
+        } else {
+            1
+        };
         let mut rgba = Vec::with_capacity(pw as usize * ph as usize * 4);
         for y in 0..ph {
             let sy = ((y as f32 * scale) as usize).min(self.height as usize - 1);
@@ -241,6 +268,10 @@ impl Message for Image {
                     Encoding::Rgb8 => rgba.extend_from_slice(&[px[0], px[1], px[2], 255]),
                     Encoding::Rgba8 => rgba.extend_from_slice(px),
                     Encoding::Mono8 => rgba.extend_from_slice(&[px[0], px[0], px[0], 255]),
+                    Encoding::Mono16 => {
+                        let v = (u16::from_le_bytes([px[0], px[1]]) as u32 * 255 / max16) as u8;
+                        rgba.extend_from_slice(&[v, v, v, 255]);
+                    }
                 }
             }
         }
@@ -379,6 +410,25 @@ mod tests {
         img.reshape(50, 50, Encoding::Rgb8);
         assert_eq!(img.data.len(), 50 * 50 * 3);
         assert_eq!(img.data.as_ptr(), ptr);
+    }
+
+    #[test]
+    fn mono16_images() {
+        let mut img = Image::new(3, 2, Encoding::Mono16);
+        assert_eq!((img.data.len(), img.stride()), (12, 6));
+        img.data[0..2].copy_from_slice(&1000u16.to_le_bytes());
+        img.data[10..12].copy_from_slice(&4000u16.to_le_bytes());
+        roundtrip(img.clone());
+        // A wrong pixel count for the encoding is refused.
+        let mut bytes = img.to_bytes();
+        bytes.pop();
+        assert!(Image::decode(&bytes).is_err());
+        let Preview::Image { rgba, .. } = img.preview() else {
+            panic!("not an image preview")
+        };
+        // Scaled to the largest depth: 1000/4000 of full scale, then white.
+        assert_eq!(&rgba[0..4], &[63, 63, 63, 255]);
+        assert_eq!(&rgba[20..24], &[255, 255, 255, 255]);
     }
 
     #[test]

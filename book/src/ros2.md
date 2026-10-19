@@ -66,7 +66,7 @@ network callback and step once a second only to apply parameter changes, so thei
 
 Fields ruro does not model are dropped on the way in and zeroed on the way out (odometry
 covariances, joint names, camera binning and region of interest). Incoming images must be
-`rgb8`, `rgba8`, `mono8`/`8UC1`, `bgr8` or `bgra8` (BGR is converted to RGB); other
+`rgb8`, `rgba8`, `mono8`/`8UC1`, `mono16`/`16UC1` (depth), `bgr8` or `bgra8` (BGR is converted to RGB); other
 encodings are dropped with a warning. Incoming point clouds need float32 x, y and z fields;
 non-finite points are skipped.
 

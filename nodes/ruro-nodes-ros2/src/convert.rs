@@ -315,8 +315,9 @@ pub fn camera_info_to_ros(m: &r::CameraInfo, _: &PubContext) -> Result<sm::msg::
     })
 }
 
-/// Accepts `rgb8`, `rgba8`, `mono8`/`8UC1`, and converts `bgr8`/`bgra8` to
-/// RGB order. Row padding (`step` larger than a row) is removed.
+/// Accepts `rgb8`, `rgba8`, `mono8`/`8UC1`, `mono16`/`16UC1`, and converts
+/// `bgr8`/`bgra8` to RGB order and big-endian 16-bit data to little-endian.
+/// Row padding (`step` larger than a row) is removed.
 pub fn image_from_ros(m: sm::msg::Image) -> Result<r::Image> {
     let (encoding, swap) = match m.encoding.as_str() {
         "rgb8" => (r::Encoding::Rgb8, false),
@@ -324,9 +325,12 @@ pub fn image_from_ros(m: sm::msg::Image) -> Result<r::Image> {
         "rgba8" => (r::Encoding::Rgba8, false),
         "bgra8" => (r::Encoding::Rgba8, true),
         "mono8" | "8UC1" => (r::Encoding::Mono8, false),
-        other => bail!("unsupported image encoding `{other}` (8-bit rgb/bgr/rgba/bgra/mono only)"),
+        "mono16" | "16UC1" => (r::Encoding::Mono16, false),
+        other => bail!(
+            "unsupported image encoding `{other}` (rgb8, bgr8, rgba8, bgra8, mono8 or mono16 only)"
+        ),
     };
-    let row = m.width as usize * encoding.channels();
+    let row = m.width as usize * encoding.bytes_per_pixel();
     let step = m.step as usize;
     let rows = m.height as usize;
     if step < row || m.data.len() < step * rows.saturating_sub(1) + row {
@@ -353,6 +357,12 @@ pub fn image_from_ros(m: sm::msg::Image) -> Result<r::Image> {
             px.swap(0, 2);
         }
     }
+    if encoding == r::Encoding::Mono16 && m.is_bigendian != 0 {
+        data.as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .for_each(|px| px.swap(0, 1));
+    }
     Ok(r::Image {
         width: m.width,
         height: m.height,
@@ -366,6 +376,7 @@ pub fn image_to_ros(m: &r::Image, ctx: &PubContext) -> Result<sm::msg::Image> {
         r::Encoding::Rgb8 => "rgb8",
         r::Encoding::Rgba8 => "rgba8",
         r::Encoding::Mono8 => "mono8",
+        r::Encoding::Mono16 => "16UC1",
     };
     Ok(sm::msg::Image {
         header: ctx_header(ctx),
@@ -573,6 +584,29 @@ mod tests {
             ..Default::default()
         };
         assert!(image_from_ros(bad).is_err());
+    }
+
+    #[test]
+    fn depth_images_are_16uc1() {
+        // 2x1 big-endian depth with 2 bytes of row padding.
+        let ros = sm::msg::Image {
+            width: 2,
+            height: 1,
+            encoding: "16UC1".into(),
+            is_bigendian: 1,
+            step: 6,
+            data: vec![0x03, 0xE8, 0x00, 0x01, 0, 0],
+            ..Default::default()
+        };
+        let img = image_from_ros(ros).unwrap();
+        assert_eq!(img.encoding, r::Encoding::Mono16);
+        assert_eq!(img.data, [0xE8, 0x03, 0x01, 0x00]);
+        let back = image_to_ros(&img, &ctx()).unwrap();
+        assert_eq!(
+            (back.step, back.encoding.as_str(), back.is_bigendian),
+            (4, "16UC1", 0)
+        );
+        assert_eq!(image_from_ros(back).unwrap(), img);
     }
 
     #[test]

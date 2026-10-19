@@ -39,6 +39,7 @@ fn encoding_name(e: Encoding) -> &'static str {
         Encoding::Rgb8 => "rgb8",
         Encoding::Rgba8 => "rgba8",
         Encoding::Mono8 => "mono8",
+        Encoding::Mono16 => "mono16",
     }
 }
 
@@ -47,8 +48,9 @@ fn parse_encoding(s: &str) -> PyResult<Encoding> {
         "rgb8" | "rgb" => Ok(Encoding::Rgb8),
         "rgba8" | "rgba" => Ok(Encoding::Rgba8),
         "mono8" | "mono" | "gray" | "l" => Ok(Encoding::Mono8),
+        "mono16" | "16uc1" => Ok(Encoding::Mono16),
         other => Err(PyValueError::new_err(format!(
-            "unknown encoding `{other}` (expected rgb8, rgba8 or mono8)"
+            "unknown encoding `{other}` (expected rgb8, rgba8, mono8 or mono16)"
         ))),
     }
 }
@@ -169,6 +171,11 @@ impl PyImage {
                 )));
             }
         };
+        if enc == Encoding::Mono16 {
+            return Err(PyValueError::new_err(
+                "mono16 images cannot be built from uint8 arrays",
+            ));
+        }
         if enc.channels() != c {
             return Err(PyValueError::new_err(format!(
                 "{} has {} channels, array has {c}",
@@ -197,7 +204,7 @@ impl PyImage {
         self.image().height
     }
 
-    /// `rgb8`, `rgba8` or `mono8`.
+    /// `rgb8`, `rgba8`, `mono8` or `mono16`.
     #[getter]
     fn encoding(&self) -> &'static str {
         encoding_name(self.image().encoding)
@@ -225,7 +232,11 @@ impl PyImage {
     fn array<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let (h, w, c) = slf.get().shape();
         let np = slf.py().import("numpy")?;
-        np.call_method1("frombuffer", (slf, "uint8"))?
+        let dtype = match slf.get().image().encoding {
+            Encoding::Mono16 => "<u2",
+            _ => "uint8",
+        };
+        np.call_method1("frombuffer", (slf, dtype))?
             .call_method1("reshape", (h, w, c))
     }
 

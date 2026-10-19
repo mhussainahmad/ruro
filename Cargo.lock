@@ -5315,6 +5315,7 @@ name = "ruro-nodes-ros2"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "ruro",
  "ruro-ros2",
  "serde_json",

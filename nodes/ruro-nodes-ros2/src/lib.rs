@@ -36,6 +36,7 @@
 //! the messages they send.
 
 pub mod convert;
+pub mod external;
 pub mod generic;
 
 use std::sync::Arc;

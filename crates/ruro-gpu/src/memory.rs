@@ -192,6 +192,11 @@ impl Allocation {
         })
     }
 
+    /// True once the allocation has been sent to another process.
+    pub fn is_exported(&self) -> bool {
+        matches!(self.export.get(), Some(Ok(_)))
+    }
+
     /// Takes the allocation back from other processes' readers so it can be
     /// written. False while any of them still holds it.
     pub fn try_reclaim(&self) -> bool {
@@ -227,6 +232,13 @@ fn size_class(len: usize) -> usize {
 /// Most free allocations a pool keeps; beyond that, returned ones are freed.
 const MAX_FREE: usize = 64;
 
+/// An allocation sent to another process is reused only after this many
+/// newer ones of its size have been returned, so its readers have a few
+/// frame periods to pin it (and its frame is not dropped as stale) even
+/// when the producer recycles every frame at once. Producers that send to
+/// other processes therefore cycle through at least `RING + 1` buffers.
+const RING: usize = 3;
+
 /// Counters of a device's buffer pool.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PoolStats {
@@ -255,9 +267,17 @@ impl Pool {
         {
             let mut free = self.free.lock();
             // Oldest first: a buffer returned long ago is the least likely to
-            // be still queued for a reader in another process.
-            if let Some(i) = free.iter().position(|a| a.size == class && a.try_reclaim()) {
-                return Ok(free.remove(i).expect("index from position"));
+            // be still queued for a reader in another process. Reclaiming
+            // comes last, as it invalidates descriptors sent earlier.
+            let rested = |i: usize| {
+                let newer = free.iter().skip(i + 1).filter(|b| b.size == class);
+                newer.count() >= RING
+            };
+            if let Some(i) = (0..free.len()).find(|&i| {
+                let a = &free[i];
+                a.size == class && (!a.is_exported() || rested(i)) && a.try_reclaim()
+            }) {
+                return Ok(free.remove(i).expect("index in range"));
             }
         }
         let alloc = match Allocation::new(self.device, class) {
@@ -451,11 +471,6 @@ impl DeviceBuffer {
         }
     }
 
-    /// Whether the buffer can be written now (see [`DeviceBuffer::writable`]).
-    pub(crate) fn can_write(&self) -> bool {
-        self.writable().is_ok()
-    }
-
     /// Changes the length within the capacity.
     pub fn set_len(&mut self, len: usize) -> Result<()> {
         ensure!(
@@ -585,15 +600,18 @@ impl Drop for DeviceBuffer {
 }
 
 /// Makes `slot` hold a buffer of `len` bytes on `device` that this process
-/// may write: the current one if nobody else holds it and it is large
-/// enough, otherwise a fresh one from the pool.
+/// may write: the current one if nobody else holds it, it is large enough
+/// and it has never been sent to another process; otherwise one from the
+/// pool (which makes exported buffers rest before reuse).
 pub(crate) fn writable_buffer(
     slot: &mut Option<Arc<DeviceBuffer>>,
     device: u32,
     len: usize,
 ) -> Result<&mut DeviceBuffer> {
     let reuse = slot.as_mut().and_then(Arc::get_mut).is_some_and(|b| {
-        b.device == device && !b.is_imported() && b.capacity() >= len && b.can_write()
+        b.device == device
+            && b.capacity() >= len
+            && b.backing_allocation().is_some_and(|a| !a.is_exported())
     });
     if reuse {
         let b = Arc::get_mut(slot.as_mut().expect("checked")).expect("checked");

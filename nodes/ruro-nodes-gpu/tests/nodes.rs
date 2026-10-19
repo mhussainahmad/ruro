@@ -154,6 +154,15 @@ fn nodes_are_registered_with_typed_ports() {
     assert!(issues.is_empty(), "{issues:?}");
 }
 
+#[test]
+fn the_example_graph_validates() {
+    ruro_host::describe(); // links every node crate of the stock host
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/gpu.yaml");
+    let graph = Graph::load(path).unwrap();
+    let issues = ruro_graph::validate(&graph, &ruro::node::registry());
+    assert!(issues.is_empty(), "{issues:?}");
+}
+
 const NO_CUDA_ENV: &str = "RURO_GPU_TEST_NO_CUDA";
 
 /// Run in a child process with a missing driver library.

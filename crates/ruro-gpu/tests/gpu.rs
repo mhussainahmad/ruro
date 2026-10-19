@@ -92,18 +92,19 @@ fn the_pool_reuses_allocations() {
     // A size no other test uses, so their buffers do not interfere.
     let len = 11 * 1024 * 1024 + 17;
     drop(DeviceBuffer::alloc(0, len).unwrap());
-    let before = pool_stats(0).unwrap().allocations;
     let mut ptrs = std::collections::HashSet::new();
     for _ in 0..100 {
         let b = DeviceBuffer::alloc(0, len).unwrap();
         ptrs.insert(b.device_ptr());
     }
-    assert_eq!(
-        pool_stats(0).unwrap().allocations,
-        before,
-        "no new allocations"
-    );
+    // One allocation, handed out again and again. (The pool's counters are
+    // shared with tests running in parallel, so they are not compared.)
     assert_eq!(ptrs.len(), 1);
+    let stats = pool_stats(0).unwrap();
+    assert!(
+        stats.allocations >= 1 && stats.bytes >= len as u64,
+        "{stats:?}"
+    );
 }
 
 #[test]
@@ -176,15 +177,15 @@ fn in_process_decode_shares_the_buffer_and_holds_it() {
     drop(again);
     drop(got);
 
-    // Once released, the producer may reuse it.
-    let mut reused = GpuImage::new(0, 640, 480, Encoding::Rgb8).unwrap();
-    let mut tries = 0;
-    while reused.buffer().unwrap().device_ptr() != ptr && tries < 70 {
-        // Other buffers of this size may be ahead in the pool.
-        reused = GpuImage::new(0, 640, 480, Encoding::Rgb8).unwrap();
-        tries += 1;
+    // Once released, the producer may reuse it, after a few newer buffers
+    // (the ring that gives receivers time to pin a frame).
+    let mut reused = false;
+    for _ in 0..10 {
+        sent.reshape(0, 640, 480, Encoding::Rgb8).unwrap();
+        let _ = sent.to_bytes();
+        reused |= sent.buffer().unwrap().device_ptr() == ptr;
     }
-    assert_eq!(reused.buffer().unwrap().device_ptr(), ptr);
+    assert!(reused);
 }
 
 #[test]
@@ -195,10 +196,19 @@ fn stale_descriptors_are_refused() {
     let stream = Stream::new(0).unwrap();
     let img = pattern(320, 240, Encoding::Mono8, 1);
     let mut g = GpuImage::from_image(0, &img, &stream).unwrap();
+    let a = g.buffer().unwrap().device_ptr();
     let bytes = g.to_bytes();
-    // The producer writes the buffer again before the receiver got to it.
-    g.upload(0, &pattern(320, 240, Encoding::Mono8, 2), &stream)
-        .unwrap();
+    // The producer goes round its ring of buffers and writes this one again
+    // before the receiver got to it.
+    for _ in 0..10 {
+        g.upload(0, &pattern(320, 240, Encoding::Mono8, 2), &stream)
+            .unwrap();
+        let _ = g.to_bytes();
+        if g.buffer().unwrap().device_ptr() == a {
+            break;
+        }
+    }
+    assert_eq!(g.buffer().unwrap().device_ptr(), a);
     let err = GpuImage::decode(&bytes).unwrap_err().to_string();
     assert!(err.contains("stale"), "{err}");
     // The current descriptor works.
@@ -336,6 +346,8 @@ const DECODE_AND_HOLD: u8 = 1;
 const STORE: u8 = 2;
 const DECODE_STORED: u8 = 3;
 const QUIT: u8 = 4;
+const DECODE_AND_PIN: u8 = 5;
+const UNPIN: u8 = 6;
 
 fn wait_one(sub: &ruro_transport::ShmSubscriber, timeout: Duration) -> Vec<u8> {
     let start = Instant::now();
@@ -366,6 +378,7 @@ fn gpu_child_process() {
     };
     // Announce until the parent answers.
     let mut held: Option<GpuImage> = None;
+    let mut pinned: Option<GpuImage> = None;
     let mut stored: Option<Vec<u8>> = None;
     let mut first = true;
     let mut idle = Instant::now();
@@ -407,6 +420,17 @@ fn gpu_child_process() {
                 }
                 Err(e) => reply(format!("error {e}")),
             },
+            DECODE_AND_PIN => match check(body) {
+                Ok((g, took)) => {
+                    pinned = Some(g);
+                    reply(format!("ok {}", took.as_micros()));
+                }
+                Err(e) => reply(format!("error {e}")),
+            },
+            UNPIN => {
+                pinned = None;
+                reply("unpinned".into());
+            }
             STORE => {
                 stored = Some(body.to_vec());
                 reply("stored".into());
@@ -420,6 +444,7 @@ fn gpu_child_process() {
             }
             QUIT => {
                 drop(held.take());
+                drop(pinned.take());
                 reply("bye".into());
                 return;
             }
@@ -467,47 +492,66 @@ fn frames_cross_processes_without_copies() {
     let stream = Stream::new(0).unwrap();
     // A frame size (size class) no other test in this binary uses.
     let (w, h) = (1920, 1200);
-    // Frame A: mapped by the child, which keeps it.
-    let mut a = GpuImage::from_image(0, &pattern(w, h, Encoding::Rgb8, 1), &stream).unwrap();
-    let a_ptr = a.buffer().unwrap().device_ptr();
-    let r = send(DECODE_AND_HOLD, 1, &a);
+    let ptr = |g: &GpuImage| g.buffer().unwrap().device_ptr();
+    // Frame A: mapped by the child, which keeps it until told otherwise.
+    let mut g = GpuImage::from_image(0, &pattern(w, h, Encoding::Rgb8, 1), &stream).unwrap();
+    let a_ptr = ptr(&g);
+    let r = send(DECODE_AND_PIN, 1, &g);
     assert!(r.starts_with("ok"), "{r}");
     eprintln!(
         "first receive (loads CUDA, maps the allocation): {} µs",
         &r[3..]
     );
 
-    // The child holds A, so writing a new frame moves to another buffer.
-    a.upload(0, &pattern(w, h, Encoding::Rgb8, 2), &stream)
-        .unwrap();
-    let b_ptr = a.buffer().unwrap().device_ptr();
-    assert_ne!(b_ptr, a_ptr, "a held buffer must not be overwritten");
-    // Frame B replaces A in the child, which releases A.
-    let r = send(DECODE_AND_HOLD, 2, &a);
-    assert!(r.starts_with("ok"), "{r}");
-    eprintln!(
-        "first receive of another allocation (maps it): {} µs",
-        &r[3..]
+    // The producer sends frame after frame from one image; the child keeps
+    // the latest. A is pinned, so it never comes back, and the others cycle
+    // through a small ring of buffers.
+    let mut buffers = std::collections::HashSet::new();
+    let mut r = String::new();
+    for seed in 2..42 {
+        g.upload(0, &pattern(w, h, Encoding::Rgb8, seed), &stream)
+            .unwrap();
+        assert_ne!(ptr(&g), a_ptr, "a pinned buffer must not be overwritten");
+        buffers.insert(ptr(&g));
+        r = send(DECODE_AND_HOLD, seed, &g);
+        assert!(r.starts_with("ok"), "{r}");
+    }
+    // A ring of four (see `RING` in memory.rs), plus slack for a slow child.
+    eprintln!("40 frames used {} buffers", buffers.len());
+    assert!(
+        buffers.len() <= 6,
+        "{} buffers for 40 frames",
+        buffers.len()
     );
-
-    // A is free again: the pool hands it out (oldest first) without allocating.
-    let before = pool_stats(0).unwrap().allocations;
-    let mut c = GpuImage::new(0, w, h, Encoding::Rgb8).unwrap();
-    assert_eq!(c.buffer().unwrap().device_ptr(), a_ptr);
-    assert_eq!(pool_stats(0).unwrap().allocations, before);
-    c.upload(0, &pattern(w, h, Encoding::Rgb8, 3), &stream)
-        .unwrap();
-    // Received again (now cached mapping): fast.
-    let r = send(DECODE_AND_HOLD, 3, &c);
-    assert!(r.starts_with("ok"), "{r}");
     eprintln!("receive of an already mapped allocation: {} µs", &r[3..]);
 
-    // A frame reused by the producer before the child decodes it is refused.
-    let mut d = GpuImage::from_image(0, &pattern(w, h, Encoding::Rgb8, 4), &stream).unwrap();
-    assert_eq!(send(STORE, 4, &d), "stored");
-    d.upload(0, &pattern(w, h, Encoding::Rgb8, 5), &stream)
-        .unwrap();
-    let r = send(DECODE_STORED, 4, &d);
+    // Once released, A is reused.
+    assert_eq!(send(UNPIN, 0, &GpuImage::default()), "unpinned");
+    let mut reused = false;
+    for seed in 42..60 {
+        g.upload(0, &pattern(w, h, Encoding::Rgb8, seed), &stream)
+            .unwrap();
+        reused |= ptr(&g) == a_ptr;
+        let r = send(DECODE_AND_HOLD, seed, &g);
+        assert!(r.starts_with("ok"), "{r}");
+    }
+    assert!(reused, "a released buffer is reused");
+
+    // A frame whose buffer the producer reuses before the child decodes it
+    // is refused.
+    let mut d = GpuImage::from_image(0, &pattern(w, h, Encoding::Rgb8, 100), &stream).unwrap();
+    let d_ptr = ptr(&d);
+    assert_eq!(send(STORE, 100, &d), "stored");
+    for seed in 101..130 {
+        d.upload(0, &pattern(w, h, Encoding::Rgb8, seed), &stream)
+            .unwrap();
+        let _ = d.to_bytes(); // sent somewhere: the buffer is exported
+        if ptr(&d) == d_ptr {
+            break;
+        }
+    }
+    assert_eq!(ptr(&d), d_ptr, "the producer went round its ring");
+    let r = send(DECODE_STORED, 100, &d);
     assert!(r.contains("stale"), "{r}");
 
     assert_eq!(send(QUIT, 0, &GpuImage::default()), "bye");

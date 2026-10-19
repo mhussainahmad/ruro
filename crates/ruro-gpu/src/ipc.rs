@@ -24,8 +24,10 @@
 //!   while anyone reads it, and once it succeeds no old descriptor can pin.
 //!
 //! The producer never blocks on readers: its pool skips allocations that are
-//! still pinned and allocates another. A receiver that crashes while holding
-//! a pin leaks that allocation until the producer exits.
+//! still pinned and allocates another. An exported allocation is also only
+//! reused after a few newer ones of its size (a ring), so a receiver has a
+//! few frame periods to pin a frame before it goes stale. A receiver that
+//! crashes while holding a pin leaks that allocation until the producer exits.
 
 use std::collections::HashMap;
 use std::fs::File;

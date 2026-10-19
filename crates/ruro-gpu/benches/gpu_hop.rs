@@ -9,7 +9,8 @@
 //!   back. `scalar` measures the round trip of two tiny messages, so a
 //!   one-way hop is about `frame - scalar / 2`.
 //! - `gpu_copy`: uploads and downloads of a 1080p RGB frame, from pageable
-//!   (`Vec`) and pinned host memory, and `gpu/normalize` to 640x640.
+//!   (`Vec`) and pinned host memory.
+//! - `gpu_kernel`: `gpu/normalize` of a 1080p frame to 640x640.
 //!
 //! Skipped, with the reason printed, without a CUDA device.
 
@@ -179,7 +180,6 @@ fn gpu_benches(c: &mut Criterion) {
     group.bench_function("scalar", |b| {
         b.iter(|| round_trip(KIND_SCALAR, &|buf| s.encode_into(buf), s.encoded_len()))
     });
-    group.throughput(Throughput::Bytes(len as u64));
     let mut frame = GpuImage::new(0, W, H, Encoding::Rgb8).unwrap();
     group.bench_function("1080p_gpu_image", |b| {
         b.iter(|| {
@@ -189,6 +189,7 @@ fn gpu_benches(c: &mut Criterion) {
             round_trip(KIND_GPU, &|buf| frame.encode_into(buf), frame.encoded_len())
         })
     });
+    group.throughput(Throughput::Bytes(len as u64));
     group.bench_function("1080p_cpu_image", |b| {
         b.iter(|| round_trip(KIND_CPU, &|buf| img.encode_into(buf), img.encoded_len()))
     });
@@ -214,6 +215,9 @@ fn gpu_benches(c: &mut Criterion) {
     group.bench_function("download_1080p_pinned", |b| {
         b.iter(|| g.buffer().unwrap().download(&mut pinned, &stream).unwrap())
     });
+    group.finish();
+
+    let mut group = c.benchmark_group("gpu_kernel");
     let mut t = Tensor::default();
     let p = Normalize {
         width: 640,

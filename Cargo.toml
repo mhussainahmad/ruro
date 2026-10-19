@@ -63,6 +63,7 @@ serialport = { version = "4.7", default-features = false }
 zune-jpeg = "0.5.15"
 roxmltree = "0.21"
 libloading = "0.8"
+openh264 = { version = "0.9.9", default-features = false, features = ["source"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls", "api-24"] }
 arrow-array = "57"
 arrow-schema = "57"

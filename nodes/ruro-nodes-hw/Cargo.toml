@@ -8,16 +8,24 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+# H.264 decoding for `hw/rtsp-camera`: builds OpenH264 from its bundled
+# source (needs a C++ compiler, no system libraries).
+h264 = ["dep:openh264"]
+
 [dependencies]
 ruro = { workspace = true }
 serde = { workspace = true }
 libc = { workspace = true }
+parking_lot = { workspace = true }
+serde-saphyr = { workspace = true }
 serialport = { workspace = true }
 zune-jpeg = { workspace = true }
+openh264 = { workspace = true, optional = true }
 
 [dev-dependencies]
 jpeg-encoder = "0.7"
-parking_lot = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-host = { workspace = true }
 serde_json = { workspace = true }

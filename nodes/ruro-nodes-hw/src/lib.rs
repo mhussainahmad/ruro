@@ -4,6 +4,8 @@
 //! trait or a thin syscall wrapper, so the byte-level logic is unit tested
 //! against fixtures without hardware attached.
 
+pub mod base64;
+pub mod calibration;
 pub mod can;
 pub mod dynamixel;
 pub mod feetech;
@@ -17,6 +19,7 @@ pub mod mjpeg_http;
 pub mod odrive;
 pub mod pixel;
 pub mod rplidar;
+pub mod rtsp;
 pub mod serial;
 pub mod v4l2;
 pub mod witmotion;
@@ -32,6 +35,7 @@ pub use livox::Livox;
 pub use mjpeg_http::MjpegHttpCamera;
 pub use odrive::ODrive;
 pub use rplidar::RpLidar;
+pub use rtsp::RtspCamera;
 pub use serial::Serial;
 pub use v4l2::V4l2Camera;
 pub use witmotion::WitMotionImu;

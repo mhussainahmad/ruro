@@ -83,6 +83,10 @@ impl Preprocess {
     /// Converts `img` to a `[1, 3, height, width]` tensor (bilinear resampling).
     pub fn run(&self, img: &Image) -> Result<(Vec<f32>, Mapping)> {
         ensure!(img.width > 0 && img.height > 0, "empty image");
+        ensure!(
+            img.encoding != Encoding::Mono16,
+            "preprocessing takes 8-bit images, not mono16"
+        );
         let (sw, sh) = (img.width as usize, img.height as usize);
         let (tw, th) = (self.width, self.height);
         let (sx, sy) = (tw as f32 / sw as f32, th as f32 / sh as f32);

@@ -640,6 +640,7 @@ impl Node for LeRobotRecorder {
                     .flat_map(|p| [p[0], p[1], p[2]])
                     .collect(),
                 Encoding::Mono8 => img.data.iter().flat_map(|&v| [v, v, v]).collect(),
+                Encoding::Mono16 => bail!("the LeRobot recorder takes 8-bit images, not mono16"),
             };
             Some(rgb)
         } else {

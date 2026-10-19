@@ -45,23 +45,24 @@ jobs:
       - name: Clippy (workspace, default features)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Optional node features that the default build leaves out. `onnx`
-      # downloads a CPU build of ONNX Runtime; `mujoco` only loads libmujoco at
-      # run time, so it builds without MuJoCo installed.
+      # downloads a CPU build of ONNX Runtime; `mujoco` and `realsense` only
+      # load their libraries at run time, so they build without them; `h264`
+      # compiles OpenH264's bundled source.
       - name: Clippy (optional node features)
         run: >
           cargo clippy --locked --all-targets
-          -p ruro-nodes-ml -p ruro-nodes-sim
-          --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco
+          -p ruro-nodes-ml -p ruro-nodes-sim -p ruro-nodes-hw
+          --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco,ruro-nodes-hw/h264,ruro-nodes-hw/realsense
           -- -D warnings
       - name: Test (workspace, default features)
         run: cargo test --workspace --locked
-      # The MuJoCo tests are skipped unless RURO_MUJOCO_LIB is set, so only the
-      # ONNX and LeRobot tests run here.
+      # The MuJoCo and RealSense library tests are skipped unless their
+      # libraries are present; the ONNX, LeRobot and H.264 tests run here.
       - name: Test (optional node features)
         run: >
           cargo test --locked
-          -p ruro-nodes-ml -p ruro-nodes-sim
-          --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco
+          -p ruro-nodes-ml -p ruro-nodes-sim -p ruro-nodes-hw
+          --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco,ruro-nodes-hw/h264,ruro-nodes-hw/realsense
 
   msrv:
     # Keep in sync with `rust-version` in the workspace Cargo.toml.

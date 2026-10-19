@@ -99,7 +99,7 @@ ruro bag import ~/bags/run_2024 --map /camera/image_raw=camera.image
 converts a rosbag2 bag (a directory or an `.mcap` file, MCAP storage) into a ruro recording,
 by default `<src>.ruro.mcap` (`-o` to choose). `--map` (repeatable) names a topic's channel,
 so that replay feeds the graph's `camera` node. Supported types: `sensor_msgs/Image` (rgb8,
-rgba8, bgr8, bgra8, mono8, and 8UC1/8UC3/8UC4), `PointCloud2` (float x/y/z), `LaserScan`,
+rgba8, bgr8, bgra8, mono8, mono16, and 8UC1/8UC3/8UC4/16UC1), `PointCloud2` (float x/y/z), `LaserScan`,
 `Imu`, `geometry_msgs/Twist`, `TwistStamped`, `PoseStamped`, `std_msgs/Float64`,
 `nav_msgs/Odometry` and `tf2_msgs/TFMessage`. Other topics are listed as skipped. Bags in
 SQLite storage must first be converted with `ros2 bag convert` (storage `mcap`).

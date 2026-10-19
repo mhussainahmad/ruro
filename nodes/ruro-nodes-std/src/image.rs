@@ -82,6 +82,10 @@ impl Node for Blur {
             return Ok(());
         };
         let src: &Image = &sample;
+        ensure!(
+            src.encoding != Encoding::Mono16,
+            "std/blur takes 8-bit images, not mono16"
+        );
         if self.radius == 0 || src.data.is_empty() {
             return self.out.send(src.clone());
         }
@@ -179,6 +183,10 @@ impl Node for Grayscale {
             return Ok(());
         };
         let src: &Image = &sample;
+        ensure!(
+            src.encoding != Encoding::Mono16,
+            "std/grayscale takes 8-bit images, not mono16"
+        );
         let mut dst = Image::new(src.width, src.height, Encoding::Mono8);
         match src.encoding {
             Encoding::Mono8 => dst.data.copy_from_slice(&src.data),
@@ -216,10 +224,18 @@ impl Node for ImageStats {
             return Ok(());
         };
         let img: &Image = &sample;
-        let ch = img.encoding.channels();
+        let ch = img.encoding.bytes_per_pixel();
         let pixels = (img.data.len() / ch).max(1) as f64;
         let sum: u64 = match img.encoding {
             Encoding::Mono8 => img.data.iter().map(|&v| v as u64).sum(),
+            // Scaled to the 8-bit range, so 1.0 is still full scale.
+            Encoding::Mono16 => img
+                .data
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| u16::from_le_bytes(*p) as u64 / 257)
+                .sum(),
             _ => img.data.chunks_exact(ch).map(|px| luma(px) as u64).sum(),
         };
         self.brightness.send(Scalar(sum as f64 / pixels / 255.0))

@@ -299,7 +299,7 @@ fn image(r: &mut CdrReader) -> Result<Converted> {
     let height = r.u32()?;
     let width = r.u32()?;
     let encoding = r.string()?;
-    let _is_bigendian = r.u8()?;
+    let is_bigendian = r.u8()? != 0;
     let step = r.u32()? as usize;
     let data = r.bytes()?;
     let (out_enc, swap_rb) = match encoding.as_str() {
@@ -308,10 +308,11 @@ fn image(r: &mut CdrReader) -> Result<Converted> {
         "rgba8" | "8UC4" => (Encoding::Rgba8, false),
         "bgra8" => (Encoding::Rgba8, true),
         "mono8" | "8UC1" => (Encoding::Mono8, false),
+        "mono16" | "16UC1" => (Encoding::Mono16, false),
         other => bail!("unsupported image encoding `{other}`"),
     };
     let ch = out_enc.channels();
-    let row = width as usize * ch;
+    let row = width as usize * out_enc.bytes_per_pixel();
     ensure!(
         step >= row,
         "image step {step} is smaller than a row ({row} bytes)"
@@ -331,6 +332,12 @@ fn image(r: &mut CdrReader) -> Result<Converted> {
         dst.copy_from_slice(&data[y * step..y * step + row]);
         if swap_rb {
             dst.chunks_exact_mut(ch).for_each(|px| px.swap(0, 2));
+        }
+        if out_enc == Encoding::Mono16 && is_bigendian {
+            dst.as_chunks_mut::<2>()
+                .0
+                .iter_mut()
+                .for_each(|px| px.swap(0, 1));
         }
     }
     Ok(Converted::new(&img, Some(header.stamp_ns)))
@@ -540,6 +547,22 @@ mod tests {
             (2, 2, Encoding::Rgb8)
         );
         assert_eq!(img.data, [3, 2, 1, 6, 5, 4, 9, 8, 7, 12, 11, 10]);
+    }
+
+    #[test]
+    fn image_16uc1_depth() {
+        // 2x1 big-endian depth, 2 bytes of padding.
+        let mut w = CdrWriter::new();
+        w.header(0, 0, "depth")
+            .u32(1)
+            .u32(2)
+            .string("16UC1")
+            .u8(1)
+            .u32(6);
+        w.bytes(&[0x03, 0xE8, 0x00, 0x01, 0, 0]);
+        let (img, _) = decode_as::<Image>("sensor_msgs/msg/Image", &w);
+        assert_eq!(img.encoding, Encoding::Mono16);
+        assert_eq!(img.data, [0xE8, 0x03, 0x01, 0x00]);
     }
 
     #[test]

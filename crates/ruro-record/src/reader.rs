@@ -167,9 +167,17 @@ fn channel_info(c: &mcap::Channel, count: Option<u64>) -> ChannelInfo {
 /// into one file ordered by log time. Channels with the same topic, type and
 /// encoding are merged.
 pub fn merge(inputs: &[PathBuf], output: &Path, compress: bool) -> Result<Info> {
+    let inputs: Vec<(PathBuf, i64)> = inputs.iter().map(|p| (p.clone(), 0)).collect();
+    merge_shifted(&inputs, output, compress)
+}
+
+/// Like [`merge`], adding a signed offset in nanoseconds to the log times of
+/// each input: recordings made on machines whose clocks differ are brought
+/// onto one clock.
+pub fn merge_shifted(inputs: &[(PathBuf, i64)], output: &Path, compress: bool) -> Result<Info> {
     let recordings: Vec<Recording> = inputs
         .iter()
-        .map(|p| Recording::open(p))
+        .map(|(p, _)| Recording::open(p))
         .collect::<Result<_>>()?;
     let mut streams = Vec::new();
     for r in &recordings {
@@ -181,11 +189,14 @@ pub fn merge(inputs: &[PathBuf], output: &Path, compress: bool) -> Result<Info> 
     let mut heap = BinaryHeap::new();
     // A segment cut short (its process was killed) ends at its first bad record.
     let next = |i: usize, s: &mut dyn Iterator<Item = Result<RecordedMessage>>| match s.next() {
-        Some(Ok(m)) => Some(m),
+        Some(Ok(mut m)) => {
+            m.log_time = m.log_time.saturating_add_signed(inputs[i].1);
+            Some(m)
+        }
         Some(Err(e)) => {
             tracing::warn!(
                 "{}: {e:#}; using the messages before it",
-                inputs[i].display()
+                inputs[i].0.display()
             );
             None
         }
@@ -284,6 +295,36 @@ mod tests {
         let r = Recording::open(&out).unwrap();
         let times: Vec<u64> = r.messages().unwrap().map(|m| m.unwrap().log_time).collect();
         assert_eq!(times, [10, 20, 30, 40, 50, 60]);
+    }
+
+    #[test]
+    fn merges_shift_the_log_times_of_each_input() {
+        let (p1, p2, out) = (tmp("shift1.mcap"), tmp("shift2.mcap"), tmp("shifted.mcap"));
+        for (path, topic, times) in [(&p1, "a.out", [10, 30]), (&p2, "b.out", [1020, 1040])] {
+            let mut w = McapWriter::create(path, false).unwrap();
+            let c = w
+                .channel(topic, "std/Scalar", crate::ENCODING_POSTCARD)
+                .unwrap();
+            for (i, t) in times.into_iter().enumerate() {
+                w.write(c, i as u64 + 1, t, &[i as u8]).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        // The second machine's clock runs 1000 ns ahead.
+        merge_shifted(&[(p1, 0), (p2, -1000)], &out, false).unwrap();
+        let r = Recording::open(&out).unwrap();
+        let msgs: Vec<(String, u64)> = r
+            .messages()
+            .unwrap()
+            .map(|m| m.unwrap())
+            .map(|m| (m.topic().to_owned(), m.log_time))
+            .collect();
+        let expected: Vec<(String, u64)> =
+            [("a.out", 10), ("b.out", 20), ("a.out", 30), ("b.out", 40)]
+                .iter()
+                .map(|(t, n)| (t.to_string(), *n))
+                .collect();
+        assert_eq!(msgs, expected);
     }
 
     #[test]

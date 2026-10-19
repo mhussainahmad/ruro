@@ -36,6 +36,9 @@ Other environment variables:
 |---|---|
 | [`run`](#ruro-run) | Run a graph in the foreground. Starts a daemon if none is reachable. |
 | [`daemon`](#ruro-daemon) | Run the per-machine daemon in the foreground. |
+| [`update`](#ruro-update) | Update daemons over the network to a signed `ruro` (and host) binary. |
+| [`keygen`](#ruro-keygen) | Make a key pair for signing updates. |
+| [`sign`](#ruro-sign) | Sign a binary for `ruro update`. |
 | [`deploy`](#ruro-deploy) | Deploy a graph to the daemon and return; upload host binaries. |
 | [`stop`](#ruro-stop) | Stop the running graph. |
 | [`check`](#ruro-check) | Validate a graph against the available node types. |
@@ -48,7 +51,7 @@ Other environment variables:
 | [`kill`](#ruro-kill) | Kill a group process to exercise supervision. |
 | [`logs`](#ruro-logs) | Stream logs from the running graph. |
 | [`estop`](#ruro-estop) | Engage or release the emergency stop. |
-| [`record`](#ruro-record) | Record the outputs of the groups running on the daemon into an MCAP file. |
+| [`record`](#ruro-record) | Record every output of the running graph, on every machine it spans, into an MCAP file. |
 | [`play`](#ruro-play) | Replay a recording into the running graph. |
 | [`playback`](#ruro-playback) | Control a running replay. |
 | [`info`](#ruro-info) | Show the channels, message counts and duration of a recording. |
@@ -79,7 +82,7 @@ and `soak` take it too. An unknown overlay name is an error.
 
 ```text
 ruro daemon [--name <NAME>] [--listen <ENDPOINT>] [--host <HOST>] [--peer <ENDPOINT>]...
-            [--heartbeat-timeout <SECONDS>]
+            [--heartbeat-timeout <SECONDS>] [--update-keys <FILE>]
 ```
 
 | Option | Default | Meaning |
@@ -89,11 +92,52 @@ ruro daemon [--name <NAME>] [--listen <ENDPOINT>] [--host <HOST>] [--peer <ENDPO
 | `--host <HOST>` | `RURO_HOST`, else `ruro-host` next to `ruro`, else `PATH` | Host binary used to run graph groups. |
 | `--peer <ENDPOINT>` | | Another daemon to connect to, e.g. `tcp/robot2:7447`. Repeatable. See [Multi-machine graphs](../multi-machine.md). |
 | `--heartbeat-timeout <SECONDS>` | 5 | Seconds without metrics after which a host is restarted (at least 0.5). |
+| `--update-keys <FILE>` | `RURO_UPDATE_KEYS` | Public keys whose signed binaries `ruro update` may install. Without it, updates are refused. |
 
-Runs until <kbd>Ctrl</kbd>+<kbd>C</kbd> or `SIGTERM`, then stops the running graph. The
+Runs until <kbd>Ctrl</kbd>+<kbd>C</kbd> or `SIGTERM`, then stops the running graph. After
+`ruro update` has installed a new binary it executes it in place, or with `RURO_RESTART=exit`
+exits with status 75 for a service manager to start it (see
+[Updating daemons](../updates.md)). The
 daemon's runtime directory is `$XDG_RUNTIME_DIR/ruro-<name>/` (or `ruro-<name>/` in the
 system temporary directory). It holds the deployed `graph.yaml`, the Unix socket hosts
 connect to, the token file, uploaded host binaries and recording segments.
+
+### ruro update
+
+```text
+ruro update [BINARY] [--host-binary <PATH>] [--to <NAME>] [--peers] [--allow-downgrade]
+            [--timeout <SECONDS>] [--check]
+```
+
+Uploads a new `ruro` binary, and with `--host-binary` a new default host, each signed with
+`ruro sign` (`<binary>.sig` next to it), to the daemon. The daemon checks the signature
+against its `--update-keys`, the target triple and architecture, that the version is newer
+than its own (unless `--allow-downgrade`) and that no graph runs unless the e-stop is
+engaged. It starts the new binary on trial, then installs it (keeping `ruro.prev`) and
+restarts; the command waits for it to come back with the new version. `--peers` also updates
+every other daemon reachable through the connected one, first. `--check` only asks. See
+[Updating daemons](../updates.md).
+
+### ruro keygen
+
+```text
+ruro keygen [NAME] [--comment <TEXT>]
+```
+
+Writes an Ed25519 key pair for signing updates: `NAME.key` (secret, mode 0600) and
+`NAME.pub`, a line to add to daemons' `--update-keys` files. `NAME` defaults to
+`ruro-update`. Existing files are not overwritten.
+
+### ruro sign
+
+```text
+ruro sign --key <KEY> <BINARY> [--host] [--binary-version <VERSION>] [--target <TRIPLE>]
+```
+
+Signs a binary for `ruro update` and writes `<BINARY>.sig`. The signature covers the
+binary's SHA-256, whether it is the daemon or (`--host`) a host, its version (by default what
+`<BINARY> --version` prints) and target triple (by default this machine's, with the
+architecture of the binary's ELF header). `--key` can also come from `RURO_UPDATE_KEY`.
 
 ### ruro deploy
 
@@ -162,7 +206,8 @@ scaled
 ruro status
 ```
 
-Prints the daemon, the deployed graph's process groups (state, pid, restarts, last exit) and
+Prints the daemon (with its version, target triple and last update, and the versions of the
+other machines of the graph), the deployed graph's process groups (state, pid, restarts, last exit) and
 live per-node metrics: state, rate, step time p50/p99, input age, CPU, errors and timer
 jitter p99. It also shows the emergency stop, recording and replay when active.
 
@@ -241,8 +286,9 @@ ruro record <FILE>
 ruro record --stop
 ```
 
-Starts recording every output of the groups running on the daemon (not groups on other
-machines of a multi-machine graph) into an MCAP file on the daemon's machine, or stops the recording and writes the file. See
+Starts recording every output of the running graph into an MCAP file on the daemon's
+machine, or stops the recording and writes the file. Groups on other machines of a
+multi-machine graph are recorded there and merged into the file, on the daemon's clock. See
 [Record and replay](../record-replay.md).
 
 ### ruro play

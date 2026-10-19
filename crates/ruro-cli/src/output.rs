@@ -140,14 +140,34 @@ pub fn peer_estop_lines(peers: &[DaemonStatus]) -> Vec<String> {
 }
 
 /// `peers` are the statuses of the other daemons running parts of the graph.
+/// `v0.1.0 (x86_64-unknown-linux-gnu)`; daemons that predate the target
+/// show only the version.
+pub fn version_cell(status: &DaemonStatus) -> String {
+    if status.target.is_empty() {
+        format!("v{}", status.version)
+    } else {
+        format!("v{} ({})", status.version, status.target)
+    }
+}
+
 pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics], peers: &[DaemonStatus]) {
     println!(
-        "daemon {}  v{}  pid {}  up {}",
+        "daemon {}  {}  pid {}  up {}",
         status.name,
-        status.version,
+        version_cell(status),
         status.pid,
         duration(status.uptime_s)
     );
+    if let Some(u) = &status.update {
+        println!("last update: {u}");
+    }
+    if !peers.is_empty() {
+        let others: Vec<String> = peers
+            .iter()
+            .map(|p| format!("{} {}", p.name, version_cell(p)))
+            .collect();
+        println!("other machines: {}", others.join(", "));
+    }
     if status.estopped {
         println!(
             "{} (release with `ruro estop --release`)",
@@ -317,6 +337,8 @@ mod tests {
             recording: None,
             playback: None,
             estopped,
+            target: String::new(),
+            update: None,
         };
         let lines = peer_estop_lines(&[peer("robot", true), peer("arm", false)]);
         assert_eq!(lines.len(), 1);

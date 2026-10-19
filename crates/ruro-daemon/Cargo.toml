@@ -19,6 +19,10 @@ ruro-proto = { workspace = true }
 ruro-msg = { workspace = true }
 ruro-record = { path = "../ruro-record" }
 sha2 = "0.10"
+ring = "0.17"
+base64 = "0.22"
+semver = "1"
+serde = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }

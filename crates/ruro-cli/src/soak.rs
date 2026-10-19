@@ -106,7 +106,7 @@ pub fn soak(endpoint: &str, name: Option<&str>, security: &Security, args: SoakA
         .session
         .declare_subscriber(c.keys.status())
         .callback(move |s| {
-            if let Ok(st) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes()) {
+            if let Ok(st) = ruro_proto::decode_status(&s.payload().to_bytes()) {
                 *s2.lock() = Some(st);
             }
         })

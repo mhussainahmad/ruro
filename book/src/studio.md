@@ -216,7 +216,8 @@ It is a software stop, like `ruro estop`: keep a hardware emergency stop within 
 ## Fleet
 
 The **Fleet** view lists every daemon the connected daemon can see, with the graph it runs, its
-processes and uptime. **Connect** switches the studio to another daemon. Clicking the
+processes, uptime, version and architecture (the full target triple on hover), and how its
+last [update](updates.md) went. **Connect** switches the studio to another daemon. Clicking the
 connection indicator in the status bar opens this view.
 
 ![Daemons on the network](images/studio-fleet.png)

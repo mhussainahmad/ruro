@@ -146,6 +146,18 @@ pub enum Ctl {
     /// descriptor, has the node's host apply it and replies once the node
     /// has accepted it. Forwarded to the machine that runs the node.
     Param,
+    /// Reply: the daemon's clock, in nanoseconds since the Unix epoch. A
+    /// daemon recording peers' groups estimates their clock offsets with it.
+    Clock,
+    /// Payload: postcard [`UploadChunk`] named after an [`UpdateRole`]
+    /// (`daemon` or `host`). Stages a binary for [`Ctl::Update`] next to
+    /// the one it replaces. Refused by daemons that trust no update keys.
+    UpdateUpload,
+    /// Payload: JSON [`UpdateRequest`]. Checks signed binaries against the
+    /// daemon's trusted keys, version, target and state; unless only
+    /// checking, tries the staged daemon binary, installs the binaries
+    /// (keeping the previous ones) and restarts the daemon.
+    Update,
 }
 
 impl Ctl {
@@ -165,8 +177,70 @@ impl Ctl {
             Ctl::Validate => "validate",
             Ctl::Param => "param",
             Ctl::RecordPart => "record-part",
+            Ctl::Clock => "clock",
+            Ctl::UpdateUpload => "update-upload",
+            Ctl::Update => "update",
         }
     }
+}
+
+/// What a binary sent with an update replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateRole {
+    /// The daemon's own executable (`ruro`).
+    Daemon,
+    /// The daemon's default host binary (`ruro-host`).
+    Host,
+}
+
+impl UpdateRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UpdateRole::Daemon => "daemon",
+            UpdateRole::Host => "host",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "daemon" => Some(UpdateRole::Daemon),
+            "host" => Some(UpdateRole::Host),
+            _ => None,
+        }
+    }
+}
+
+/// A binary's signature, as written by `ruro sign` next to it
+/// (`<binary>.sig`, JSON). The Ed25519 signature covers every other field
+/// (see `ruro_daemon::sign`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedBinary {
+    pub role: UpdateRole,
+    /// Version the binary reports, e.g. `0.2.0`.
+    pub version: String,
+    /// Target triple it was built for.
+    pub target: String,
+    /// SHA-256 of the binary, lowercase hex.
+    pub sha256: String,
+    /// Public key that made the signature, base64.
+    pub key: String,
+    /// The signature, base64.
+    pub signature: String,
+}
+
+/// Payload of [`Ctl::Update`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateRequest {
+    /// At most one binary per role, uploaded first with
+    /// [`Ctl::UpdateUpload`] unless only checking.
+    pub binaries: Vec<SignedBinary>,
+    /// Accept a daemon binary that is not newer than the running one.
+    pub allow_downgrade: bool,
+    /// Only check the signatures and whether the daemon would accept them.
+    pub check: bool,
+    /// How long the new daemon binary gets to start on trial.
+    pub timeout_s: f64,
 }
 
 /// Payload of [`Ctl::DeployGroups`].
@@ -181,7 +255,11 @@ pub struct GroupsDeploy {
 /// Reply to every control request: `Ok(body)` or `Err(message)`.
 pub type CtlReply = std::result::Result<String, String>;
 
-/// Published by the daemon twice a second.
+/// Published by the daemon twice a second. Decode it with
+/// [`decode_status`], which also reads the status of older daemons.
+///
+/// New fields go at the end: postcard is not self-describing, and daemons
+/// of different versions share a network while they are being updated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonStatus {
     pub name: String,
@@ -197,6 +275,49 @@ pub struct DaemonStatus {
     pub playback: Option<PlaybackStatus>,
     /// True while the emergency stop is engaged.
     pub estopped: bool,
+    /// Target triple the daemon was built for, e.g.
+    /// `aarch64-unknown-linux-gnu`. Empty for daemons that predate it.
+    pub target: String,
+    /// Outcome of the last update of this daemon, e.g. `updated from 0.1.0`
+    /// or why an update was rolled back.
+    pub update: Option<String>,
+}
+
+/// The status as published by daemons before `target` and `update`.
+#[derive(Deserialize)]
+struct StatusV1 {
+    name: String,
+    version: String,
+    pid: u32,
+    uptime_s: f64,
+    graph: Option<String>,
+    groups: Vec<GroupStatus>,
+    recording: Option<String>,
+    playback: Option<PlaybackStatus>,
+    estopped: bool,
+}
+
+/// Decodes a [`DaemonStatus`], including one published by an older daemon.
+/// (Older readers ignore the fields added since, which postcard appends.)
+pub fn decode_status(bytes: &[u8]) -> Result<DaemonStatus> {
+    decode(bytes).or_else(|e| {
+        let Ok(s) = decode::<StatusV1>(bytes) else {
+            return Err(e);
+        };
+        Ok(DaemonStatus {
+            name: s.name,
+            version: s.version,
+            pid: s.pid,
+            uptime_s: s.uptime_s,
+            graph: s.graph,
+            groups: s.groups,
+            recording: s.recording,
+            playback: s.playback,
+            estopped: s.estopped,
+            target: String::new(),
+            update: None,
+        })
+    })
 }
 
 /// State of a replay.
@@ -859,6 +980,53 @@ pub fn hostname() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The status layout of daemons before `target` and `update`.
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct OldStatus {
+        name: String,
+        version: String,
+        pid: u32,
+        uptime_s: f64,
+        graph: Option<String>,
+        groups: Vec<GroupStatus>,
+        recording: Option<String>,
+        playback: Option<PlaybackStatus>,
+        estopped: bool,
+    }
+
+    #[test]
+    fn statuses_of_old_and_new_daemons_decode_both_ways() {
+        let old = OldStatus {
+            name: "robot".into(),
+            version: "0.1.0".into(),
+            pid: 7,
+            uptime_s: 1.5,
+            graph: Some("g".into()),
+            groups: Vec::new(),
+            recording: None,
+            playback: None,
+            estopped: true,
+        };
+        let new = decode_status(&encode(&old)).unwrap();
+        assert_eq!(
+            (new.name.as_str(), new.pid, new.estopped),
+            ("robot", 7, true)
+        );
+        assert_eq!((new.target.as_str(), new.update), ("", None));
+
+        let current = DaemonStatus {
+            target: "x86_64-unknown-linux-gnu".into(),
+            update: Some("updated from 0.0.9".into()),
+            version: "0.2.0".into(),
+            ..new
+        };
+        assert_eq!(decode_status(&encode(&current)).unwrap(), current);
+        // An old reader ignores the new fields.
+        let seen: OldStatus = decode(&encode(&current)).unwrap();
+        assert_eq!(seen.version, "0.2.0");
+        assert!(seen.estopped);
+    }
 
     #[test]
     fn keys() {

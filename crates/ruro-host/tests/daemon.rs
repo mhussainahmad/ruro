@@ -423,37 +423,51 @@ fn parameters_are_checked_and_confirmed() {
     request(&s, &d.keys, Ctl::Stop, "").unwrap();
 }
 
-#[test]
-fn recording_and_replay_cover_every_machine() {
-    let d1 = TestDaemon::start("recleft", |_| {});
+/// Two daemons, the second connected to the first, both answering.
+fn two_daemons(left: &str, right: &str) -> (TestDaemon, TestDaemon, zenoh::Session) {
+    let d1 = TestDaemon::start(left, |_| {});
     let peer = d1.endpoint.clone();
-    let d2 = TestDaemon::start("recright", |c| c.peers = vec![peer]);
+    let d2 = TestDaemon::start(right, |c| c.peers = vec![peer]);
     let s = d1.client();
     let start = Instant::now();
     while ruro_proto::discover(&s, Some(d2.name()), Duration::from_millis(500)).is_err() {
         assert!(start.elapsed() < TIMEOUT, "peer daemon not reachable");
     }
-    // The source runs on the peer, the gain here.
-    let graph = format!(
+    (d1, d2, s)
+}
+
+/// A source on `right`, a gain here and a second gain on `right` again, so
+/// data crosses machines both ways.
+fn spanning_graph(right: &str) -> String {
+    format!(
         r#"
 name: rec-span
 groups:
   a: {{ machine: {right} }}
+  c: {{ machine: {right} }}
 nodes:
   src: {{ type: std/sine, group: a, rate: 100, params: {{ frequency: 2.0 }} }}
   gain: {{ type: std/gain, group: b, params: {{ k: 0.5 }} }}
+  twice: {{ type: std/gain, group: c, params: {{ k: 2.0 }} }}
 wires:
   - {{ from: src.value, to: gain.input, depth: 16 }}
-"#,
-        right = d2.name()
-    );
-    request(&s, &d1.keys, Ctl::Deploy, &graph).unwrap();
+  - {{ from: gain.output, to: twice.input, depth: 16 }}
+"#
+    )
+}
+
+#[test]
+fn recording_and_replay_cover_every_machine() {
+    let (d1, d2, s) = two_daemons("recleft", "recright");
+    request(&s, &d1.keys, Ctl::Deploy, &spanning_graph(d2.name())).unwrap();
     wait_metrics(&s, &d1.keys, "b", |m| node_hz(m, "gain") > 50.0);
+    wait_metrics(&s, &d2.keys, "c", |m| node_hz(m, "twice") > 50.0);
 
     let first = tmp("span-first.mcap");
     let reply = request(&s, &d1.keys, Ctl::Record, &first.display().to_string()).unwrap();
     assert!(
-        reply.contains("recording 2 group(s)") && reply.contains(&format!("on `{}`: a", d2.name())),
+        reply.contains("recording 3 group(s)")
+            && reply.contains(&format!("on `{}`: a, c", d2.name())),
         "{reply}"
     );
     let peer_status = next_status(&s, &d2.keys);
@@ -468,15 +482,69 @@ wires:
     std::thread::sleep(Duration::from_millis(1500));
     let reply = request(&s, &d1.keys, Ctl::Record, "").unwrap();
     assert!(
-        reply.contains("2 channel(s)") && reply.contains(&format!("from `{}`: a", d2.name())),
+        reply.contains("3 channel(s)") && reply.contains(&format!("from `{}`: a, c", d2.name())),
         "{reply}"
     );
-    let gain_first = values(&first, "gain.output");
-    assert!(values(&first, "src.value").len() > 100);
-    assert!(gain_first.len() > 100, "{}", gain_first.len());
+    // Both daemons share this machine's clock: measured, and nothing to correct.
+    assert!(!reply.contains("clock"), "{reply}");
     wait_status(&s, &d2.keys, TIMEOUT, |st| st.recording.is_none());
 
-    // Replaying the source mutes it on the peer and feeds the gain here.
+    // One file, with every channel of both machines on one timeline.
+    let rec = Recording::open(&first).unwrap();
+    let info = rec.info().unwrap();
+    let topics: Vec<&str> = info.channels.iter().map(|c| c.topic.as_str()).collect();
+    assert_eq!(
+        topics
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["gain.output", "src.value", "twice.output"].into(),
+        "{topics:?}"
+    );
+    let times: Vec<u64> = rec
+        .messages()
+        .unwrap()
+        .map(|m| m.unwrap().log_time)
+        .collect();
+    assert!(times.windows(2).all(|w| w[0] <= w[1]), "out of order");
+    // Each value travels src (peer) -> gain (here) -> twice (peer): its
+    // stamps grow along the way, by much less than a sample period. (Only
+    // values sent once are matched up.)
+    let stamps = |topic: &str| -> BTreeMap<u64, u64> {
+        let mut seen: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+        for m in rec.messages().unwrap().map(Result::unwrap) {
+            if m.topic() == topic {
+                let v = Scalar::decode(&m.data).unwrap().0.to_bits();
+                seen.entry(v).or_default().push(m.log_time);
+            }
+        }
+        seen.into_iter()
+            .filter(|(_, t)| t.len() == 1)
+            .map(|(v, t)| (v, t[0]))
+            .collect()
+    };
+    let (src, gain, twice) = (
+        stamps("src.value"),
+        stamps("gain.output"),
+        stamps("twice.output"),
+    );
+    let mut hops = 0;
+    for (v, t) in &src {
+        let half = (f64::from_bits(*v) * 0.5).to_bits();
+        let (Some(g), Some(w)) = (gain.get(&half), twice.get(v)) else {
+            continue;
+        };
+        assert!(t <= g && g <= w, "src {t}, gain {g}, twice {w}");
+        assert!(w - t < 50_000_000, "src {t}, twice {w}");
+        hops += 1;
+    }
+    assert!(hops > 50, "{hops} values made it through all three nodes");
+    let gain_first = values(&first, "gain.output");
+    let twice_first = values(&first, "twice.output");
+    assert!(gain_first.len() > 100, "{}", gain_first.len());
+
+    // Replaying the source mutes it on the peer and feeds the gain here,
+    // whose outputs feed the second gain on the peer.
     let replay = tmp("span-src-only.mcap");
     filter(&first, &replay, &["src.value"]);
     let second = tmp("span-second.mcap");
@@ -502,18 +570,62 @@ wires:
     wait_status(&s, &d1.keys, TIMEOUT, |st| st.playback.is_none());
     std::thread::sleep(Duration::from_millis(300));
     request(&s, &d1.keys, Ctl::Record, "").unwrap();
+    let contains = |run: &[f64], first: &[f64]| {
+        let expected = &first[1..first.len() - 1];
+        run.windows(expected.len()).any(|w| w == expected)
+    };
     let gain_second = values(&second, "gain.output");
-    let expected = &gain_first[..gain_first.len() - 1];
     assert!(
-        gain_second.windows(expected.len()).any(|w| w == expected),
+        contains(&gain_second, &gain_first),
         "replayed gain outputs differ: first run {} values, second run {}",
         gain_first.len(),
         gain_second.len()
+    );
+    let twice_second = values(&second, "twice.output");
+    assert!(
+        contains(&twice_second, &twice_first),
+        "the gain on the peer was not fed: first run {} values, second run {}",
+        twice_first.len(),
+        twice_second.len()
     );
     // After the replay the source on the peer runs again.
     wait_metrics(&s, &d2.keys, "a", |m| node_hz(m, "src") > 50.0);
     request(&s, &d1.keys, Ctl::Stop, "").unwrap();
     cleanup(&[&first, &replay, &second]);
+}
+
+#[test]
+fn a_recording_keeps_what_was_recorded_when_a_peer_disappears() {
+    let (d1, mut d2, s) = two_daemons("recgone", "recvanish");
+    let right = d2.name().to_owned();
+    request(&s, &d1.keys, Ctl::Deploy, &spanning_graph(&right)).unwrap();
+    wait_metrics(&s, &d1.keys, "b", |m| node_hz(m, "gain") > 50.0);
+
+    let file = tmp("span-gone.mcap");
+    let reply = request(&s, &d1.keys, Ctl::Record, &file.display().to_string()).unwrap();
+    assert!(reply.contains(&format!("on `{right}`: a, c")), "{reply}");
+    std::thread::sleep(Duration::from_millis(800));
+    // The peer machine goes away mid-recording.
+    d2.daemon.take().unwrap().shutdown();
+    std::thread::sleep(Duration::from_millis(300));
+
+    let start = Instant::now();
+    let reply = request(&s, &d1.keys, Ctl::Record, "").unwrap();
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        reply.contains(&format!("not recorded: the groups on `{right}`")),
+        "{reply}"
+    );
+    let info = Recording::open(&file).unwrap().info().unwrap();
+    let topics: Vec<&str> = info.channels.iter().map(|c| c.topic.as_str()).collect();
+    assert_eq!(topics, ["gain.output"], "{reply}");
+    assert!(values(&file, "gain.output").len() > 30);
+    let _ = request(&s, &d1.keys, Ctl::Stop, "");
+    cleanup(&[&file]);
 }
 
 /// A CA and a certificate for `localhost` signed by it, as PEM files.

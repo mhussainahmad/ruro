@@ -40,6 +40,25 @@ pub fn receive(dir: &Path, chunk: &UploadChunk) -> Result<String> {
         "host name `{}` must match [A-Za-z0-9_-]+",
         chunk.name
     );
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let part = dir.join(format!("{}.part", chunk.name));
+    let target = dir.join(&chunk.name);
+    let label = format!("host `{}`", chunk.name);
+    let reply = store(&part, &target, &label, chunk)?;
+    if reply.starts_with("stored") {
+        tracing::info!(
+            "stored host binary `{}` ({} bytes)",
+            chunk.name,
+            chunk.total
+        );
+    }
+    Ok(reply)
+}
+
+/// Appends one chunk to `part`; after the last one, checks the file's
+/// SHA-256, makes it executable and durable, and renames it to `target`.
+/// `label` names the binary in replies.
+pub fn store(part: &Path, target: &Path, label: &str, chunk: &UploadChunk) -> Result<String> {
     ensure!(
         chunk.sha256.len() == 64 && chunk.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
         "malformed SHA-256"
@@ -49,12 +68,10 @@ pub fn receive(dir: &Path, chunk: &UploadChunk) -> Result<String> {
         .checked_add(chunk.data.len() as u64)
         .context("chunk offset overflows")?;
     ensure!(end <= chunk.total, "chunk ends past the file size");
-    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    let part = dir.join(format!("{}.part", chunk.name));
     let mut file = if chunk.offset == 0 {
-        File::create(&part)
+        File::create(part)
     } else {
-        OpenOptions::new().append(true).open(&part)
+        OpenOptions::new().append(true).open(part)
     }
     .with_context(|| format!("opening {}", part.display()))?;
     let have = file.metadata()?.len();
@@ -65,30 +82,24 @@ pub fn receive(dir: &Path, chunk: &UploadChunk) -> Result<String> {
         );
     }
     file.write_all(&chunk.data)?;
-    drop(file);
     if end < chunk.total {
         return Ok(format!("received {end}/{} bytes", chunk.total));
     }
-    let sum = sha256_file(&part)?;
+    file.sync_all()?;
+    drop(file);
+    let sum = sha256_file(part)?;
     if !sum.eq_ignore_ascii_case(&chunk.sha256) {
-        let _ = std::fs::remove_file(&part);
+        let _ = std::fs::remove_file(part);
         bail!(
-            "checksum mismatch for `{}`: expected {}, got {sum}; the upload was discarded",
-            chunk.name,
+            "checksum mismatch for {label}: expected {}, got {sum}; the upload was discarded",
             chunk.sha256
         );
     }
-    std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755))?;
-    let target = dir.join(&chunk.name);
-    std::fs::rename(&part, &target)?;
-    tracing::info!(
-        "stored host binary `{}` ({} bytes)",
-        chunk.name,
-        chunk.total
-    );
+    std::fs::set_permissions(part, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::rename(part, target)?;
     Ok(format!(
-        "stored host `{}` ({} bytes, sha256 {sum})",
-        chunk.name, chunk.total
+        "stored {label} ({} bytes, sha256 {sum})",
+        chunk.total
     ))
 }
 

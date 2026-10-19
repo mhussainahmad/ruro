@@ -13,6 +13,9 @@ default = []
 # H.264 decoding for `hw/rtsp-camera`: builds OpenH264 from its bundled
 # source (needs a C++ compiler, no system libraries).
 h264 = ["dep:openh264"]
+# `hw/realsense`: loads librealsense2 at run time (see RURO_REALSENSE_LIB),
+# so it builds without librealsense installed.
+realsense = ["dep:libloading"]
 
 [dependencies]
 ruro = { workspace = true }
@@ -23,6 +26,7 @@ serde-saphyr = { workspace = true }
 serialport = { workspace = true }
 zune-jpeg = { workspace = true }
 openh264 = { workspace = true, optional = true }
+libloading = { workspace = true, optional = true }
 
 [dev-dependencies]
 jpeg-encoder = "0.7"

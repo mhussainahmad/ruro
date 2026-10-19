@@ -5313,6 +5313,7 @@ version = "0.1.0"
 dependencies = [
  "jpeg-encoder",
  "libc",
+ "libloading",
  "openh264",
  "parking_lot",
  "ruro",

@@ -18,6 +18,7 @@ pub mod livox;
 pub mod mjpeg_http;
 pub mod odrive;
 pub mod pixel;
+pub mod realsense;
 pub mod rplidar;
 pub mod rtsp;
 pub mod serial;
@@ -34,6 +35,8 @@ pub use jog::JointJog;
 pub use livox::Livox;
 pub use mjpeg_http::MjpegHttpCamera;
 pub use odrive::ODrive;
+#[cfg(feature = "realsense")]
+pub use realsense::RealSense;
 pub use rplidar::RpLidar;
 pub use rtsp::RtspCamera;
 pub use serial::Serial;

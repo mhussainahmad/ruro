@@ -15,6 +15,7 @@
 //! - [`discovery`] lists the topics of a ROS 2 system from its liveliness
 //!   tokens.
 
+pub mod action;
 pub mod cdr;
 pub mod cli;
 pub mod codegen;

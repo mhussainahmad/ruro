@@ -1,0 +1,27 @@
+# An Intel RealSense camera: colour, depth aligned to colour, and a point
+# cloud. See book/src/hardware.md; not yet tested with a camera.
+# librealsense2 is loaded at run time (install it, or set RURO_REALSENSE_LIB).
+#   cargo build --release -p ruro-host --features ruro-nodes-hw/realsense
+#   ruro run examples/realsense.yaml
+name: realsense
+nodes:
+  camera:
+    type: hw/realsense
+    group: camera
+    rate: 30
+    params:
+      serial: ""
+      width: 640
+      height: 480
+      fps: 30
+      align: true
+      point_step: 4
+      max_range: 4.0
+      frame_prefix: camera
+    pos: [0, 0]
+  stats:
+    type: std/image-stats
+    group: vision
+    pos: [400, 0]
+wires:
+  - camera.color -> stats.image

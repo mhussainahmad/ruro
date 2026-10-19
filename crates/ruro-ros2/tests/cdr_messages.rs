@@ -161,3 +161,25 @@ fn type_metadata() {
         "RIHS01_9c45bf16fe0983d80e3cfe750d6835843d265a9a6c46bd2e609fcddde6fb8d2a"
     );
 }
+
+#[test]
+fn wstrings_match_what_ros_2_puts_on_the_wire() {
+    use ruro_ros2::cdr::{CdrDecode, CdrEncode, CdrReader, CdrWriter};
+    use ruro_ros2::msgs::example_interfaces::msg::WString;
+    // Serialized by ROS 2 Jazzy (tests/data/cdr_fixtures.jsonl): a count of
+    // UTF-16 units, each as 4 bytes; the emoji is a surrogate pair. The last
+    // four bytes are padding left uninitialised by the publisher.
+    let wire: Vec<u8> = (0..112)
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&"000100000b000000650000006d0000006f0000006a00000069000000200000003dd8000000de0000200000006f0000006b0000002e736f00"[i..i + 2], 16).unwrap()
+        })
+        .collect();
+    let mut r = CdrReader::new(&wire).unwrap();
+    let msg = WString::decode(&mut r).unwrap();
+    assert_eq!(msg.data, "emoji 😀 ok");
+    let mut w = CdrWriter::new();
+    msg.encode(&mut w);
+    let bytes = w.finish();
+    assert_eq!(bytes[..], wire[..52]);
+}

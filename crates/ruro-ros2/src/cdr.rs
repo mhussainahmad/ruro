@@ -127,6 +127,15 @@ impl CdrWriter {
         self.buf.push(0);
     }
 
+    /// A `wstring`: a count of UTF-16 code units, each written as 4 bytes,
+    /// with no terminator, as ROS 2 Jazzy's Fast-CDR serializer writes it.
+    pub fn wstring(&mut self, s: &str) {
+        self.len(s.encode_utf16().count());
+        for u in s.encode_utf16() {
+            self.u32(u32::from(u));
+        }
+    }
+
     /// A `uint8[]`/`byte[]` sequence in one copy.
     pub fn byte_seq(&mut self, b: &[u8]) {
         self.len(b.len());
@@ -254,6 +263,21 @@ impl<'a> CdrReader<'a> {
             return Err(CdrError::BadString);
         }
         String::from_utf8(text.to_vec()).map_err(|_| CdrError::BadString)
+    }
+
+    /// A `wstring` (see [`CdrWriter::wstring`]).
+    pub fn wstring(&mut self) -> Result<String, CdrError> {
+        let n = self.len(4)?;
+        let mut units = Vec::with_capacity(n);
+        for _ in 0..n {
+            let u = self.u32()?;
+            units
+                .push(u16::try_from(u).map_err(|_| {
+                    CdrError::Invalid(format!("wstring unit {u:#x} is not UTF-16"))
+                })?);
+        }
+        String::from_utf16(&units)
+            .map_err(|_| CdrError::Invalid("wstring is not valid UTF-16".into()))
     }
 
     /// A `uint8[]`/`byte[]` sequence in one copy.

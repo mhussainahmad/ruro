@@ -110,6 +110,52 @@ impl ruro_ros2::RosMessage for Detection {
     const TYPE_HASH: &'static str = "RIHS01_fdb40b96c39d51238ad7a8df500a3ced58c8bcc9f0569dabbbc73c93aa1d7d36";
 }
 
+/// `demo_msgs/msg/Names`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Names {
+    pub title: ::std::string::String,
+    pub names: ::std::vec::Vec<::std::string::String>,
+    pub pair: [::std::string::String; 2],
+    pub short: ::std::vec::Vec<::std::string::String>,
+}
+
+impl ::core::default::Default for Names {
+    fn default() -> Self {
+        Self {
+            title: ::core::default::Default::default(),
+            names: ::core::default::Default::default(),
+            pair: ::std::array::from_fn(|_| ::core::default::Default::default()),
+            short: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl ruro_ros2::cdr::CdrEncode for Names {
+    fn encode(&self, w: &mut ruro_ros2::cdr::CdrWriter) {
+        w.wstring(&self.title);
+        w.len(self.names.len()); for s in &self.names { w.wstring(s); }
+        for s in &self.pair { w.wstring(s); }
+        w.len(self.short.len()); for s in &self.short { w.wstring(s); }
+    }
+}
+
+impl ruro_ros2::cdr::CdrDecode for Names {
+    fn decode(r: &mut ruro_ros2::cdr::CdrReader<'_>) -> ::core::result::Result<Self, ruro_ros2::cdr::CdrError> {
+        Ok(Self {
+            title: r.wstring()?,
+            names: { let n = r.len(4)?; let mut v = ::std::vec::Vec::with_capacity(n); for _ in 0..n { v.push(r.wstring()?); } v },
+            pair: { let mut a: [::std::string::String; _] = ::std::array::from_fn(|_| ::std::string::String::new()); for s in a.iter_mut() { *s = r.wstring()?; } a },
+            short: { let n = r.len(4)?; let mut v = ::std::vec::Vec::with_capacity(n); for _ in 0..n { v.push(r.wstring()?); } v },
+        })
+    }
+}
+
+impl ruro_ros2::RosMessage for Names {
+    const TYPE_NAME: &'static str = "demo_msgs/msg/Names";
+    const DDS_TYPE_NAME: &'static str = "demo_msgs::msg::dds_::Names_";
+    const TYPE_HASH: &'static str = "RIHS01_a0e20b2c1b0d724cecce379817e22d52839d5bc3b762bdcac37d0ca0fd6dd0c8";
+}
+
 }
 pub mod srv {
 #![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]

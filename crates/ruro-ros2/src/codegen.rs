@@ -162,7 +162,14 @@ impl Gen<'_> {
         match (&f.ty.base, f.ty.array) {
             (BaseType::Primitive(p), Array::None) => format!("w.{}(self.{name});", method(*p)),
             (BaseType::String { .. }, Array::None) => format!("w.string(&self.{name});"),
-            (BaseType::WString { .. }, Array::None) => format!("w.string(&self.{name});"),
+            (BaseType::WString { .. }, Array::None) => format!("w.wstring(&self.{name});"),
+            // `String` encodes as a `string`, so `wstring` arrays are written here.
+            (BaseType::WString { .. }, Array::Fixed(_)) => {
+                format!("for s in &self.{name} {{ w.wstring(s); }}")
+            }
+            (BaseType::WString { .. }, Array::Bounded(_) | Array::Unbounded) => {
+                format!("w.len(self.{name}.len()); for s in &self.{name} {{ w.wstring(s); }}")
+            }
             (_, Array::Bounded(_) | Array::Unbounded) if bytes => {
                 format!("w.byte_seq(&self.{name});")
             }
@@ -180,9 +187,10 @@ impl Gen<'_> {
         );
         match (&f.ty.base, f.ty.array) {
             (BaseType::Primitive(p), Array::None) => format!("r.{}()?", method(*p)),
-            (BaseType::String { .. } | BaseType::WString { .. }, Array::None) => {
-                "r.string()?".into()
-            }
+            (BaseType::String { .. }, Array::None) => "r.string()?".into(),
+            (BaseType::WString { .. }, Array::None) => "r.wstring()?".into(),
+            (BaseType::WString { .. }, Array::Fixed(_)) => "{ let mut a: [::std::string::String; _] = ::std::array::from_fn(|_| ::std::string::String::new()); for s in a.iter_mut() { *s = r.wstring()?; } a }".into(),
+            (BaseType::WString { .. }, Array::Bounded(_) | Array::Unbounded) => "{ let n = r.len(4)?; let mut v = ::std::vec::Vec::with_capacity(n); for _ in 0..n { v.push(r.wstring()?); } v }".into(),
             (_, Array::Bounded(_) | Array::Unbounded) if bytes => "r.byte_seq()?".into(),
             _ => format!("{}::cdr::CdrDecode::decode(r)?", self.opts.runtime),
         }

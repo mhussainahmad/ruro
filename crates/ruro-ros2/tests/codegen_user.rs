@@ -81,3 +81,32 @@ fn defaults_constants_and_roundtrip() {
     let resp = Lookup_Response { ok: true, found: d };
     assert_eq!(from_slice::<Lookup_Response>(&to_vec(&resp)).unwrap(), resp);
 }
+
+#[test]
+fn wstring_arrays_encode_like_the_dynamic_codec() {
+    use demo::demo_msgs::msg::Names;
+    use ruro_ros2::dynamic::{MessageType, decode};
+    use ruro_ros2::idl::TypeName;
+    let n = Names {
+        title: "é".into(),
+        names: vec!["a".into(), "😀".into()],
+        pair: ["x".into(), String::new()],
+        short: vec!["ok".into()],
+    };
+    let bytes = to_vec(&n);
+    assert_eq!(from_slice::<Names>(&bytes).unwrap(), n);
+    // The dynamic codec is checked against bytes ROS 2 itself serialized.
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/demo_msgs");
+    let mut interfaces = ruro_ros2::bundled_interfaces();
+    interfaces.load_package(&dir).unwrap();
+    let ty = MessageType::compile(
+        &interfaces,
+        &TypeName::parse("demo_msgs/msg/Names").unwrap(),
+    )
+    .unwrap();
+    let value = decode(&ty, &bytes).unwrap();
+    assert_eq!(value.value.encode().unwrap(), bytes);
+    let json = value.value.to_json();
+    assert_eq!(json["names"][1], "😀");
+    assert_eq!(json["pair"][0], "x");
+}

@@ -1828,14 +1828,14 @@ impl ::core::default::Default for WString {
 
 impl crate::cdr::CdrEncode for WString {
     fn encode(&self, w: &mut crate::cdr::CdrWriter) {
-        w.string(&self.data);
+        w.wstring(&self.data);
     }
 }
 
 impl crate::cdr::CdrDecode for WString {
     fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
         Ok(Self {
-            data: r.string()?,
+            data: r.wstring()?,
         })
     }
 }

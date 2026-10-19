@@ -467,6 +467,43 @@ fn keepalives_are_sent_within_the_session_timeout() {
     assert_eq!(server.requests("TEARDOWN"), 1);
 }
 
+/// Opt-in check against a real server, e.g. mediamtx fed by ffmpeg:
+/// `RURO_TEST_RTSP_URL=rtsp://127.0.0.1:8554/stream cargo test -p ruro-nodes-hw
+/// --features h264 --test rtsp real_server -- --nocapture`. Both transports
+/// must deliver decoded frames. `RURO_TEST_RTSP_DUMP=dir` writes the last
+/// image of each as a PPM file and the encoded frames as one stream.
+#[test]
+fn real_server() {
+    let Ok(url) = std::env::var("RURO_TEST_RTSP_URL") else {
+        eprintln!("skipped: set RURO_TEST_RTSP_URL to test against a real RTSP server");
+        return;
+    };
+    for transport in ["tcp", "udp"] {
+        let mut h = camera(url.clone(), transport, true);
+        let start = Instant::now();
+        let (images, encoded) = run_until(&mut h, Duration::from_secs(20), |i, _| i.len() >= 30);
+        let secs = start.elapsed().as_secs_f64();
+        drop(h);
+        assert!(!images.is_empty(), "{transport}: no images from {url}");
+        let last = images.last().unwrap();
+        let mean = last.data.iter().map(|&v| v as f64).sum::<f64>() / last.data.len() as f64;
+        eprintln!(
+            "{transport}: {} images and {} encoded frames in {secs:.1} s, {}x{}, mean level {mean:.0}",
+            images.len(),
+            encoded.len(),
+            last.width,
+            last.height
+        );
+        if let Ok(dir) = std::env::var("RURO_TEST_RTSP_DUMP") {
+            let mut ppm = format!("P6\n{} {}\n255\n", last.width, last.height).into_bytes();
+            ppm.extend_from_slice(&last.data);
+            std::fs::write(format!("{dir}/rtsp-{transport}.ppm"), ppm).unwrap();
+            let raw: Vec<u8> = encoded.iter().flat_map(|e| e.0.iter().copied()).collect();
+            std::fs::write(format!("{dir}/rtsp-{transport}.bin"), raw).unwrap();
+        }
+    }
+}
+
 #[test]
 fn wrong_credentials_and_missing_streams_are_reported() {
     let mut cfg = Config::new(Stream::Jpeg(vec![test_jpeg(0)]));

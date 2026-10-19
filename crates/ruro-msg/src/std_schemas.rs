@@ -297,6 +297,11 @@ mod tests {
             position: vec![1.0],
             ..Default::default()
         });
+        check(crate::Ros2Any {
+            type_name: "std_msgs/msg/Bool".into(),
+            type_hash: "RIHS01_00".into(),
+            cdr: vec![0, 1, 0, 0, 1],
+        });
     }
 
     #[test]

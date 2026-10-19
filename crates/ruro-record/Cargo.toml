@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 ruro-msg = { workspace = true }
+ruro-ros2 = { workspace = true }
 anyhow = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }

@@ -36,6 +36,18 @@ impl McapWriter {
     /// Returns the id of the channel `topic` carrying message type `ty`,
     /// declaring it on first use.
     pub fn channel(&mut self, topic: &str, ty: &str, encoding: &str) -> Result<u16> {
+        self.channel_with_metadata(topic, ty, encoding, &BTreeMap::new())
+    }
+
+    /// [`channel`](Self::channel) with metadata for the channel record,
+    /// used when it is first declared.
+    pub fn channel_with_metadata(
+        &mut self,
+        topic: &str,
+        ty: &str,
+        encoding: &str,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<u16> {
         let key = (topic.to_owned(), ty.to_owned(), encoding.to_owned());
         if let Some(&id) = self.channels.get(&key) {
             return Ok(id);
@@ -53,7 +65,7 @@ impl McapWriter {
         };
         let id = self
             .inner
-            .add_channel(schema, topic, encoding, &BTreeMap::new())
+            .add_channel(schema, topic, encoding, metadata)
             .context("adding channel")?;
         self.channels.insert(key, id);
         Ok(id)

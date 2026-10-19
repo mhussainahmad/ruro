@@ -1,0 +1,69 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from ruro_test_msgs/msg/Primitives.msg
+// generated code does not contain a copyright notice
+
+
+module ruro_test_msgs {
+  module msg {
+    module Primitives_Constants {
+      const int8 SMALL = -3;
+      const uint32 BIG = 4000000000;
+      const double PI = 3.14159;
+      const boolean YES = TRUE;
+      const string NAME = "ruro";
+      const string QUOTED = "it's \"q\"";
+    };
+    @verbatim (language="comment", text=
+      "Every primitive type, with defaults and constants.")
+    struct Primitives {
+      @default (value=TRUE)
+      boolean b;
+
+      @default (value=7)
+      octet by;
+
+      @default (value=65)
+      uint8 ch;
+
+      @default (value=1.5)
+      float f32;
+
+      @default (value=-2.25)
+      double f64;
+
+      @default (value=-8)
+      int8 i8;
+
+      @default (value=200)
+      uint8 u8;
+
+      @default (value=-1600)
+      int16 i16;
+
+      @default (value=60000)
+      uint16 u16;
+
+      @default (value=-320000)
+      int32 i32;
+
+      @default (value=3200000000)
+      uint32 u32;
+
+      @default (value=-64000000000)
+      int64 i64;
+
+      @default (value=18000000000000000000)
+      uint64 u64;
+
+      @default (value="default text")
+      string s;
+
+      @default (value="wide default")
+      wstring ws;
+
+      string<8> bounded_s;
+
+      wstring<4> bounded_ws;
+    };
+  };
+};

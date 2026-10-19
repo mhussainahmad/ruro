@@ -20,3 +20,6 @@ zenoh-ext = { workspace = true }
 serde-saphyr = { workspace = true }
 clap = { workspace = true }
 xxhash-rust = { workspace = true }
+ruro-graph = { workspace = true }
+roxmltree = { workspace = true }
+libc = { workspace = true }

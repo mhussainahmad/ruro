@@ -1,0 +1,23 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from ruro_test_msgs/msg/Deep.msg
+// generated code does not contain a copyright notice
+
+#include "ruro_test_msgs/msg/Nested.idl"
+
+module ruro_test_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Alignment after odd-sized nested data.")
+    struct Deep {
+      uint8 a;
+
+      ruro_test_msgs::msg::Nested inner;
+
+      uint8 b;
+
+      sequence<ruro_test_msgs::msg::Nested> inners;
+
+      double c;
+    };
+  };
+};

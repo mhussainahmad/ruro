@@ -1,0 +1,29 @@
+launch:
+- arg:
+    name: camera
+    default: cam
+- arg:
+    name: fps
+    default: "30"
+- group:
+    children:
+    - push-ros-namespace:
+        namespace: $(var camera)
+    - node:
+        pkg: usb_cam
+        exec: usb_cam_node_exe
+        name: driver
+        param:
+        - name: framerate
+          value: $(var fps)
+        - name: size
+          value: [640, 480]
+        - from: $(dirname)/camera_params.yaml
+        remap:
+        - from: image_raw
+          to: image
+- node:
+    pkg: demo_nodes_cpp
+    exec: listener
+    name: listener
+    output: screen

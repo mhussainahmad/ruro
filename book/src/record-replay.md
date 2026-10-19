@@ -93,13 +93,25 @@ daemon still writes the file.
 ## ROS 2 bags
 
 ```sh
-ruro bag import ~/bags/run_2024 --map /camera/image_raw=camera.image
+ruro bag import ~/bags/run_2024 --map /camera/image_raw=camera.image [--raw]
 ```
 
 converts a rosbag2 bag (a directory or an `.mcap` file, MCAP storage) into a ruro recording,
 by default `<src>.ruro.mcap` (`-o` to choose). `--map` (repeatable) names a topic's channel,
-so that replay feeds the graph's `camera` node. Supported types: `sensor_msgs/Image` (rgb8,
+so that replay feeds the graph's `camera` node.
+
+Every topic is kept. Topics of these types become ruro messages: `sensor_msgs/Image` (rgb8,
 rgba8, bgr8, bgra8, mono8, mono16, and 8UC1/8UC3/8UC4/16UC1), `PointCloud2` (float x/y/z), `LaserScan`,
 `Imu`, `geometry_msgs/Twist`, `TwistStamped`, `PoseStamped`, `std_msgs/Float64`,
-`nav_msgs/Odometry` and `tf2_msgs/TFMessage`. Other topics are listed as skipped. Bags in
-SQLite storage must first be converted with `ros2 bag convert` (storage `mcap`).
+`nav_msgs/Odometry` and `tf2_msgs/TFMessage`. Every other topic becomes a `ros2/Any`
+channel holding each message's exact bytes with its type name and RIHS01 hash (recorded by
+rosbag2, or computed from the definition the bag holds, in `.msg` or `.idl` form); the
+channel's metadata keeps that definition and the topic's QoS profiles. Map such a topic to
+the output of a [`ros2/sub`](ros2.md#any-message-type) node and replay feeds the graph
+from it, and a `ros2/pub` downstream publishes the messages on ROS 2 again. A message of a
+convertible type that fails to convert is kept the same way, on a channel named
+`<channel>_raw`. `--raw` keeps every topic as `ros2/Any`, even convertible ones.
+
+The import prints, per topic, how many messages were converted, kept raw or skipped (only
+messages that are not CDR are skipped) and why. Bags in SQLite storage must first be
+converted with `ros2 bag convert` (storage `mcap`).

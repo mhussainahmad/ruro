@@ -30,6 +30,7 @@ fn imports_a_bag_written_by_rosbags() {
     let opts = ImportOptions {
         map: [("/camera/image_raw".to_owned(), "camera.image".to_owned())].into(),
         compress: false,
+        raw: false,
     };
     let report = import(&src, &out, &opts).unwrap();
     let chatter = report
@@ -37,7 +38,8 @@ fn imports_a_bag_written_by_rosbags() {
         .iter()
         .find(|t| t.ros_topic == "/chatter")
         .unwrap();
-    assert_eq!((chatter.converted, chatter.skipped), (0, 1));
+    // std_msgs/String has no ruro equivalent: kept as ros2/Any.
+    assert_eq!((chatter.converted, chatter.raw, chatter.skipped), (0, 1, 0));
     let converted: u64 = report.topics.iter().map(|t| t.converted).sum();
     assert_eq!(converted, 9, "{report:#?}");
 
@@ -101,6 +103,10 @@ fn imports_a_bag_written_by_rosbags() {
     );
     assert_eq!(pose.orientation.z, pose.orientation.w);
     assert!(pose.orientation.z > 0.7 && pose.orientation.x == 0.0);
+
+    let chatter = Ros2Any::decode(&get("chatter.out", "ros2/Any")).unwrap();
+    assert_eq!(chatter.type_name, "std_msgs/msg/String");
+    assert!(chatter.type_hash.starts_with("RIHS01_df668c74"));
 
     let speed = Scalar::decode(&get("speed.out", "std/Scalar")).unwrap();
     assert_eq!(speed, Scalar(42.5));

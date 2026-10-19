@@ -1,0 +1,5 @@
+string key
+Primitives[<=2] hints
+---
+bool found
+Nested value

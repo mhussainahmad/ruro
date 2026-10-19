@@ -227,9 +227,10 @@ connection indicator in the status bar opens this view.
 The **ROS 2 Topics** view lists the topics of a ROS 2 system that uses rmw_zenoh. Set the
 **Router** (default `tcp/127.0.0.1:7447`, independent of the daemon connection) and the
 **Domain** (default from `ROS_DOMAIN_ID`), then press **Discover topics**. Each topic shows
-its type and its publisher and subscriber counts; for the
-[supported types](ros2.md#message-types), buttons add a `ros2/sub-*` or `ros2/pub-*` bridge
-node for it to the graph, with its topic, domain, router and QoS filled in.
+its type and its publisher and subscriber counts; buttons add a bridge node for it to the
+graph, with its topic, domain, router and QoS filled in: `ros2/sub-*` or `ros2/pub-*` for
+the [supported types](ros2.md#message-types), the generic `ros2/sub` or `ros2/pub` with
+the type and its hash for [any other type](ros2.md#any-message-type).
 
 ![ROS 2 topics](images/studio-ros2.png)
 

@@ -6,12 +6,14 @@
 //! they travel as reference-counted values.
 
 mod preview;
+mod ros2_any;
 pub mod schema;
 mod sensor_types;
 mod std_schemas;
 mod std_types;
 
 pub use preview::{FramePreview, PREVIEW_MAX_POINTS, Preview, flatten_json, subsample_points};
+pub use ros2_any::{Ros2Any, Ros2AnyPreviewer};
 pub use schema::{Describe, MessageSchema, Schema};
 pub use sensor_types::*;
 pub use std_types::*;

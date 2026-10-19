@@ -40,6 +40,10 @@ pub enum BagCmd {
         /// (so replay feeds the graph's `camera` node). Repeatable.
         #[arg(long = "map", value_parser = parse_mapping)]
         map: Vec<(String, String)>,
+        /// Keep every topic as ros2/Any (the exact CDR bytes), even topics
+        /// whose type has a ruro equivalent.
+        #[arg(long)]
+        raw: bool,
     },
 }
 
@@ -200,7 +204,7 @@ pub fn info(file: &Path) -> Result<()> {
 
 pub fn bag(cmd: BagCmd) -> Result<()> {
     match cmd {
-        BagCmd::Import { src, out, map } => {
+        BagCmd::Import { src, out, map, raw } => {
             let out = out.unwrap_or_else(|| {
                 let name = src
                     .file_name()
@@ -211,42 +215,56 @@ pub fn bag(cmd: BagCmd) -> Result<()> {
             let opts = ruro_record::rosbag::ImportOptions {
                 map: map.into_iter().collect::<HashMap<_, _>>(),
                 compress: true,
+                raw,
             };
             let report = ruro_record::rosbag::import(&src, &out, &opts)?;
-            let width = report
-                .topics
-                .iter()
-                .map(|t| t.ros_topic.len())
-                .max()
-                .unwrap_or(0);
-            for t in &report.topics {
-                match &t.ruro_topic {
-                    Some(name) => println!(
-                        "{:width$}  {:<32} -> {name} ({} message(s){})",
-                        t.ros_topic,
-                        t.ros_type,
-                        t.converted,
-                        if t.skipped > 0 {
-                            format!(", {} skipped", t.skipped)
-                        } else {
-                            String::new()
-                        }
-                    ),
-                    None => println!(
-                        "{:width$}  {:<32}    skipped: {}",
-                        t.ros_topic,
-                        t.ros_type,
-                        t.reason.as_deref().unwrap_or("unsupported")
-                    ),
-                }
+            print_import_report(&report);
+            let written = report.written();
+            if written == 0 {
+                bail!("the bag has no messages that could be imported");
             }
-            let converted: u64 = report.topics.iter().map(|t| t.converted).sum();
-            if converted == 0 {
-                bail!("no message could be converted");
-            }
-            println!("wrote {converted} message(s) to {}", out.display());
+            println!("wrote {written} message(s) to {}", out.display());
             Ok(())
         }
+    }
+}
+
+/// One line per ROS topic: where its messages went, and anything not
+/// imported.
+fn print_import_report(report: &ruro_record::rosbag::ImportReport) {
+    let width = report
+        .topics
+        .iter()
+        .map(|t| t.ros_topic.len())
+        .max()
+        .unwrap_or(0);
+    let type_width = report
+        .topics
+        .iter()
+        .map(|t| t.ros_type.len())
+        .max()
+        .unwrap_or(0);
+    for t in &report.topics {
+        let mut parts = Vec::new();
+        if let Some(name) = &t.ruro_topic {
+            parts.push(format!("{} converted -> {name}", t.converted));
+        }
+        if let Some(name) = &t.raw_topic {
+            parts.push(format!("{} as ros2/Any -> {name}", t.raw));
+        }
+        if t.skipped > 0 {
+            parts.push(format!("{} skipped", t.skipped));
+        }
+        let mut line = format!(
+            "{:width$}  {:type_width$}  {}",
+            t.ros_topic,
+            t.ros_type,
+            parts.join(", ")
+        );
+        if let Some(reason) = &t.reason {
+            line.push_str(&format!(" ({reason})"));
+        }
+        println!("{line}");
     }
 }
 

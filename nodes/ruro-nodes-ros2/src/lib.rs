@@ -24,6 +24,10 @@
 //! | `Text` | `std_msgs/String` | `ros2/sub-string`, `ros2/pub-string` |
 //! | `Flag` | `std_msgs/Bool` | `ros2/sub-bool`, `ros2/pub-bool` |
 //!
+//! Messages of any other type go through the generic `ros2/sub` and
+//! `ros2/pub` nodes as `ros2/Any`, unchanged; `ros2/field` and `ros2/decode`
+//! read them (see [`generic`]).
+//!
 //! QoS: `qos` (reliable or best_effort), `durability` (volatile or
 //! transient_local) and `depth` set the endpoint's QoS as in ROS 2. For
 //! latched topics such as `/tf_static`, use `durability: transient_local`
@@ -42,6 +46,8 @@
 
 pub mod actions;
 pub mod convert;
+pub mod external;
+pub mod generic;
 pub mod services;
 
 use std::sync::Arc;

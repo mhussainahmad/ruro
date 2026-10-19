@@ -5408,6 +5408,7 @@ name = "ruro-nodes-ros2"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "ruro",
  "ruro-ros2",
  "serde_json",
@@ -5487,6 +5488,7 @@ dependencies = [
  "memmap2",
  "parking_lot",
  "ruro-msg",
+ "ruro-ros2",
  "serde_json",
  "tracing",
 ]
@@ -5497,6 +5499,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "libc",
+ "roxmltree",
+ "ruro-graph",
  "serde",
  "serde-saphyr",
  "serde_json",

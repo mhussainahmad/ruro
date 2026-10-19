@@ -247,7 +247,8 @@ fn expand_node(input: DeriveInput) -> syn::Result<TokenStream2> {
 
     for field in &fields.named {
         let name = field.ident.as_ref().unwrap();
-        let name_str = name.to_string();
+        // `r#type` is the parameter `type`.
+        let name_str = syn::ext::IdentExt::unraw(name).to_string();
         let ty = &field.ty;
         match field_role(field)? {
             FieldRole::Input => {

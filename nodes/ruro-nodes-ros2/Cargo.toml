@@ -12,7 +12,9 @@ authors.workspace = true
 ruro = { workspace = true }
 ruro-ros2 = { workspace = true }
 anyhow = { workspace = true }
+libc = { workspace = true }
 
 [dev-dependencies]
+libc = { workspace = true }
 serde_json = { workspace = true }
 zenoh = { workspace = true }

@@ -1,0 +1,53 @@
+<launch>
+  <arg name="robot" default="r1" description="Robot name"/>
+  <arg name="use_sim" default="false"/>
+  <arg name="rate" default="5.0"/>
+  <let name="config" value="$(find-pkg-share robot_config)/config"/>
+
+  <set_parameter name="use_sim_time" value="$(var use_sim)"/>
+  <set_env name="RCUTILS_COLORIZED_OUTPUT" value="0"/>
+
+  <node pkg="demo_nodes_cpp" exec="talker" name="talker" namespace="$(var robot)" respawn="true" respawn_delay="2">
+    <param name="rate" value="$(var rate)"/>
+    <param name="frame" value="base_$(var robot)"/>
+    <param name="label" value="42" type="str"/>
+    <param name="pid">
+      <param name="kp" value="1.5"/>
+      <param name="gains" value="[1, 2, 3]"/>
+    </param>
+    <param from="$(var config)/talker.yaml"/>
+    <remap from="chatter" to="/$(var robot)/out"/>
+    <env name="EXTRA" value="$(env HOME /nohome)"/>
+  </node>
+
+  <group>
+    <push-ros-namespace namespace="sensors"/>
+    <set_remap from="scan" to="scan_filtered"/>
+    <node pkg="laser_driver" exec="driver_node" name="lidar" args="--port /dev/ttyUSB0 --baud 115200"/>
+    <node pkg="laser_driver" exec="filter" name="filter" if="$(var use_sim)"/>
+    <node pkg="laser_driver" exec="sim_filter" name="sim_filter" unless="$(var use_sim)"/>
+  </group>
+
+  <group scoped="false">
+    <let name="robot" value="r2"/>
+  </group>
+
+  <include file="$(dirname)/camera.launch.yaml">
+    <arg name="camera" value="front_$(var robot)"/>
+  </include>
+
+  <node_container pkg="rclcpp_components" exec="component_container" name="container" namespace="vision">
+    <composable_node pkg="image_proc" plugin="image_proc::RectifyNode" name="rectify">
+      <param name="queue_size" value="5"/>
+      <remap from="image" to="/camera/image_raw"/>
+      <extra_arg name="use_intra_process_comms" value="true"/>
+    </composable_node>
+  </node_container>
+
+  <executable cmd="rosbag2_record_helper --all" name="recorder"/>
+  <timer period="3.0">
+    <node pkg="demo_nodes_py" exec="listener" name="late_listener"/>
+  </timer>
+  <log message="hello"/>
+  <node pkg="unknown_pkg" exec="tool" name="tool" args="$(command date)"/>
+</launch>

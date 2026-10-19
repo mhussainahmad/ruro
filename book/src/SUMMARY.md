@@ -21,6 +21,7 @@
 - [Hardware drivers](hardware.md)
 - [Simulation](simulation.md)
   - [Simulation and the real robot](sim-to-real.md)
+  - [Gazebo and Isaac Sim](gazebo-isaac.md)
 - [Machine learning](ml.md)
 - [ROS 2 bridge](ros2.md)
 - [Deploying on robots](deployment.md)

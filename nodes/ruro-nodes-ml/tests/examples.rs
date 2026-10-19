@@ -87,3 +87,33 @@ fn the_policy_replaces_the_gamepad() {
         .collect();
     assert_eq!(into_arm, ["policy.action -> arm.command"]);
 }
+
+/// The Gazebo rover (both variants) and the Isaac Sim example validate against
+/// the stock host's node types. Only the Gazebo one has been run for real.
+#[test]
+fn simulator_examples_validate() {
+    ruro_host::describe();
+    let registry = ruro::node::registry();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for (file, overlays) in [
+        ("gazebo/rover.yaml", &[][..]),
+        ("gazebo/rover.yaml", &["real"]),
+        ("isaac-sim/carter.yaml", &[]),
+    ] {
+        let g = Graph::load(root.join(file))
+            .unwrap()
+            .with_overlays(overlays)
+            .unwrap();
+        let issues: Vec<String> = validate(&g, &registry)
+            .into_iter()
+            .map(|i| i.to_string())
+            .collect();
+        assert!(issues.is_empty(), "{file} {overlays:?}: {issues:#?}");
+    }
+    let real = Graph::load(root.join("gazebo/rover.yaml"))
+        .unwrap()
+        .with_overlays(&["real"])
+        .unwrap();
+    assert_eq!(real.nodes["lidar"].kind, "hw/rplidar");
+    assert_eq!(real.group_config("robot").machine.as_deref(), Some("rover"));
+}

@@ -1,0 +1,53 @@
+# NOT VERIFIED: written against the Isaac Sim documentation, never run with
+# Isaac Sim. See README.md.
+#
+# NVIDIA Nova Carter in Isaac Sim, through Isaac Sim's ROS 2 bridge
+# (rmw_zenoh) and ruro's ROS 2 bridge: the front 2D lidar steers the robot
+# around obstacles with std/scan-avoid; odometry, the chassis IMU, the front
+# left camera and /tf come in for watching in the studio. Topic names are the
+# Nova Carter asset's (Isaac Sim 5.x and 6.x documentation).
+#
+#   ruro daemon                                  # the Zenoh router Isaac Sim connects to
+#   ruro run examples/isaac-sim/carter.yaml
+name: carter
+nodes:
+  scan:
+    type: ros2/sub-laser-scan
+    group: sim
+    params: { topic: /front_2d_lidar/scan, qos: best_effort, router: tcp/127.0.0.1:7447 }
+    pos: [0, 0]
+  odom:
+    type: ros2/sub-odometry
+    group: sim
+    params: { topic: /chassis/odom, router: tcp/127.0.0.1:7447 }
+    pos: [0, 160]
+  imu:
+    type: ros2/sub-imu
+    group: sim
+    params: { topic: /chassis/imu, qos: best_effort, router: tcp/127.0.0.1:7447 }
+    pos: [0, 300]
+  camera:
+    type: ros2/sub-image
+    group: sim
+    params:
+      topic: /front_stereo_camera/left/image_raw
+      qos: best_effort
+      router: tcp/127.0.0.1:7447
+    pos: [0, 440]
+  tf:
+    type: ros2/sub-tf
+    group: sim
+    params: { topic: /tf, router: tcp/127.0.0.1:7447 }
+    pos: [0, 580]
+  avoid:
+    type: std/scan-avoid
+    params: { speed: 0.5, turn: 0.6, stop_distance: 1.0 }
+    pos: [350, 0]
+  drive:
+    type: ros2/pub-twist
+    group: sim
+    params: { topic: /cmd_vel, router: tcp/127.0.0.1:7447 }
+    pos: [700, 0]
+wires:
+  - scan.out -> avoid.scan
+  - avoid.cmd -> drive.input

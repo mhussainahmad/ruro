@@ -87,8 +87,5 @@ fn invalid_returns_are_ignored_and_stops_send_zero() {
     s.ranges[182] = f32::INFINITY;
     assert_eq!(command(&mut h, s).linear.x, 0.5);
     h.set_estop(true);
-    assert_eq!(
-        command(&mut h, scan(8.0, 0.0, 0.0, 8.0)),
-        Twist::default()
-    );
+    assert_eq!(command(&mut h, scan(8.0, 0.0, 0.0, 8.0)), Twist::default());
 }

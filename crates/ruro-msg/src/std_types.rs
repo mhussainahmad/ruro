@@ -103,7 +103,8 @@ impl Encoding {
         }
     }
 
-    fn from_u8(v: u8) -> Result<Self, DecodeError> {
+    /// The encoding with wire value `v` (`Encoding as u8` is the inverse).
+    pub fn from_u8(v: u8) -> Result<Self, DecodeError> {
         match v {
             0 => Ok(Encoding::Rgb8),
             1 => Ok(Encoding::Rgba8),

@@ -1,0 +1,35 @@
+[package]
+name = "ruro-gpu"
+description = "CUDA device buffers for ruro: GPU images and tensors shared without copies"
+keywords = ["robotics", "cuda", "gpu", "zero-copy", "tensor"]
+categories = ["science::robotics", "hardware-support"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro-msg = { workspace = true }
+anyhow = { workspace = true }
+libloading = { workspace = true }
+libc = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+ruro-node = { workspace = true }
+ruro-transport = { workspace = true }
+serde_json = { workspace = true }
+
+[[bench]]
+name = "gpu_hop"
+harness = false
+
+[lib]
+bench = false

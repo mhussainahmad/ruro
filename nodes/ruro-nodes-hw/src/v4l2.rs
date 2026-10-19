@@ -11,6 +11,7 @@ use std::os::unix::fs::OpenOptionsExt;
 
 use ruro::prelude::*;
 
+use crate::calibration::Calibration;
 use crate::pixel::{decode_jpeg, yuyv_to_rgb};
 
 pub const fn fourcc(s: &[u8; 4]) -> u32 {
@@ -428,6 +429,9 @@ impl Drop for Capture {
 pub struct V4l2Camera {
     #[output]
     image: Output<Image>,
+    /// Published with each image when `calibration` is set.
+    #[output]
+    camera_info: Output<CameraInfo>,
     /// Video device.
     #[param(default = "/dev/video0")]
     device: String,
@@ -442,11 +446,19 @@ pub struct V4l2Camera {
     /// `auto`, `yuyv` or `mjpeg`.
     #[param(default = "auto")]
     format: String,
+    /// ROS `camera_calibration` YAML file; empty for no `camera_info`.
+    #[param(default = "")]
+    calibration: String,
+    /// Frame id of `camera_info`.
+    #[param(default = "camera")]
+    frame_id: String,
+    calib: Calibration,
     capture: Option<Capture>,
 }
 
 impl Node for V4l2Camera {
     fn start(&mut self, _ctx: &mut Ctx) -> Result {
+        self.calib = Calibration::open(&self.calibration, &self.frame_id)?;
         let cap = Capture::open(
             &self.device,
             self.width,
@@ -465,9 +477,11 @@ impl Node for V4l2Camera {
         Ok(())
     }
 
-    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
         let cap = self.capture.as_mut().context("camera not open")?;
         if let Some(img) = cap.next_frame(100)? {
+            self.calib
+                .publish(&self.camera_info, img.width, img.height, ctx.now_ns())?;
             self.image.send(img)?;
         }
         Ok(())

@@ -429,6 +429,36 @@ fn mjpeg_over_udp_with_digest_auth() {
 }
 
 #[test]
+fn calibration_is_published_with_each_image() {
+    let path = std::env::temp_dir().join(format!("ruro-rtsp-calib-{}.yaml", std::process::id()));
+    std::fs::write(
+        &path,
+        "image_width: 32\nimage_height: 24\ncamera_matrix: {rows: 3, cols: 3, data: [30, 0, 16, 0, 30, 12, 0, 0, 1]}\n\
+         distortion_model: plumb_bob\ndistortion_coefficients: {rows: 1, cols: 5, data: [0.1, 0, 0, 0, 0]}\n",
+    )
+    .unwrap();
+    let server = Server::start(Config::new(Stream::Jpeg(vec![test_jpeg(1)])));
+    let mut h = Harness::with_node::<RtspCamera>(
+        json!({ "url": server.url(false), "calibration": path.to_str().unwrap(), "frame_id": "front" }),
+        |_| {},
+    )
+    .unwrap();
+    let (images, _) = run_until(&mut h, Duration::from_secs(10), |i, _| i.len() >= 3);
+    // `run_until` takes only images and frames; the infos are still queued.
+    let infos = h.take::<ruro::msg::CameraInfo>("camera_info").unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(images.len() >= 3);
+    assert_eq!(infos.len(), images.len(), "one CameraInfo per image");
+    let c = &infos[0];
+    assert_eq!(
+        (c.width, c.height, c.header.frame_id.as_str()),
+        (32, 24, "front")
+    );
+    assert_eq!((c.k[0], c.d[0]), (30.0, 0.1));
+    assert!(c.header.stamp_ns > 0);
+}
+
+#[test]
 fn reconnects_after_the_server_drops_the_connection() {
     let mut cfg = Config::new(Stream::Jpeg((0..2).map(test_jpeg).collect()));
     cfg.frames_per_connection = Some(3);

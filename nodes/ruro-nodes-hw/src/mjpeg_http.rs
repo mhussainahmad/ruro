@@ -13,6 +13,7 @@ use std::time::Duration;
 use ruro::prelude::*;
 
 use crate::base64;
+use crate::calibration::Calibration;
 use crate::pixel::decode_jpeg;
 
 /// Parts of an `http://host[:port]/path` URL.
@@ -199,12 +200,22 @@ pub fn open_stream(url: &HttpUrl, timeout: Duration) -> io::Result<PartReader<Tc
 pub struct MjpegHttpCamera {
     #[output]
     image: Output<Image>,
+    /// Published with each image when `calibration` is set.
+    #[output]
+    camera_info: Output<CameraInfo>,
     /// Stream URL, e.g. `http://192.168.4.1:81/stream`. `user:pass@` is supported.
     #[param(default = "http://192.168.4.1:81/stream")]
     url: String,
     /// Connect and read timeout in seconds.
     #[param(default = 5.0, min = 0.1, max = 60)]
     timeout: f64,
+    /// ROS `camera_calibration` YAML file; empty for no `camera_info`.
+    #[param(default = "")]
+    calibration: String,
+    /// Frame id of `camera_info`.
+    #[param(default = "camera")]
+    frame_id: String,
+    calib: Calibration,
     frames: Option<Receiver<Vec<u8>>>,
     worker: Option<JoinHandle<()>>,
     stop: Arc<AtomicBool>,
@@ -242,6 +253,7 @@ fn reader_loop(url: HttpUrl, timeout: Duration, tx: SyncSender<Vec<u8>>, stop: A
 impl Node for MjpegHttpCamera {
     fn start(&mut self, _ctx: &mut Ctx) -> Result {
         let url = parse_url(&self.url).map_err(|e| anyhow!(e))?;
+        self.calib = Calibration::open(&self.calibration, &self.frame_id)?;
         let (tx, rx) = sync_channel(2);
         let stop = self.stop.clone();
         let timeout = Duration::from_secs_f64(self.timeout);
@@ -254,13 +266,15 @@ impl Node for MjpegHttpCamera {
         Ok(())
     }
 
-    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
         let rx = self.frames.as_ref().context("not started")?;
         // Only the newest frame matters.
         let Some(jpeg) = rx.try_iter().last() else {
             return Ok(());
         };
         let (width, height, data) = decode_jpeg(&jpeg).map_err(|e| anyhow!(e))?;
+        self.calib
+            .publish(&self.camera_info, width, height, ctx.now_ns())?;
         self.image.send(Image {
             width,
             height,

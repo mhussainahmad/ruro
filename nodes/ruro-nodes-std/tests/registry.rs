@@ -13,6 +13,7 @@ fn std_nodes_are_registered() {
         "std/grayscale",
         "std/image-stats",
         "std/pid",
+        "std/scan-avoid",
         "std/sine",
     ] {
         assert!(kinds.contains(&kind), "{kind} missing from {kinds:?}");

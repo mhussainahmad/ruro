@@ -73,7 +73,12 @@ fn router() -> (zenoh::Session, String) {
 }
 
 /// Runs `cmd` in the ROS 2 environment; stdout lines arrive on the channel.
-fn ros(script: &str, endpoint: &str, mount: &PathBuf, cmd: &str) -> (Child, mpsc::Receiver<String>) {
+fn ros(
+    script: &str,
+    endpoint: &str,
+    mount: &PathBuf,
+    cmd: &str,
+) -> (Child, mpsc::Receiver<String>) {
     let mut child = Command::new(script)
         .arg(cmd)
         .env("ZENOH_ROUTER", endpoint)
@@ -182,7 +187,11 @@ fn ros2_nodes_and_ruro_exchange_any_type_byte_for_byte() {
     }
     let mut lib = ruro_ros2::search::TypeLibrary::bundled();
     lib.add_dir(std::path::Path::new(&interfaces()));
-    for (topic, got) in [("/ints", &got_ints), ("/ruro_log", &got_log), ("/wide", &got_wide)] {
+    for (topic, got) in [
+        ("/ints", &got_ints),
+        ("/ruro_log", &got_log),
+        ("/wide", &got_wide),
+    ] {
         assert!(
             wire[topic].contains(&got.cdr),
             "{topic}: ruro's bytes are not what crossed the router"
@@ -206,7 +215,10 @@ fn ros2_nodes_and_ruro_exchange_any_type_byte_for_byte() {
         (f.take("value").unwrap(), f.take("text").unwrap())
     };
     assert_eq!(field("data[1]", &got_ints).0, [Scalar(-2.0)]);
-    assert_eq!(field("layout.dim[0].label", &got_ints).1, [Text("x".into())]);
+    assert_eq!(
+        field("layout.dim[0].label", &got_ints).1,
+        [Text("x".into())]
+    );
     assert_eq!(field("msg", &got_log).1, [Text("sent by rclpy".into())]);
     assert_eq!(field("stamp.sec", &got_log).0, [Scalar(5.0)]);
     assert_eq!(field("data", &got_wide).1, [Text("wé 😀".into())]);
@@ -221,8 +233,8 @@ fn ros2_nodes_and_ruro_exchange_any_type_byte_for_byte() {
     let ty = lib
         .resolve_str("example_interfaces/msg/Int64MultiArray")
         .unwrap();
-    let msg = ruro_ros2::dynamic::MessageValue::from_json(&ty, &json!({ "data": [7, 8, 9] }))
-        .unwrap();
+    let msg =
+        ruro_ros2::dynamic::MessageValue::from_json(&ty, &json!({ "data": [7, 8, 9] })).unwrap();
     let out = Ros2Any {
         type_name: ty.name.to_string(),
         type_hash: ty.hash.clone(),
@@ -248,7 +260,10 @@ fn ros2_nodes_and_ruro_exchange_any_type_byte_for_byte() {
             text.push_str(&l);
             text.push('\n');
         }
-        assert!(Instant::now() < deadline, "ros2 topic echo got nothing:\n{text}");
+        assert!(
+            Instant::now() < deadline,
+            "ros2 topic echo got nothing:\n{text}"
+        );
         std::thread::sleep(Duration::from_millis(200));
     }
     assert!(text.contains("data:\n- 7\n- 8\n- 9"), "{text}");

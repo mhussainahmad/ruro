@@ -23,6 +23,7 @@
   - [Simulation and the real robot](sim-to-real.md)
 - [Machine learning](ml.md)
 - [ROS 2 bridge](ros2.md)
+  - [Bringing a ROS 2 system to ruro](ros2-migration.md)
 - [Deploying on robots](deployment.md)
   - [Multi-machine graphs](multi-machine.md)
   - [Security](security.md)

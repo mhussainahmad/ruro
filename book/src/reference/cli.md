@@ -56,7 +56,7 @@ Other environment variables:
 | [`schema`](#ruro-schema) | Print message schemas, check compatibility, generate Python types. |
 | [`new`](#ruro-new) | Create a node package or add a node to one. |
 | [`build`](#ruro-build) | Build a host binary that links the packages listed in `ruro.toml`. |
-| [`ros2`](#ruro-ros2) | List ROS 2 topics, generate message types, compute type hashes. |
+| [`ros2`](#ruro-ros2) | List ROS 2 topics, generate message types, compute type hashes, import launch files. |
 | [`soak`](#ruro-soak) | Run a graph for a while and check memory, latency and drops (hidden). |
 
 ### ruro run
@@ -245,12 +245,13 @@ Shows the channels, message counts and duration of a local recording.
 ### ruro bag import
 
 ```text
-ruro bag import <SRC> [-o <OUT>] [--map <TOPIC=NODE.PORT>]...
+ruro bag import <SRC> [-o <OUT>] [--map <TOPIC=NODE.PORT>]... [--raw]
 ```
 
 Converts a rosbag2 bag (directory or `.mcap` file, MCAP storage) into a ruro recording,
 by default `<SRC>.ruro.mcap`. `--map` names a topic's channel so that replay feeds the
-right node. See [ROS 2 bags](../record-replay.md#ros-2-bags).
+right node. Topics without a ruro equivalent are kept as `ros2/Any`; `--raw` keeps every
+topic that way. See [ROS 2 bags](../record-replay.md#ros-2-bags).
 
 ### ruro studio
 
@@ -303,12 +304,17 @@ the network.
 ruro ros2 topics [--router <ENDPOINT>] [--domain <ID>] [--timeout <MS>] [--json]
 ruro ros2 gen <PACKAGE_DIR>... [-o <FILE>] [--root <PATH>]
 ruro ros2 hash <TYPE> [PACKAGE_DIR]... [--verbose]
+ruro ros2 import <LAUNCH_FILE> [NAME:=VALUE]... [--params <FILE>]... [-o <FILE>] [--router <ENDPOINT>]
+    [--sub <TOPIC=TYPE>]... [--pub <TOPIC=TYPE>]... [--name <NAME>] [--eval]
 ```
 
 Lists ROS 2 topics announced through rmw_zenoh (router default `tcp/127.0.0.1:7447`,
 domain from `ROS_DOMAIN_ID` or 0, timeout 1000 ms), generates Rust types from `.msg`/`.srv`
 definitions (module path `crate::ros` by default), and prints the RIHS01 hash of a message
-type such as `geometry_msgs/msg/Twist`. See [ROS 2 bridge](../ros2.md).
+type such as `geometry_msgs/msg/Twist`. `import` converts an XML or YAML launch file (a
+Python one with `--eval` in a sourced ROS 2 environment) into a graph of `ros2/node`
+nodes, listing what it could not convert as warnings; see
+[Bringing a ROS 2 system to ruro](../ros2-migration.md). See [ROS 2 bridge](../ros2.md).
 
 ### ruro soak
 

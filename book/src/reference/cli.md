@@ -300,15 +300,22 @@ the network.
 ### ruro ros2
 
 ```text
-ruro ros2 topics [--router <ENDPOINT>] [--domain <ID>] [--timeout <MS>] [--json]
+ruro ros2 topics [--router <ENDPOINT>] [--domain <ID>] [--timeout <MS>] [--json] [--all]
+ruro ros2 services [--router <ENDPOINT>] [--domain <ID>] [--timeout <MS>] [--json]
+ruro ros2 actions [--router <ENDPOINT>] [--domain <ID>] [--timeout <MS>] [--json]
+ruro ros2 call <SERVICE> <TYPE> [<YAML>] [--router <ENDPOINT>] [--domain <ID>]
+               [--timeout <MS>] [--package <DIR>]...
 ruro ros2 gen <PACKAGE_DIR>... [-o <FILE>] [--root <PATH>]
 ruro ros2 hash <TYPE> [PACKAGE_DIR]... [--verbose]
 ```
 
-Lists ROS 2 topics announced through rmw_zenoh (router default `tcp/127.0.0.1:7447`,
-domain from `ROS_DOMAIN_ID` or 0, timeout 1000 ms), generates Rust types from `.msg`/`.srv`
-definitions (module path `crate::ros` by default), and prints the RIHS01 hash of a message
-type such as `geometry_msgs/msg/Twist`. See [ROS 2 bridge](../ros2.md).
+Lists ROS 2 topics, services and actions announced through rmw_zenoh (router default
+`tcp/127.0.0.1:7447`, domain from `ROS_DOMAIN_ID` or 0, timeout 1000 ms; topics and
+services of actions are left out unless `topics --all`), calls a service with a YAML
+request (bundled or `--package` types; timeout 10000 ms), generates Rust types from
+`.msg`/`.srv`/`.action` definitions (module path `crate::ros` by default), and prints the
+RIHS01 hash of a message, service or action type such as `geometry_msgs/msg/Twist`. See
+[ROS 2 bridge](../ros2.md).
 
 ### ruro soak
 

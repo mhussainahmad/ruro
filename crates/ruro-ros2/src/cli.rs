@@ -111,7 +111,7 @@ pub fn run(args: Ros2Args) -> Result<()> {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                interfaces.messages.retain(|t, _| t.package != name);
+                interfaces.remove_package(&name);
                 interfaces.load_package(&dir.canonicalize()?)?;
                 names.push(name);
             }

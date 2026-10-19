@@ -1,4 +1,5 @@
-//! Embeds the bundled interface definitions (`interfaces/<pkg>/msg/*.msg`).
+//! Embeds the bundled interface definitions
+//! (`interfaces/<pkg>/{msg,srv,action}/*`).
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -18,25 +19,32 @@ fn main() {
     packages.sort();
     for pkg in packages {
         let name = pkg.file_name().unwrap().to_string_lossy().into_owned();
-        let mut files: Vec<_> = std::fs::read_dir(pkg.join("msg"))
-            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
-            .unwrap_or_default();
-        files.sort();
-        for f in files
-            .into_iter()
-            .filter(|f| f.extension().is_some_and(|e| e == "msg"))
-        {
-            println!("cargo:rerun-if-changed={}", f.display());
-            let stem = f.file_stem().unwrap().to_string_lossy().into_owned();
-            entries.push((name.clone(), stem, f));
+        for kind in ["msg", "srv", "action"] {
+            let dir = pkg.join(kind);
+            println!("cargo:rerun-if-changed={}", dir.display());
+            let mut files: Vec<_> = std::fs::read_dir(&dir)
+                .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
+                .unwrap_or_default();
+            files.sort();
+            for f in files
+                .into_iter()
+                .filter(|f| f.extension().is_some_and(|e| e == kind))
+            {
+                println!("cargo:rerun-if-changed={}", f.display());
+                let stem = f.file_stem().unwrap().to_string_lossy().into_owned();
+                entries.push((name.clone(), kind, stem, f));
+            }
         }
     }
-    let mut out = String::from("/// `(package, message, definition)` of every bundled message.\n");
-    out.push_str("pub const BUNDLED: &[(&str, &str, &str)] = &[\n");
-    for (pkg, msg, path) in entries {
+    let mut out = String::from(
+        "/// `(package, kind, name, definition)` of every bundled interface, where\n\
+         /// kind is `msg`, `srv` or `action`.\n",
+    );
+    out.push_str("pub const BUNDLED: &[(&str, &str, &str, &str)] = &[\n");
+    for (pkg, kind, name, path) in entries {
         let _ = writeln!(
             out,
-            "    ({pkg:?}, {msg:?}, include_str!({:?})),",
+            "    ({pkg:?}, {kind:?}, {name:?}, include_str!({:?})),",
             path.display().to_string()
         );
     }

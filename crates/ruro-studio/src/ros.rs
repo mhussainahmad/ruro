@@ -197,6 +197,14 @@ pub fn show(s: &mut Studio, ui: &mut Ui) {
 
 fn topic_card(s: &mut Studio, ui: &mut Ui, t: &TopicInfo) {
     let kinds = ruro_ros2::bridge_kinds(&t.ros_type);
+    // Types without a ruro equivalent go through the generic bridge as
+    // ros2/Any.
+    let mut params = s.ros.bridge_params(t);
+    let (sub, publ) = kinds.unwrap_or_else(|| {
+        params.push(("type".into(), Value::String(t.ros_type.clone())));
+        params.push(("type_hash".into(), Value::String(t.type_hash.clone())));
+        ("ros2/sub", "ros2/pub")
+    });
     Frame::new()
         .fill(CARD())
         .stroke(egui::Stroke::new(1.0, BORDER()))
@@ -232,42 +240,40 @@ fn topic_card(s: &mut Studio, ui: &mut Ui, t: &TopicInfo) {
                         .font(font(11.5))
                         .color(TEXT_FAINT()),
                 );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match kinds {
-                    Some((sub, publ)) => {
-                        if widgets::icon_button_sized(
-                            ui,
-                            icons::ARROW_RIGHT_LEFT,
-                            "Add a publisher node for this topic",
-                            22.0,
-                            13.0,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            s.push(Cmd::AddConfiguredNode {
-                                kind: publ.into(),
-                                params: s.ros.bridge_params(t),
-                            });
-                        }
-                        if widgets::icon_button_sized(
-                            ui,
-                            icons::PLUS,
-                            "Add a subscriber node for this topic",
-                            22.0,
-                            13.0,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            s.push(Cmd::AddConfiguredNode {
-                                kind: sub.into(),
-                                params: s.ros.bridge_params(t),
-                            });
-                        }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if widgets::icon_button_sized(
+                        ui,
+                        icons::ARROW_RIGHT_LEFT,
+                        "Add a publisher node for this topic",
+                        22.0,
+                        13.0,
+                        false,
+                    )
+                    .clicked()
+                    {
+                        s.push(Cmd::AddConfiguredNode {
+                            kind: publ.into(),
+                            params: params.clone(),
+                        });
                     }
-                    None => {
+                    if widgets::icon_button_sized(
+                        ui,
+                        icons::PLUS,
+                        "Add a subscriber node for this topic",
+                        22.0,
+                        13.0,
+                        false,
+                    )
+                    .clicked()
+                    {
+                        s.push(Cmd::AddConfiguredNode {
+                            kind: sub.into(),
+                            params: params.clone(),
+                        });
+                    }
+                    if kinds.is_none() {
                         ui.label(
-                            RichText::new("no bridge for this type")
+                            RichText::new("as ros2/Any")
                                 .font(font(11.0))
                                 .color(TEXT_FAINT()),
                         );

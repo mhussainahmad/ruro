@@ -7,52 +7,94 @@ yourself.
 ## Tested in CI
 
 These run in every CI build (`cargo test --workspace`, the Python package's tests and the
-optional ML features):
+optional ML and camera features):
 
 - **Runtime:** in-process and shared-memory messaging, pooled sends, parameters, timers,
   simulated time, deterministic groups, deadlines and jitter metrics.
-- **Graphs:** YAML format, validation, composite nodes and their flattening.
+- **Graphs:** YAML format, validation, composite nodes and their flattening, and
+  [overlays](sim-to-real.md) (merge rules, ordering, errors for overlays that do not apply).
 - **Daemon and CLI:** deployment, supervision and restarts, heartbeats, the emergency stop,
-  record and replay, graphs spanning two daemons (on one machine), host binary uploads, TLS,
-  mutual TLS and tokens.
+  record and replay (including graphs spanning two daemons, recorded into one file and
+  replayed into both), host binary uploads, TLS, mutual TLS and tokens.
+- **Daemon updates:** signature, target, architecture and version checks; refusals while a
+  graph runs; updating a running daemon in place, refusing a binary that fails its trial
+  start, rolling back after a failed real start, and the restart path used under systemd,
+  all with real daemon processes on one machine.
 - **Node SDK:** derives, schemas and compatibility checks, `ruro new` packages.
 - **Studio:** headless UI tests of editing, tabs, undo, subgraphs, comparing, recovery,
-  the emergency stop, nodes on peer daemons and more. Its screenshots are rendered from the same tests.
+  overlays, the emergency stop, nodes on peer daemons and more. Its screenshots are
+  rendered from the same tests.
 - **Python nodes:** the `ruro` package's tests, and a daemon running Python and Rust nodes
   in one graph.
-- **ROS 2 bridge:** encoding, type hashes (checked against ROS 2 Jazzy's) and publishing and
-  subscribing through an in-process Zenoh router.
+- **ROS 2 bridge:** encoding, type hashes (all bundled message, service and action types
+  checked against ROS 2 Jazzy's), the QoS written into discovery tokens (checked against
+  tokens captured from Jazzy nodes), publishing, subscribing, services, actions and
+  transient-local durability through an in-process Zenoh router.
+- **ROS 2 import:** messages of any type decoded and re-encoded byte for byte (125 types
+  serialized by ROS 2 itself), hashes of definitions found at run time, a Jazzy bag
+  imported with every byte kept, launch-file conversion, and `ros2/node` supervision with
+  stand-in commands.
 - **Robot descriptions:** URDF and MJCF parsing and forward kinematics.
 - **Machine learning:** ONNX detection and policy models, YOLO decoding, LeRobot dataset
   writing (read back with a Parquet reader).
-- **Hardware drivers:** protocol encoding and decoding against byte fixtures, and the serial
-  drivers end to end against simulated devices on pseudo-terminals.
+- **Hardware drivers:** protocol encoding and decoding against byte fixtures, the serial
+  drivers end to end against simulated devices on pseudo-terminals, and the RTSP camera
+  against an in-process RTSP server (H.264 and MJPEG, TCP and UDP, both authentication
+  schemes, reconnection).
+- **GPU buffers:** without a GPU, only that the GPU nodes refuse to start with a clear
+  message.
+
+## Verified outside CI
+
+These were checked against the real software on a development machine, with opt-in tests
+that skip in CI:
+
+- **ROS 2 interop** with ROS 2 Jazzy and rmw_zenoh_cpp 0.2.11 in a container
+  (`RURO_ROS2_CONTAINER`): services in both directions, actions with feedback and cancel in
+  both directions, `/tf_static` latching both ways, the generic `ros2/sub` and `ros2/pub`
+  bridges with types ruro does not bundle (byte-identical with what crossed the router),
+  type hashes of all 380 message and 310 `.idl` types installed there, and demo nodes run
+  from their launch file through `ros2/node`. See [ROS 2 bridge](ros2.md).
+- **Gazebo Harmonic** through the ROS 2 bridge, headless in a container
+  (`RURO_GAZEBO_CONTAINER`): lidar scans and odometry reach the graph and velocity commands
+  move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).
+- **GPU buffers** on one machine with an RTX 4090 (driver 610.57.04): in one process, across
+  two processes and under the daemon. See [GPU buffers](gpu.md).
+- **RTSP cameras** against the mediamtx server (H.264 from ffmpeg, MJPEG from GStreamer),
+  not against IP cameras.
+- **MuJoCo** (`sim/mujoco`) against MuJoCo 3.15.0.
+- **LeRobot datasets** with the Hugging Face `datasets` library when `RURO_LEROBOT_PYTHON`
+  is set; not yet loaded by LeRobot itself.
 
 ## Implemented, not verified against the real thing
 
 - **Hardware drivers** have not been run against the physical devices they drive. See
   [Hardware drivers](hardware.md) for what each one is tested against.
-- **MuJoCo** (`sim/mujoco`) is tested against MuJoCo 3.15.0 on a development machine; CI
-  has no MuJoCo, so those tests are skipped there.
-- **ROS 2 interop** has not been tested in CI against a running ROS 2 installation with
-  rmw_zenoh.
-- **LeRobot datasets** are checked with the Hugging Face `datasets` library when
-  `RURO_LEROBOT_PYTHON` is set, not in CI, and not yet loaded by LeRobot itself.
+- **RealSense** (`hw/realsense`): checked against the librealsense2 2.59 headers and unit
+  tested, never run with the library or a camera.
+- **Isaac Sim**: the example graph is written from Isaac Sim's documentation and only
+  checked to parse and validate.
+- **Bridge nodes** `ros2/call-trigger`, `ros2/call-set-bool`, `ros2/serve-set-bool` and
+  `ros2/fibonacci-goal`, through a local Zenoh router only.
+- **`ros2/node`** behind a router that requires a token or TLS, composable-node loading, and
+  `ruro ros2 import --eval` on complex Python launch files.
 - **Multi-machine graphs** have been tested with two daemons on one machine, not across a
-  network.
+  network. Clock-offset correction for recordings is unit tested only.
+- **Daemon updates** under a real systemd and across a network.
 - **Real-time priority and memory locking** need privileges that CI does not have; their
   fallback (a warning) is what CI exercises.
-- **Performance figures** in [Performance](performance.md) come from one development machine.
+- **Performance figures** in [Performance](performance.md) come from development machines.
 
 ## Known gaps
 
 - Python nodes have no e-stop hook. A stop engaged directly on a peer machine does not
   travel back to the daemon that deployed the graph.
-- Recording and replay cover only the groups of the daemon you talk to.
 - `ruro param` does not check parameter ranges.
-- ROS 2: topics only (no services or actions), volatile durability only, Jazzy-style type
-  hashes only.
-- Not implemented: GPU buffers, RealSense and RTSP cameras, camera calibration messages,
-  Gazebo or Isaac Sim nodes (they connect through ROS 2), graph overlays for switching
-  between simulation and the real robot.
+- ROS 2: deadline, lifespan and liveliness are announced but not enforced (as in
+  rmw_zenoh); the generic bridges are always volatile; a ruro ROS node offers no parameter
+  or type-description services; simulated time cannot follow a ROS `/clock`.
+- GPU buffers work between processes on one machine only, and ONNX Runtime does not take
+  them yet (its CUDA provider is not wired up). Python nodes cannot receive them.
+- H.265 RTSP streams are refused.
+- A daemon update that starts and later fails is not rolled back automatically.
 - The crates are not published on crates.io, and there are no prebuilt packages.

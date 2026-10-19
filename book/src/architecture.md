@@ -12,13 +12,16 @@ crates/
   ruro-transport  iceoryx2 shared-memory topics
   ruro-proto      control protocol over Zenoh (deploy, metrics, taps, params, logs), TLS
   ruro-host       executes one process group: threads, wiring, metrics, real-time setup
-  ruro-daemon     per-machine supervisor and Zenoh router, peers, uploads, recording
+  ruro-daemon     per-machine supervisor and Zenoh router, peers, uploads, recording,
+                  updates
   ruro-record     MCAP recording, replay and rosbag2 import
   ruro-schema     message schema export, compatibility checks, Python codegen
   ruro-pkg        `ruro new` and `ruro build`: node packages and generated hosts
-  ruro-ros2       ROS 2 interop: CDR, RIHS01 hashes, rmw_zenoh pub/sub, codegen
+  ruro-ros2       ROS 2 interop: CDR, RIHS01 hashes, rmw_zenoh topics, services
+                  and actions, codegen, dynamic types, launch import
   ruro-tf         transform buffer and tf nodes
   ruro-urdf       URDF and MJCF parsing, forward kinematics
+  ruro-gpu        CUDA driver loaded at run time, device buffers, IPC handles
   ruro-py         Python node API (pyo3), also the `ruro` Python package
   ruro-host-py    ruro-host with an embedded Python interpreter
   ruro-cli        `ruro`
@@ -28,6 +31,7 @@ nodes/
   ruro-nodes-hw    hardware drivers
   ruro-nodes-sim   simulation: MuJoCo, robot state
   ruro-nodes-ml    ONNX inference, YOLO decoding, policies, LeRobot recording
+  ruro-nodes-gpu   GPU upload, download and preprocessing
   ruro-nodes-ros2  ROS 2 bridge nodes
 ```
 

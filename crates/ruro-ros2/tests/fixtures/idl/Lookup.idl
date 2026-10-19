@@ -1,0 +1,21 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from ruro_test_msgs/srv/Lookup.srv
+// generated code does not contain a copyright notice
+
+#include "ruro_test_msgs/msg/Nested.idl"
+#include "ruro_test_msgs/msg/Primitives.idl"
+
+module ruro_test_msgs {
+  module srv {
+    struct Lookup_Request {
+      string key;
+
+      sequence<ruro_test_msgs::msg::Primitives, 2> hints;
+    };
+    struct Lookup_Response {
+      boolean found;
+
+      ruro_test_msgs::msg::Nested value;
+    };
+  };
+};

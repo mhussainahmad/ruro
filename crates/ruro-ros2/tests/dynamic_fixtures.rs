@@ -130,3 +130,37 @@ fn constants_and_defaults_of_the_test_package() {
         .unwrap();
     assert_eq!(a.default_value().to_json(), first["value"]);
 }
+
+#[test]
+fn idl_files_generated_by_rosidl_give_the_same_types() {
+    // fixtures/idl holds the .idl files rosidl generated for ruro_test_msgs.
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/idl");
+    let mut lib = library();
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        let specs = ruro_ros2::idl_file::parse_idl(&text).unwrap();
+        for spec in &specs {
+            lib.resolve(&spec.name).unwrap();
+        }
+        let mut from_idl = lib.interfaces().clone();
+        for spec in specs.iter().cloned() {
+            from_idl.add(spec);
+        }
+        for spec in &specs {
+            let from_msg = lib.resolve(&spec.name).unwrap();
+            let t = dynamic::MessageType::compile(&from_idl, &spec.name).unwrap();
+            assert_eq!(t.hash, from_msg.hash, "{}", spec.name);
+            assert_eq!(t.constants, from_msg.constants, "{}", spec.name);
+            assert_eq!(
+                t.default_value().to_json(),
+                from_msg.default_value().to_json(),
+                "{}",
+                spec.name
+            );
+            checked += 1;
+        }
+    }
+    // 4 messages, a request and response, goal, result and feedback.
+    assert_eq!(checked, 9);
+}

@@ -1536,6 +1536,25 @@ pub fn parse_concatenated(root: &TypeName, text: &str) -> Result<Vec<idl::Messag
     Ok(specs)
 }
 
+/// Parses a type definition as rosbag2 and MCAP files store it, with schema
+/// encoding `ros2msg` or `ros2idl`.
+pub fn parse_schema(root: &TypeName, encoding: &str, text: &str) -> Result<Vec<idl::MessageSpec>> {
+    match encoding {
+        "ros2msg" => parse_concatenated(root, text),
+        "ros2idl" => crate::idl_file::parse_concatenated_idl(text),
+        other => bail!("unsupported schema encoding `{other}`"),
+    }
+}
+
+/// Compiles `root` from a schema as [`parse_schema`] reads it.
+pub fn compile_schema(root: &TypeName, encoding: &str, text: &str) -> Result<Arc<MessageType>> {
+    let mut interfaces = Interfaces::default();
+    for s in parse_schema(root, encoding, text)? {
+        interfaces.add(s);
+    }
+    MessageType::compile(&interfaces, root)
+}
+
 /// Renders the definition of `root` and every type it references in the
 /// concatenated `ros2msg` form, from the parsed definitions. Comments and
 /// layout are not kept; types and names, defaults and constants are.

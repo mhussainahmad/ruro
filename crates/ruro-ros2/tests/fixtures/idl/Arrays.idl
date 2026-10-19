@@ -1,0 +1,109 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from ruro_test_msgs/msg/Arrays.msg
+// generated code does not contain a copyright notice
+
+
+module ruro_test_msgs {
+  module msg {
+    typedef boolean boolean__2[2];
+    typedef octet octet__3[3];
+    typedef uint8 uint8__2[2];
+    typedef float float__3[3];
+    typedef double double__2[2];
+    typedef int8 int8__3[3];
+    typedef uint8 uint8__4[4];
+    typedef int16 int16__2[2];
+    typedef uint16 uint16__2[2];
+    typedef int32 int32__2[2];
+    typedef uint32 uint32__2[2];
+    typedef int64 int64__2[2];
+    typedef uint64 uint64__2[2];
+    typedef string string__2[2];
+    typedef wstring wstring__2[2];
+    @verbatim (language="comment", text=
+      "Fixed, bounded and unbounded arrays of every kind of element.")
+    struct Arrays {
+      boolean__2 fixed_bool;
+
+      octet__3 fixed_byte;
+
+      uint8__2 fixed_char;
+
+      @default (value="(1.0, 2.0, 3.0)")
+      float__3 fixed_f32;
+
+      double__2 fixed_f64;
+
+      int8__3 fixed_i8;
+
+      uint8__4 fixed_u8;
+
+      int16__2 fixed_i16;
+
+      uint16__2 fixed_u16;
+
+      @default (value="(-1, 1)")
+      int32__2 fixed_i32;
+
+      uint32__2 fixed_u32;
+
+      int64__2 fixed_i64;
+
+      uint64__2 fixed_u64;
+
+      @default (value="('a', 'b')")
+      string__2 fixed_s;
+
+      wstring__2 fixed_ws;
+
+      sequence<boolean, 3> bounded_bool;
+
+      sequence<octet, 4> bounded_byte;
+
+      sequence<uint8, 5> bounded_u8;
+
+      sequence<int16, 3> bounded_i16;
+
+      sequence<float, 3> bounded_f32;
+
+      sequence<double, 3> bounded_f64;
+
+      sequence<int64, 2> bounded_i64;
+
+      sequence<string, 3> bounded_s;
+
+      sequence<string<5>, 2> bounded_bounded_s;
+
+      sequence<wstring, 2> bounded_ws;
+
+      sequence<boolean> seq_bool;
+
+      sequence<octet> seq_byte;
+
+      sequence<uint8> seq_char;
+
+      sequence<uint8> seq_u8;
+
+      sequence<int8> seq_i8;
+
+      sequence<uint16> seq_u16;
+
+      @default (value="(5, 6, 7)")
+      sequence<int32> seq_i32;
+
+      sequence<uint32> seq_u32;
+
+      sequence<float> seq_f32;
+
+      sequence<double> seq_f64;
+
+      sequence<uint64> seq_u64;
+
+      sequence<int64> seq_i64;
+
+      sequence<string> seq_s;
+
+      sequence<wstring> seq_ws;
+    };
+  };
+};

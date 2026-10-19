@@ -23,6 +23,7 @@ pub mod discovery;
 pub mod dynamic;
 pub mod hash;
 pub mod idl;
+pub mod idl_file;
 #[rustfmt::skip]
 pub mod msgs;
 pub mod rmw;

@@ -238,13 +238,31 @@ pub fn load_package(name: &str, dir: &Path) -> (Vec<MessageSpec>, Vec<String>) {
         let Ok(entries) = std::fs::read_dir(dir.join(sub)) else {
             continue;
         };
-        let mut files: Vec<PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == sub))
+        let all: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        // A `.idl` is used only where there is no `.msg`/`.srv`/`.action`
+        // (rosidl installs both; some packages are written in IDL).
+        let mut files: Vec<PathBuf> = all
+            .iter()
+            .filter(|p| {
+                p.extension().is_some_and(|e| e == sub)
+                    || (p.extension().is_some_and(|e| e == "idl")
+                        && !all.contains(&p.with_extension(sub)))
+            })
+            .cloned()
             .collect();
         files.sort();
         for path in files {
+            if path.extension().is_some_and(|e| e == "idl") {
+                let file = path.display().to_string();
+                let parsed = std::fs::read_to_string(&path)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|text| crate::idl_file::parse_idl(&text));
+                match parsed {
+                    Ok(s) => specs.extend(s.into_iter().filter(|s| s.name.package == name)),
+                    Err(e) => warnings.push(format!("skipped {file}: {e:#}")),
+                }
+                continue;
+            }
             let stem = path
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())

@@ -1,0 +1,47 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from ruro_test_msgs/msg/Nested.msg
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Pose.idl"
+#include "ruro_test_msgs/msg/Arrays.idl"
+#include "ruro_test_msgs/msg/Primitives.idl"
+#include "std_msgs/msg/Empty.idl"
+#include "std_msgs/msg/Header.idl"
+
+module ruro_test_msgs {
+  module msg {
+    typedef ruro_test_msgs::msg::Primitives ruro_test_msgs__msg__Primitives;
+    typedef ruro_test_msgs__msg__Primitives ruro_test_msgs__msg__Primitives__2[2];
+    typedef std_msgs::msg::Empty std_msgs__msg__Empty;
+    typedef std_msgs__msg__Empty std_msgs__msg__Empty__2[2];
+    module Nested_Constants {
+      const uint8 KIND_A = 1;
+      const uint8 KIND_B = 2;
+    };
+    @verbatim (language="comment", text=
+      "Nested messages, arrays of them and empty messages inside.")
+    struct Nested {
+      std_msgs::msg::Header header;
+
+      uint8 kind;
+
+      ruro_test_msgs::msg::Primitives one;
+
+      ruro_test_msgs__msg__Primitives__2 two;
+
+      sequence<ruro_test_msgs::msg::Arrays> many;
+
+      sequence<ruro_test_msgs::msg::Arrays, 2> few;
+
+      std_msgs::msg::Empty nothing;
+
+      std_msgs__msg__Empty__2 nothings;
+
+      uint8 after_empty;
+
+      sequence<geometry_msgs::msg::Pose> poses;
+
+      double last;
+    };
+  };
+};

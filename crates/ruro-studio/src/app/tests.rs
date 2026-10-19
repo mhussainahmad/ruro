@@ -342,11 +342,11 @@ fn command_palette_runs_commands_and_dismisses() {
     // Quick open lists graphs and opens one with Enter.
     key(&mut h, CTRL, egui::Key::P);
     let palette = h.state_mut().palette.as_mut().unwrap();
-    palette.query = examples().join("arm.yaml").display().to_string();
+    palette.query = examples().join("pid.yaml").display().to_string();
     h.run_steps(2);
     h.key_press(egui::Key::Enter);
     h.run_steps(4);
-    assert_eq!(h.state().doc.name, "arm-demo");
+    assert_eq!(h.state().doc.name, "pid-demo");
     assert_eq!(h.state().tabs().len(), 2);
 }
 
@@ -609,16 +609,16 @@ fn select_all_then_align_and_delete() {
 #[test]
 fn tabs_switch_close_and_confirm_unsaved_changes() {
     let mut h = harness(Some(examples().join("camera.yaml")));
-    h.state_mut().push(Cmd::Open(examples().join("arm.yaml")));
+    h.state_mut().push(Cmd::Open(examples().join("pid.yaml")));
     h.run_steps(3);
     assert_eq!(h.state().tabs().len(), 2);
-    assert_eq!(h.state().doc.name, "arm-demo");
+    assert_eq!(h.state().doc.name, "pid-demo");
 
     h.get_by_label("camera.yaml").click();
     h.run_steps(3);
     assert_eq!(h.state().doc.name, "camera-demo");
     // Opening an open file switches to it instead of opening it twice.
-    h.state_mut().push(Cmd::Open(examples().join("arm.yaml")));
+    h.state_mut().push(Cmd::Open(examples().join("pid.yaml")));
     h.run_steps(3);
     assert_eq!(h.state().tabs().len(), 2);
 
@@ -630,7 +630,7 @@ fn tabs_switch_close_and_confirm_unsaved_changes() {
     assert!(!h.state().doc.can_undo());
 
     // Closing a changed tab asks first.
-    h.get_by_label("arm.yaml").click();
+    h.get_by_label("pid.yaml").click();
     h.run_steps(3);
     key(&mut h, CTRL, egui::Key::W);
     assert!(h.state().confirm_close.is_some());
@@ -925,6 +925,139 @@ fn deploy_flattens_and_watches_resolve_into_composites() {
         matches!(&sent[..], [Command::Watch { daemon: None, node, port }] if node == "group__gray" && port == "out"),
         "{sent:?}"
     );
+}
+
+/// Picks overlays in the title bar, as a user would.
+fn pick_overlay(h: &mut Harness<'static, Studio>, current: &str, name: &str) {
+    h.get_by_label(current).click();
+    h.run_steps(2);
+    h.get_by_label(name).click();
+    h.run_steps(3);
+}
+
+#[test]
+fn overlays_are_shown_read_only_and_run_as_shown() {
+    let tmp = tempdir("overlays");
+    let mut h = harness(Some(examples().join("camera.yaml")));
+    // Graphs without overlays have no picker.
+    assert!(h.query_by_label("Base graph").is_none());
+    let path = copy_example("pid.yaml", &tmp);
+    h.state_mut().push(Cmd::Open(path.clone()));
+    h.run_steps(3);
+    assert_eq!(node_ids(h.state()), ["arm", "pid", "target"]);
+
+    pick_overlay(&mut h, "Base graph", "scaled");
+    {
+        let st = h.state();
+        assert_eq!(st.variant_names(), ["scaled"]);
+        // The canvas shows the effective graph, its changes marked.
+        assert_eq!(node_ids(st), ["arm", "half", "pid", "target"]);
+        let marks = st.variant.as_ref().unwrap().diff.marks();
+        assert_eq!(marks.nodes.get("half"), Some(&crate::diff::Mark::Added));
+        assert_eq!(marks.nodes.get("arm"), Some(&crate::diff::Mark::Changed));
+        assert!(!marks.nodes.contains_key("pid"));
+        assert!(st.issues.is_empty(), "{:?}", st.issues);
+        assert!(!st.doc.dirty);
+    }
+    // Overlays combine; the picker names them all.
+    pick_overlay(&mut h, "scaled", "stiff");
+    assert_eq!(h.state().variant_names(), ["stiff", "scaled"], "file order");
+    let pid = h.state().doc.find("pid").unwrap();
+    assert_eq!(
+        h.state().doc.snarl[pid].params["kp"],
+        serde_json::json!(12.0)
+    );
+
+    // Run deploys what is shown, without overlays of its own.
+    let ctx = h.ctx.clone();
+    h.state_mut().handle_event(
+        &ctx,
+        Event::Connected {
+            daemon: "rover".into(),
+            endpoint: "tcp/127.0.0.1:7447".into(),
+        },
+    );
+    let deploy = |h: &mut Harness<'static, Studio>| {
+        h.state().link.take_sent();
+        h.state_mut().push(Cmd::Deploy);
+        h.run_steps(2);
+        let sent = h.state().link.take_sent();
+        let Some(Command::Deploy(yaml)) = sent.first() else {
+            panic!("{sent:?}")
+        };
+        ruro_graph::Graph::from_yaml(yaml).unwrap()
+    };
+    let g = deploy(&mut h);
+    assert!(
+        g.nodes.contains_key("half") && g.overlays.is_empty(),
+        "{g:?}"
+    );
+    assert_eq!(g.nodes["pid"].params["kp"], serde_json::json!(12.0));
+    h.state_mut().handle_event(
+        &ctx,
+        Event::Reply {
+            op: "deploy",
+            result: Ok(String::new()),
+        },
+    );
+    let mut status = camera_status(None, None);
+    status.graph = Some("pid-demo".into());
+    h.state_mut().handle_event(&ctx, Event::Status(status));
+    h.run_steps(2);
+    assert!(!h.state().undeployed_changes());
+    // Another selection is a change the running graph does not have.
+    pick_overlay(&mut h, "stiff + scaled", "Base graph");
+    assert!(h.state().variant.is_none());
+    assert_eq!(node_ids(h.state()), ["arm", "pid", "target"]);
+    assert!(h.state().undeployed_changes());
+    // The base graph runs without the overlays it carries.
+    let g = deploy(&mut h);
+    assert!(
+        !g.nodes.contains_key("half") && g.overlays.is_empty(),
+        "{g:?}"
+    );
+
+    // Saving writes the document, not the overlay shown.
+    pick_overlay(&mut h, "Base graph", "scaled");
+    key(&mut h, CTRL, egui::Key::S);
+    assert_eq!(
+        h.state().variant_names(),
+        ["scaled"],
+        "still shown after saving"
+    );
+    let saved = ruro_graph::Graph::load(&path).unwrap();
+    assert!(!saved.nodes.contains_key("half"));
+    assert_eq!(saved.overlay_names(), ["stiff", "scaled"]);
+
+    // An edit puts the document back first and applies to it.
+    h.state_mut().push(Cmd::AddNode("std/sine".into()));
+    h.run_steps(3);
+    assert!(h.state().variant.is_none());
+    assert_eq!(node_ids(h.state()), ["arm", "pid", "sine", "target"]);
+    assert_eq!(h.state().doc.overlays.len(), 2);
+}
+
+#[test]
+fn removed_nodes_are_drawn_as_ghosts_under_an_overlay() {
+    let tmp = tempdir("overlay-ghosts");
+    let path = tmp.join("g.yaml");
+    std::fs::write(
+        &path,
+        "name: g\nnodes:\n  a: { type: std/sine, rate: 10, pos: [0, 0] }\n  b: { type: std/gain, pos: [300, 0] }\nwires: [a.value -> b.input]\noverlays:\n  lean: { clock: sim, nodes: { b: null } }\n",
+    )
+    .unwrap();
+    let mut h = harness(Some(path));
+    pick_overlay(&mut h, "Base graph", "lean");
+    let st = h.state();
+    assert_eq!(node_ids(st), ["a"]);
+    let v = st.variant.as_ref().unwrap();
+    assert_eq!(
+        v.diff.marks().ghosts,
+        [("b".to_owned(), "std/gain".to_owned(), [300.0, 0.0])]
+    );
+    assert_eq!(v.diff.graph, ["clock wall → sim"]);
+    assert_eq!(st.doc.clock, ruro_graph::ClockSource::Sim);
+    assert_eq!(st.base_doc().clock, ruro_graph::ClockSource::Wall);
 }
 
 #[test]
@@ -1755,7 +1888,7 @@ fn screenshots() {
     let tmp = tempdir("shots");
     let path = copy_example("camera.yaml", &tmp);
     let mut h = shot(Some(path));
-    h.state_mut().push(Cmd::Open(examples().join("arm.yaml")));
+    h.state_mut().push(Cmd::Open(examples().join("pid.yaml")));
     h.run_steps(2);
     let first = h.state().tab_order[0];
     h.state_mut().push(Cmd::SwitchTab(first));
@@ -1791,6 +1924,14 @@ fn screenshots() {
     h.state_mut().push(Cmd::OpenSubgraph("vision".into()));
     h.state_mut().push(Cmd::FitView);
     save(&mut h, "studio-subgraph");
+
+    // An overlay applied: the effective graph, its changes marked.
+    let mut h = shot(Some(examples().join("pid.yaml")));
+    h.state_mut().push(Cmd::SetVariant(vec!["scaled".into()]));
+    h.run_steps(2);
+    h.state_mut().push(Cmd::Focus(Some("half".into())));
+    h.state_mut().push(Cmd::FitView);
+    save(&mut h, "studio-overlay");
 
     // Multi-selection and the close prompt.
     let mut h = shot(Some(examples().join("camera.yaml")));

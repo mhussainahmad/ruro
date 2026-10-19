@@ -7,7 +7,7 @@ mod control;
 mod image;
 mod signal;
 
-pub use control::{FakeArm, Pid};
+pub use control::{FakeArm, Pid, ScanAvoid};
 pub use image::{Blur, FakeCamera, Grayscale, ImageStats};
 pub use signal::{Gain, Sine};
 

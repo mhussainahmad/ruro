@@ -20,6 +20,8 @@ pub enum GraphError {
     Io(#[from] std::io::Error),
     #[error("composite node `{node}`: {message}")]
     Composite { node: String, message: String },
+    #[error("overlay `{overlay}`: {message}")]
+    Overlay { overlay: String, message: String },
 }
 
 /// A complete dataflow graph.
@@ -45,6 +47,10 @@ pub struct Graph {
     pub nodes: IndexMap<String, NodeInstance>,
     #[serde(default)]
     pub wires: Vec<Wire>,
+    /// Named variants of the graph, selected when it is run (see
+    /// [`Graph::with_overlays`]).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub overlays: IndexMap<String, crate::Overlay>,
 }
 
 /// How and where a process group runs.

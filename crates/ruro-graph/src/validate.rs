@@ -69,6 +69,14 @@ pub fn validate_in(graph: &Graph, registry: &Registry, base: &Path) -> Vec<Issue
             }),
         }
         if let Ok(sub) = crate::composite::subgraph(id, inst, base) {
+            if !sub.graph.overlays.is_empty() {
+                issues.push(Issue {
+                    node: Some(id.clone()),
+                    message: "the subgraph has overlays, which only apply to the top-level \
+                              graph; move them there"
+                        .into(),
+                });
+            }
             for inner in validate_in(&sub.graph, registry, &sub.base) {
                 issues.push(Issue {
                     node: Some(id.clone()),
@@ -95,6 +103,7 @@ pub fn validate_in(graph: &Graph, registry: &Registry, base: &Path) -> Vec<Issue
             },
         });
     }
+    issues.extend(graph.overlay_issues());
     let desc = |id: &str, kind: &str| -> Option<&NodeDescriptor> {
         composites.get(id).or_else(|| registry.get(kind))
     };
@@ -253,6 +262,26 @@ mod tests {
             "name: ok\nnodes:\n  a: { type: t/src, rate: 10, params: { gain: 2 } }\n  b: { type: t/sink }\nwires: [a.out -> b.in]\n",
         );
         assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    #[test]
+    fn overlays_that_do_not_apply_are_reported() {
+        let issues = messages(
+            "name: ok\nnodes:\n  a: { type: t/src, rate: 10 }\noverlays:\n  good: { nodes: { a: { rate: 5 } } }\n  bad: { nodes: { b: null } }\n",
+        );
+        assert_eq!(
+            issues,
+            ["overlay `bad`: cannot remove node `b`: it is not in the graph"]
+        );
+        let issues = messages(
+            "name: top\nnodes:\n  c:\n    type: composite\n    graph:\n      name: inner\n      nodes: { a: { type: t/src, rate: 10 } }\n      overlays: { x: { clock: sim } }\n",
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.starts_with("c: the subgraph has overlays")),
+            "{issues:?}"
+        );
     }
 
     #[test]

@@ -57,7 +57,7 @@ the clock over shared memory (or the network), so every process follows the same
   output, and so does `ruro check` when it can reach a daemon.
 
 The MuJoCo node (`sim/mujoco`) publishes its simulation time as a `std/Clock`; see
-`examples/arm-sim.yaml`. Flattening composite nodes keeps the graph's `clock` setting.
+`examples/arm.yaml`, whose `real` overlay switches the graph back to the wall clock. Flattening composite nodes keeps the graph's `clock` setting.
 
 ## Emergency stop
 
@@ -98,6 +98,7 @@ until a command arrives that was sent after the release:
 | Node | Safe state |
 |---|---|
 | `std/fake-arm` | commanded velocity zero; the joint slows down with its usual lag |
+| `std/scan-avoid` | sends a zero twist for every scan |
 | `hw/dynamixel`, `hw/so100-arm` | the servos hold their present position; torque stays enabled so the arm does not fall |
 | `hw/odrive` | axes stay in closed-loop control: zero velocity (velocity mode), hold the present position (position mode) or zero torque (torque mode, the joint goes limp) |
 | `hw/joint-jog` | stick input is ignored and the targets follow the measured joint state, so the arm holds where it is |

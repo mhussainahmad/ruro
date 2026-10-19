@@ -80,10 +80,23 @@ impl SecurityArgs {
     }
 }
 
+/// Overlays to apply to a graph file.
+#[derive(Args, Clone, Default)]
+pub struct OverlayArgs {
+    /// Apply the graph's overlay of this name. Repeatable; overlays are
+    /// applied in the order given.
+    #[arg(long = "overlay", short = 'o', value_name = "NAME")]
+    pub overlays: Vec<String>,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Run a graph in the foreground. Starts a daemon if none is reachable.
-    Run { graph: PathBuf },
+    Run {
+        graph: PathBuf,
+        #[command(flatten)]
+        overlay: OverlayArgs,
+    },
     /// Run the per-machine daemon in the foreground.
     Daemon {
         /// Name other tools use to address this daemon (default: hostname).
@@ -116,11 +129,19 @@ enum Cmd {
         /// Name to store the binary under (default: its file name).
         #[arg(long, requires = "host_binary")]
         host_name: Option<String>,
+        #[command(flatten)]
+        overlay: OverlayArgs,
     },
     /// Stop the running graph.
     Stop,
     /// Validate a graph against the available node types.
-    Check { graph: PathBuf },
+    Check {
+        graph: PathBuf,
+        #[command(flatten)]
+        overlay: OverlayArgs,
+    },
+    /// List the overlays of a graph file and what each changes.
+    Overlays { graph: PathBuf },
     /// Show the daemon, its groups and live node metrics.
     Status,
     /// List every daemon reachable through the connected one.
@@ -174,6 +195,8 @@ enum Cmd {
         /// Deploy this graph first.
         #[arg(long)]
         graph: Option<PathBuf>,
+        #[command(flatten)]
+        overlay: OverlayArgs,
     },
     /// Control a running replay.
     Playback {
@@ -288,12 +311,19 @@ fn run(cli: Cli) -> Result<()> {
             daemon.shutdown();
             Ok(())
         }
-        Cmd::Run { graph } => run_graph(&cli.connect, cli.daemon.as_deref(), &security, &graph),
+        Cmd::Run { graph, overlay } => run_graph(
+            &cli.connect,
+            cli.daemon.as_deref(),
+            &security,
+            &graph,
+            &overlay.overlays,
+        ),
         Cmd::Deploy {
             graph,
             to,
             host_binary,
             host_name,
+            overlay,
         } => {
             if graph.is_none() && host_binary.is_none() {
                 bail!("nothing to deploy: give a graph, --host-binary, or both");
@@ -303,7 +333,9 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{}", fleet::upload_host(&c, &bin, host_name.as_deref())?);
             }
             if let Some(graph) = graph {
-                println!("{}", deploy(&c, &graph)?);
+                println!("{}", deploy(&c, &graph, &overlay.overlays)?);
+            } else if !overlay.overlays.is_empty() {
+                bail!("--overlay needs a graph");
             }
             Ok(())
         }
@@ -311,9 +343,21 @@ fn run(cli: Cli) -> Result<()> {
             println!("{}", client()?.request(Ctl::Stop, "")?);
             Ok(())
         }
-        Cmd::Check { graph: path } => {
+        Cmd::Check {
+            graph: path,
+            overlay,
+        } => {
             let daemon = daemon_session(&cli.connect, cli.daemon.as_deref(), &security)?;
-            check::check(&path, daemon.as_ref().map(|(s, k)| (s, k)))
+            check::check(
+                &path,
+                &overlay.overlays,
+                daemon.as_ref().map(|(s, k)| (s, k)),
+            )
+        }
+        Cmd::Overlays { graph } => {
+            let g = Graph::load(&graph).with_context(|| format!("loading {}", graph.display()))?;
+            print!("{}", output::overlays(&g));
+            Ok(())
         }
         Cmd::Status => status(&client()?),
         Cmd::Fleet => {
@@ -377,10 +421,17 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Record { file, stop } => recording::record(&client()?, file, stop),
-        Cmd::Play { file, rate, graph } => {
+        Cmd::Play {
+            file,
+            rate,
+            graph,
+            overlay,
+        } => {
             let c = client()?;
             if let Some(g) = graph {
-                println!("{}", deploy(&c, &g)?);
+                println!("{}", deploy(&c, &g, &overlay.overlays)?);
+            } else if !overlay.overlays.is_empty() {
+                bail!("--overlay needs --graph");
             }
             recording::play(&c, &file, rate)
         }
@@ -405,15 +456,24 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn deploy(c: &Client, path: &Path) -> Result<String> {
-    c.request(Ctl::Deploy, &flattened_yaml(path)?)
+fn deploy(c: &Client, path: &Path, overlays: &[String]) -> Result<String> {
+    c.request(Ctl::Deploy, &flattened_yaml(path, overlays)?)
 }
 
-/// Loads a graph and expands its subgraphs, resolving `graph:` file
-/// references relative to the graph's own directory. The daemon may run on
-/// another machine, so it must receive a self-contained graph.
-fn flattened_yaml(path: &Path) -> Result<String> {
+/// Loads a graph file and applies `overlays` to it, in order.
+fn load_graph(path: &Path, overlays: &[String]) -> Result<Graph> {
     let graph = Graph::load(path).with_context(|| format!("loading {}", path.display()))?;
+    graph
+        .with_overlays(overlays)
+        .with_context(|| format!("applying overlays to {}", path.display()))
+}
+
+/// Loads a graph, applies `overlays` and expands its subgraphs, resolving
+/// `graph:` file references relative to the graph's own directory. The
+/// daemon may run on another machine, so it must receive a self-contained
+/// graph.
+fn flattened_yaml(path: &Path, overlays: &[String]) -> Result<String> {
+    let graph = load_graph(path, overlays)?;
     let flat = graph
         .flatten_in(&base_dir(path))
         .with_context(|| format!("expanding subgraphs of {}", path.display()))?;
@@ -460,9 +520,17 @@ pub fn connect_or_start(
 }
 
 /// `ruro run`: deploy to a reachable daemon, or start one in this process.
-fn run_graph(endpoint: &str, name: Option<&str>, security: &Security, path: &Path) -> Result<()> {
+fn run_graph(
+    endpoint: &str,
+    name: Option<&str>,
+    security: &Security,
+    path: &Path,
+    overlays: &[String],
+) -> Result<()> {
+    // A typo in an overlay name is reported before a daemon is started.
+    load_graph(path, overlays)?;
     let (daemon, c) = connect_or_start(endpoint, name, security)?;
-    println!("{}", deploy(&c, path)?);
+    println!("{}", deploy(&c, path, overlays)?);
     if daemon.is_none() {
         // Host output goes to the remote daemon's terminal; mirror it here.
         stream_logs(&c.session, &c.keys)?;
@@ -707,6 +775,68 @@ mod tests {
     }
 
     #[test]
+    fn overlays_are_applied_in_the_order_given() {
+        let cli = Cli::try_parse_from(["ruro", "run", "g.yaml", "--overlay", "sim", "-o", "bench"])
+            .unwrap();
+        assert!(
+            matches!(cli.cmd, Cmd::Run { overlay, .. } if overlay.overlays == ["sim", "bench"])
+        );
+        for args in [
+            &["ruro", "check", "g.yaml", "--overlay", "real"][..],
+            &["ruro", "deploy", "g.yaml", "--overlay", "real"],
+            &[
+                "ruro",
+                "play",
+                "r.mcap",
+                "--graph",
+                "g.yaml",
+                "--overlay",
+                "real",
+            ],
+            &["ruro", "soak", "g.yaml", "--overlay", "real"],
+            &["ruro", "overlays", "g.yaml"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_ok(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn deploys_send_graphs_with_overlays_applied() {
+        let dir = std::env::temp_dir().join(format!("ruro-cli-overlay-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("parts")).unwrap();
+        std::fs::write(
+            dir.join("parts/source.yaml"),
+            "name: source\noutputs:\n  value: s.value\nnodes:\n  s: { type: std/sine, rate: 10 }\n",
+        )
+        .unwrap();
+        let top = dir.join("top.yaml");
+        std::fs::write(
+            &top,
+            "name: top\nnodes:\n  src: { type: std/sine, rate: 10 }\n  g: { type: std/gain }\nwires: [src.value -> g.input]\noverlays:\n  file:\n    nodes:\n      src: { type: graph:parts/source.yaml }\n  fast:\n    clock: sim\n    nodes:\n      g: { params: { k: 3 } }\n",
+        )
+        .unwrap();
+        let load = |overlays: &[&str]| {
+            let overlays: Vec<String> = overlays.iter().map(|s| s.to_string()).collect();
+            flattened_yaml(&top, &overlays).map(|y| Graph::from_yaml(&y).unwrap())
+        };
+        let base = load(&[]).unwrap();
+        assert!(base.overlays.is_empty(), "the daemon gets no overlays");
+        assert_eq!(base.nodes["src"].kind, "std/sine");
+        // Overlays apply before subgraphs are expanded, in order.
+        let flat = load(&["file", "fast"]).unwrap();
+        let ids: Vec<&str> = flat.nodes.keys().map(String::as_str).collect();
+        assert_eq!(ids, ["src__s", "g"]);
+        assert_eq!(flat.nodes["g"].params["k"], serde_json::json!(3));
+        assert_eq!(flat.clock, ruro_graph::ClockSource::Sim);
+        let e = format!("{:#}", load(&["slow"]).unwrap_err());
+        assert!(
+            e.contains("overlay `slow`") && e.contains("file, fast"),
+            "{e}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn deploys_send_graphs_with_file_subgraphs_expanded() {
         let dir = std::env::temp_dir().join(format!("ruro-cli-flatten-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("parts")).unwrap();
@@ -723,7 +853,7 @@ mod tests {
         .unwrap();
 
         // Resolved against the graph's directory, not the working directory.
-        let flat = Graph::from_yaml(&flattened_yaml(&top).unwrap()).unwrap();
+        let flat = Graph::from_yaml(&flattened_yaml(&top, &[]).unwrap()).unwrap();
         let kinds: Vec<&str> = flat.nodes.values().map(|n| n.kind.as_str()).collect();
         assert_eq!(kinds, ["std/sine", "std/gain"]);
         assert_eq!(flat.wires.len(), 1);

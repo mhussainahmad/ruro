@@ -434,6 +434,29 @@ fn more_commands(s: &Studio) -> Vec<Item> {
         "",
         Cmd::CompareDialog,
     ));
+    if s.doc.parent.is_none() {
+        let shown = s.variant_names();
+        if !shown.is_empty() {
+            v.push(item(
+                icons::WORKFLOW,
+                "Run: Show Base Graph",
+                "Edit the graph without overlays",
+                "",
+                Cmd::SetVariant(Vec::new()),
+            ));
+        }
+        for name in s.base_doc().overlays.keys() {
+            if shown != [name.clone()] {
+                v.push(item(
+                    icons::LAYERS,
+                    format!("Run: Use Overlay {name}"),
+                    "Show and run the graph with this overlay applied",
+                    "",
+                    Cmd::SetVariant(vec![name.clone()]),
+                ));
+            }
+        }
+    }
     if s.compare.is_some() {
         v.push(item(
             icons::X,

@@ -236,9 +236,13 @@ only needed without one.
 | `std/gain` | `input: Scalar` | `output: Scalar` | `k` |
 | `std/pid` | `setpoint: Scalar`, `measured: Scalar` | `command: Scalar` | `kp`, `ki`, `kd`, `limit` |
 | `std/fake-arm` (200 Hz) | `velocity: Scalar` | `position: Scalar`, `state: JointState` | `lag`, `max_speed` |
+| `std/scan-avoid` | `scan: LaserScan` | `cmd: Twist` | `speed`, `turn`, `stop_distance`, `sector_deg` |
 
 `std/fake-arm` stops on an [emergency stop](runtime.md#emergency-stop): its commanded
-velocity drops to zero.
+velocity drops to zero. `std/scan-avoid` is a reactive obstacle avoider for
+differential-drive bases: it drives ahead while nothing is within `stop_distance` in the
+sector ahead and otherwise turns on the spot towards the side with more room; while the stop
+is engaged it sends zero twists.
 
 Run `ruro nodes -v` for ranges, defaults and descriptions. The standard host also links the
 [hardware](hardware.md), [simulation](simulation.md), [machine learning](ml.md) and

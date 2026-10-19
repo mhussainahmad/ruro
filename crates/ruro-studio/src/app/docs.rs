@@ -41,6 +41,7 @@ impl Studio {
 
     /// Opens `doc` in a new tab and shows it. An untouched empty tab is reused.
     pub(crate) fn new_tab(&mut self, doc: Doc) {
+        self.leave_variant();
         self.want_running_graph = false;
         if Self::pristine(&self.doc) {
             let old = self.doc.uid;
@@ -65,6 +66,7 @@ impl Studio {
         if uid == self.doc.uid {
             return;
         }
+        self.leave_variant();
         let Some(i) = self.parked.iter().position(|d| d.uid == uid) else {
             return;
         };
@@ -86,6 +88,7 @@ impl Studio {
     }
 
     pub(crate) fn close_tab(&mut self, uid: u64, discard: bool) {
+        self.leave_variant();
         let Some(doc) = self.doc_by_uid(uid) else {
             return;
         };
@@ -418,7 +421,8 @@ impl Studio {
 
     fn autosave_all(&mut self) {
         let Some(store) = &self.store else { return };
-        for d in std::iter::once(&self.doc).chain(&self.parked) {
+        // Overlays shown on the canvas are not part of the document.
+        for d in std::iter::once(self.base_doc()).chain(&self.parked) {
             if d.dirty && d.parent.is_none() {
                 if let Ok(yaml) = d.to_graph(&self.registry).to_yaml()
                     && let Err(e) = store.write_autosave(d.uid, &d.name, d.path.as_deref(), &yaml)
@@ -468,6 +472,7 @@ impl Studio {
 
     /// Called when the window closes: unsaved work is kept for recovery.
     pub(crate) fn shutdown(&mut self) {
+        self.leave_variant();
         self.doc.commit();
         self.autosave_all();
         self.save_settings_tick();

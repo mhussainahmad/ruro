@@ -1,6 +1,6 @@
 //! Terminal formatting.
 
-use ruro_graph::Registry;
+use ruro_graph::{Graph, Registry};
 use ruro_proto::{DaemonStatus, GroupMetrics, GroupState, Level, LogLine, NodeState, Preview};
 
 /// Prints a line from a background callback. Exits quietly when stdout is
@@ -261,9 +261,35 @@ pub fn duration(s: f64) -> String {
     }
 }
 
+/// `ruro overlays`: each overlay of `graph` and what it changes.
+pub fn overlays(graph: &Graph) -> String {
+    if graph.overlays.is_empty() {
+        return format!("{} has no overlays\n", graph.name);
+    }
+    let mut out = String::new();
+    for (name, overlay) in &graph.overlays {
+        out.push_str(name);
+        out.push('\n');
+        for line in overlay.summary() {
+            out.push_str(&format!("    {line}\n"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlays_are_listed_with_their_changes() {
+        let g = Graph::from_yaml(
+            "name: g\nnodes:\n  a: { type: t/a }\noverlays:\n  sim: { clock: sim }\n  real: { nodes: { a: { type: t/b } } }\n",
+        )
+        .unwrap();
+        assert_eq!(overlays(&g), "sim\n    clock sim\nreal\n    a: type t/b\n");
+        assert_eq!(overlays(&Graph::new("p")), "p has no overlays\n");
+    }
 
     #[test]
     fn colour_codes_only_when_colouring() {

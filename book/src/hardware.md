@@ -88,13 +88,14 @@ crate. Both are BSD-2-Clause, which is compatible with ruro's MIT/Apache-2.0 lic
 binary built with the feature must include OpenH264's copyright notice. The build compiles
 Cisco's bundled C++ source (about 15 s) and adds about 1.4 MB to the host. Without `nasm`
 on the build machine there is no assembly, and decoding is up to three times slower.
-Cisco's royalty-free H.264 patent licence covers only Cisco's own prebuilt binaries, not
-builds from source, so check what applies before shipping binaries built with `h264`. The
-`openh264` crate can also load Cisco's binary at run time; that is not wired up yet.
+Cisco's H.264 patent licence (through MPEG LA) covers only Cisco's own prebuilt binaries
+([binary licence](http://www.openh264.org/BINARY_LICENSE.txt)), not builds from source, so
+check what applies before shipping binaries built with `h264`. The `openh264` crate can
+also load Cisco's binary at run time; that is not wired up yet.
 
 Not supported yet: H.265 (a stream that offers only H.265 is refused with a message
 saying so; it would need an RFC 7798 depacketizer and a decoder), audio, RTSPS and SRTP,
-multicast, RTCP receiver reports (keep-alives were enough for the servers tested), and
+multicast, RTCP receiver reports (mediamtx kept UDP sessions alive on keep-alives alone), and
 RTSP 2.0.
 
 ## Intel RealSense
@@ -167,8 +168,9 @@ The RTSP test has been run against [mediamtx](https://github.com/bluenviron/medi
 1.21.2, fed by ffmpeg (`testsrc2` encoded with libx264) and by GStreamer
 (`videotestsrc ! jpegenc ! rtpjpegpay` into a `udp+rtp` source), with Basic and with Digest
 authentication. 30 frames arrived over each transport and decoded, and ffmpeg decoded the
-recorded `encoded` output without errors. The RealSense test has not been run with the
-library present.
+recorded `encoded` output without errors. With `RURO_TEST_RTSP_SECONDS=75` sessions over
+both transports outlived the server's 60 s session timeout on keep-alives. The RealSense
+test has not been run with the library present.
 
 ## Driver notes
 

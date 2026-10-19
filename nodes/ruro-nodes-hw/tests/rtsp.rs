@@ -500,21 +500,39 @@ fn keepalives_are_sent_within_the_session_timeout() {
 /// Opt-in check against a real server, e.g. mediamtx fed by ffmpeg:
 /// `RURO_TEST_RTSP_URL=rtsp://127.0.0.1:8554/stream cargo test -p ruro-nodes-hw
 /// --features h264 --test rtsp real_server -- --nocapture`. Both transports
-/// must deliver decoded frames. `RURO_TEST_RTSP_DUMP=dir` writes the last
-/// image of each as a PPM file and the encoded frames as one stream.
+/// must deliver decoded frames. `RURO_TEST_RTSP_SECONDS=n` keeps each
+/// session open for n seconds (past the server's session timeout, to check
+/// keep-alives) and requires frames to still be arriving at the end.
+/// `RURO_TEST_RTSP_DUMP=dir` writes the last image of each as a PPM file and
+/// the encoded frames as one stream.
 #[test]
 fn real_server() {
     let Ok(url) = std::env::var("RURO_TEST_RTSP_URL") else {
         eprintln!("skipped: set RURO_TEST_RTSP_URL to test against a real RTSP server");
         return;
     };
+    let hold: f64 = std::env::var("RURO_TEST_RTSP_SECONDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
     for transport in ["tcp", "udp"] {
         let mut h = camera(url.clone(), transport, true);
         let start = Instant::now();
-        let (images, encoded) = run_until(&mut h, Duration::from_secs(20), |i, _| i.len() >= 30);
+        let (mut seen, mut last_new) = (0, Instant::now());
+        let (images, encoded) = run_until(&mut h, Duration::from_secs_f64(hold + 20.0), |i, _| {
+            if i.len() > seen {
+                (seen, last_new) = (i.len(), Instant::now());
+            }
+            i.len() >= 30 && start.elapsed().as_secs_f64() >= hold
+        });
         let secs = start.elapsed().as_secs_f64();
         drop(h);
         assert!(!images.is_empty(), "{transport}: no images from {url}");
+        assert!(
+            last_new.elapsed() < Duration::from_secs(2),
+            "{transport}: frames stopped {:.1} s before the end",
+            last_new.elapsed().as_secs_f64()
+        );
         let last = images.last().unwrap();
         let mean = last.data.iter().map(|&v| v as f64).sum::<f64>() / last.data.len() as f64;
         eprintln!(

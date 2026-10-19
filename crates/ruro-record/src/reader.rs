@@ -203,7 +203,12 @@ pub fn merge(inputs: &[PathBuf], output: &Path, compress: bool) -> Result<Info> 
         let id = match ids.get(&(i, m.channel.id)) {
             Some(&id) => id,
             None => {
-                let id = writer.channel(m.topic(), m.ty(), m.encoding())?;
+                let id = writer.channel_with_metadata(
+                    m.topic(),
+                    m.ty(),
+                    m.encoding(),
+                    &m.channel.metadata,
+                )?;
                 ids.insert((i, m.channel.id), id);
                 id
             }

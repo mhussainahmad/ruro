@@ -5394,6 +5394,7 @@ dependencies = [
  "memmap2",
  "parking_lot",
  "ruro-msg",
+ "ruro-ros2",
  "serde_json",
  "tracing",
 ]

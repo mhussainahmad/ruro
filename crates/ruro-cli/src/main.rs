@@ -201,7 +201,8 @@ enum Cmd {
     New(ruro_pkg::cli::NewArgs),
     /// Build a host binary that links the packages listed in ruro.toml.
     Build(ruro_pkg::cli::BuildArgs),
-    /// ROS 2 interop: list topics, generate message types, compute type hashes.
+    /// ROS 2 interop: list topics, services and actions, call services,
+    /// generate message types, compute type hashes.
     Ros2(ruro_ros2::cli::Ros2Args),
 }
 

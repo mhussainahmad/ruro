@@ -22,13 +22,16 @@ pub mod codegen;
 pub mod discovery;
 pub mod hash;
 pub mod idl;
+mod json_cdr;
 #[rustfmt::skip]
 pub mod msgs;
 pub mod rmw;
 pub mod time;
 
-pub use discovery::{TopicInfo, bridge_kinds, list_topics};
-pub use rmw::{Endpoint, Publisher, Qos, Reliability, Subscriber};
+pub use discovery::{
+    ActionInfo, ServiceInfo, TopicInfo, bridge_kinds, list_actions, list_services, list_topics,
+};
+pub use rmw::{Client, Durability, Endpoint, History, Publisher, Qos, Reliability, Subscriber};
 
 mod bundled {
     include!(concat!(env!("OUT_DIR"), "/bundled.rs"));

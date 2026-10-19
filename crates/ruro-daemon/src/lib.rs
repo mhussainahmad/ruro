@@ -517,6 +517,7 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             None => String::new(),
         }),
         "ping" => Ok(st.name.clone()),
+        "clock" => Ok(ruro_msg::now_ns().to_string()),
         "kill" => {
             let group = text().trim().to_owned();
             // Groups of a graph that spans machines run where it pins them.

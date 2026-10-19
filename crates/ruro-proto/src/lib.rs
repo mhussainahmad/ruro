@@ -146,6 +146,9 @@ pub enum Ctl {
     /// descriptor, has the node's host apply it and replies once the node
     /// has accepted it. Forwarded to the machine that runs the node.
     Param,
+    /// Reply: the daemon's clock, in nanoseconds since the Unix epoch. A
+    /// daemon recording peers' groups estimates their clock offsets with it.
+    Clock,
 }
 
 impl Ctl {
@@ -165,6 +168,7 @@ impl Ctl {
             Ctl::Validate => "validate",
             Ctl::Param => "param",
             Ctl::RecordPart => "record-part",
+            Ctl::Clock => "clock",
         }
     }
 }

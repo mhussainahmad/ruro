@@ -5,7 +5,9 @@ them later: to debug a run after the fact, to develop perception without the rob
 compare two versions of a node on the same input.
 
 > **Status:** implemented and tested end to end through the daemon (record a graph, replay
-> it, compare downstream outputs) and against a rosbag2 fixture.
+> it, compare downstream outputs), through two daemons on one machine (a graph spanning
+> both, a peer that goes away mid-recording) and against a rosbag2 fixture. Clock-offset
+> correction is unit-tested only: both test daemons share one clock.
 
 ## Recording
 
@@ -34,9 +36,9 @@ log time is the send stamp. Each host writes its own segment (under the daemon's
 directory) and the daemon merges them, so recording never moves messages between processes.
 
 - A graph must be running, and the file's directory must exist.
-- Only the groups running on the daemon you talk to are recorded. For a graph that spans
-  [machines](multi-machine.md), the groups on other machines are not in the file; start a
-  recording on each of their daemons as well.
+- For a graph that spans [machines](multi-machine.md), every machine records its own groups
+  and `ruro record --stop` collects their parts into the one file (see
+  [below](#recordings-across-machines)).
 - The path is on the daemon's machine. `ruro record` makes a relative path absolute against
   the directory you run it in, so use absolute paths when the daemon is remote.
 - `ruro stop`, or deploying another graph, also ends the recording.
@@ -59,9 +61,34 @@ replay only some nodes, record (or keep) only their channels. `ruro play` shows 
 position until the replay ends; <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. `ruro playback`
 controls it from another terminal, and the studio shows a timeline while it plays.
 
-Recording and replay cover the process groups of the daemon you talk to. In a
-[multi-machine graph](multi-machine.md), groups running on other machines are neither
-recorded nor fed.
+## Recordings across machines
+
+Recording and replay cover every machine of a [multi-machine graph](multi-machine.md).
+Talk to the daemon the graph was deployed to:
+
+- `ruro record` asks every peer running groups of the graph to record them. The reply names
+  the groups on each machine, for example
+  ``recording 3 group(s) to /data/run1.mcap: b; on `robot`: a, c``.
+- `ruro record --stop` collects each peer's part and merges it into the one file. The reply
+  names the groups recorded on each machine (``from `robot`: a, c``) and every machine that
+  could not record (``not recorded: the groups on `robot` (...)``). A machine that goes away
+  mid-recording loses its part; the file holds everything else.
+- Replay mutes each recorded node on the machine that runs it and sends the recorded
+  messages there, so nodes downstream on any machine are fed.
+
+Log times are each machine's own clock. When a recording starts, the daemon measures each
+peer's clock against its own (the peer's reading against the middle of a round trip, best of
+eight). If the offset is larger than half the round trip, which is all the measurement can
+resolve, the peer's part is shifted onto the daemon's clock when it is merged and the reply
+says so: ``from `robot`: a (clock +41.2 ms ahead, corrected to within 0.3 ms)``. Otherwise
+the times are left as they are. The correction is a single offset per recording: it does
+not follow clocks that drift during a long recording, and on a busy network it is only as
+good as the round trip. Keep the robot's computers synchronised with chrony (NTP) or PTP
+when you compare their timestamps closely. A peer from an older version that cannot report
+its clock is merged uncorrected, and the reply says `clock offset unknown`.
+
+A large peer part can take longer than the CLI's 10 s request timeout to collect. The
+daemon still writes the file.
 
 ## ROS 2 bags
 

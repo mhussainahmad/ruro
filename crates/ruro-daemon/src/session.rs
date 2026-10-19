@@ -7,7 +7,10 @@
 //! record theirs the same way; when the recording stops, each merges its
 //! segments and the daemon fetches the result and merges it in. Replies
 //! name the groups recorded on every machine, and the machines that could
-//! not record.
+//! not record. Log times are each machine's clock: when the recording
+//! starts the daemon measures every peer's clock offset, and shifts the
+//! peer's part onto its own clock if the offset is larger than the
+//! measurement can resolve.
 //!
 //! Replay: the daemon streams a recording and publishes each message of a
 //! replayed node on that node's injection key, under the daemon that runs
@@ -33,8 +36,70 @@ pub struct RecordSession {
     pub target: RecordTarget,
     /// Where hosts write their segments.
     pub dir: PathBuf,
-    /// Peers recording their groups for this recording.
-    pub peers: Vec<String>,
+    /// Peers recording their groups for this recording, with their clock
+    /// offsets when they could be measured.
+    pub peers: Vec<(String, Option<ClockOffset>)>,
+}
+
+/// How far a peer's clock is ahead of this daemon's, measured NTP-style:
+/// the peer's reading is compared with the middle of the round trip that
+/// fetched it, so the error is at most half the round trip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClockOffset {
+    pub offset_ns: i64,
+    pub uncertainty_ns: u64,
+}
+
+impl ClockOffset {
+    /// The best estimate from `(sent, peer, received)` readings: the one
+    /// with the shortest round trip.
+    pub fn estimate(samples: &[(u64, u64, u64)]) -> Option<Self> {
+        samples
+            .iter()
+            .filter(|(t0, _, t2)| t2 >= t0)
+            .min_by_key(|(t0, _, t2)| t2 - t0)
+            .map(|&(t0, t1, t2)| Self {
+                offset_ns: (t1 as i128 - (t0 as i128 + t2 as i128) / 2) as i64,
+                uncertainty_ns: (t2 - t0).div_ceil(2),
+            })
+    }
+
+    /// What to add to the peer's log times to put them on this daemon's
+    /// clock. Zero when the clocks agree as far as can be measured (for
+    /// example when both follow NTP or PTP more closely than the round trip
+    /// shows).
+    pub fn correction_ns(&self) -> i64 {
+        if self.offset_ns.unsigned_abs() <= self.uncertainty_ns {
+            0
+        } else {
+            -self.offset_ns
+        }
+    }
+}
+
+/// How long a peer gets to show it is still there before its part of a
+/// recording is fetched.
+const PEER_PROBE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Round trips used to measure a peer's clock.
+const CLOCK_SAMPLES: usize = 8;
+
+/// Measures how far `peer`'s clock is ahead of this daemon's.
+fn measure_clock(st: &State, peer: &str) -> Result<ClockOffset> {
+    let mut samples = Vec::with_capacity(CLOCK_SAMPLES);
+    for _ in 0..CLOCK_SAMPLES {
+        let t0 = ruro_msg::now_ns();
+        let reply = st.peer_request(peer, Ctl::Clock, "")?;
+        let t2 = ruro_msg::now_ns();
+        let t1: u64 = reply.trim().parse().context("malformed clock reply")?;
+        samples.push((t0, t1, t2));
+    }
+    ClockOffset::estimate(&samples).context("the clock went backwards")
+}
+
+/// `+1.2 ms`, for replies.
+fn millis(ns: i64) -> String {
+    format!("{:+.1} ms", ns as f64 / 1e6)
 }
 
 /// Where a recording ends up.
@@ -130,7 +195,12 @@ fn start_recording(st: &Arc<State>, path: &Path) -> Result<String> {
     for p in st.peers.lock().clone() {
         match st.peer_request(&p, Ctl::Record, &format!("from {}", st.name)) {
             Ok(reply) => {
-                recording_peers.push(p.clone());
+                // Log times are each machine's clock: measured now, the
+                // peer's part is corrected when it is merged in.
+                let clock = measure_clock(st, &p)
+                    .inspect_err(|e| tracing::warn!("cannot measure the clock of `{p}`: {e:#}"))
+                    .ok();
+                recording_peers.push((p.clone(), clock));
                 parts.push(format!("on `{p}`: {}", after_colon(&reply)));
             }
             Err(e) => failed.push(format!("the groups on `{p}` ({e:#})")),
@@ -143,7 +213,7 @@ fn start_recording(st: &Arc<State>, path: &Path) -> Result<String> {
     ) {
         Ok(g) => g,
         Err(e) => {
-            for p in &recording_peers {
+            for (p, _) in &recording_peers {
                 let _ = st.peer_request(p, Ctl::Record, &format!("stop-from {}", st.name));
             }
             return Err(e);
@@ -179,7 +249,7 @@ fn after_colon(reply: &str) -> &str {
 fn start_segments(
     st: &Arc<State>,
     target: RecordTarget,
-    peers: Vec<String>,
+    peers: Vec<(String, Option<ClockOffset>)>,
 ) -> Result<Vec<String>> {
     let mut rec = st.recording.lock();
     if let Some(r) = &*rec {
@@ -238,7 +308,7 @@ pub fn finish_recording(st: &Arc<State>, ask_hosts: bool) -> Result<Option<Strin
             }
         }
     }
-    let mut segments = readable_segments(&session.dir)?;
+    let segments = readable_segments(&session.dir)?;
     let recorded: BTreeSet<String> = segments
         .iter()
         .filter_map(|p| {
@@ -276,21 +346,33 @@ pub fn finish_recording(st: &Arc<State>, ask_hosts: bool) -> Result<Option<Strin
         }
         RecordTarget::File(output) => {
             let mut notes = Vec::new();
-            for p in &session.peers {
+            let mut inputs: Vec<(PathBuf, i64)> = segments.into_iter().map(|s| (s, 0)).collect();
+            for (p, clock) in &session.peers {
                 match fetch_part(st, p, &session.dir) {
                     Ok(Some((file, groups))) => {
-                        segments.push(file);
-                        notes.push(format!("from `{p}`: {}", groups.join(", ")));
+                        let mut note = format!("from `{p}`: {}", groups.join(", "));
+                        let correction = clock.map_or(0, |c| c.correction_ns());
+                        match clock {
+                            None => note.push_str(" (clock offset unknown, not corrected)"),
+                            Some(_) if correction == 0 => {}
+                            Some(c) => note.push_str(&format!(
+                                " (clock {} ahead, corrected to within {})",
+                                millis(c.offset_ns),
+                                millis(c.uncertainty_ns as i64).trim_start_matches('+')
+                            )),
+                        }
+                        inputs.push((file, correction));
+                        notes.push(note);
                     }
                     Ok(None) => notes.push(format!("nothing recorded on `{p}`")),
                     Err(e) => notes.push(format!("not recorded: the groups on `{p}` ({e:#})")),
                 }
             }
-            if segments.is_empty() {
+            if inputs.is_empty() {
                 let _ = std::fs::remove_dir_all(&session.dir);
                 bail!("nothing was recorded");
             }
-            let info = ruro_record::merge(&segments, &output, true)?;
+            let info = ruro_record::merge_shifted(&inputs, &output, true)?;
             let _ = std::fs::remove_dir_all(&session.dir);
             let mut msg = format!(
                 "recorded {} message(s) on {} channel(s) over {:.1} s to {}",
@@ -332,6 +414,10 @@ fn readable_segments(dir: &Path) -> Result<Vec<PathBuf>> {
 /// recorded nothing.
 fn fetch_part(st: &State, peer: &str, dir: &Path) -> Result<Option<(PathBuf, Vec<String>)>> {
     use std::io::Write;
+    // A machine that went away would hold the reply for the whole request
+    // timeout, and with it the client, which waits no longer than that.
+    ruro_proto::request(&st.session, &Keys::new(peer), Ctl::Ping, "", PEER_PROBE)
+        .context("unreachable")?;
     let body = st.peer_request(peer, Ctl::Record, &format!("stop-from {}", st.name))?;
     let part: ruro_proto::RecordedPart = serde_json::from_str(&body).context("malformed reply")?;
     let Some(file) = part.file else {
@@ -601,5 +687,35 @@ pub fn reap_playback(st: &Arc<State>) {
         .is_some_and(|p| p.ctl.is_finished());
     if finished {
         stop_playback(st);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clock_offsets_come_from_the_shortest_round_trip() {
+        // The peer runs 5 ms ahead; one sample was delayed on the way back.
+        let ms: u64 = 1_000_000;
+        let samples = [
+            (100 * ms, 106 * ms, 102 * ms),
+            (200 * ms, 205 * ms + ms / 10, 200 * ms + ms / 5),
+            (300 * ms, 305 * ms, 340 * ms),
+        ];
+        let c = ClockOffset::estimate(&samples).unwrap();
+        assert_eq!(c.offset_ns, 5_000_000);
+        assert_eq!(c.uncertainty_ns, ms / 10);
+        assert_eq!(c.correction_ns(), -5_000_000);
+        assert_eq!(millis(c.offset_ns), "+5.0 ms");
+
+        // Clocks that agree within the round trip are left alone.
+        let close = ClockOffset::estimate(&[(1000, 1700, 2000)]).unwrap();
+        assert_eq!((close.offset_ns, close.uncertainty_ns), (200, 500));
+        assert_eq!(close.correction_ns(), 0);
+        // A peer behind this daemon.
+        let behind = ClockOffset::estimate(&[(10 * ms, 7 * ms, 10 * ms + 2)]).unwrap();
+        assert_eq!(behind.correction_ns(), 3_000_001);
+        assert!(ClockOffset::estimate(&[(5, 1, 4)]).is_none());
     }
 }

@@ -514,11 +514,11 @@ fn estop_holds_position_actuators_where_the_arm_is() {
     );
 }
 
-/// The simulated example graph follows the MuJoCo clock.
+/// The example graph without overlays is the simulation and follows the MuJoCo clock.
 #[test]
 fn example_graph_runs_on_the_simulation_clock() {
     ruro_nodes_sim::link();
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arm-sim.yaml");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arm.yaml");
     let graph = Graph::load(path).unwrap();
     assert_eq!(
         ruro_host::clock_port(&graph).unwrap(),

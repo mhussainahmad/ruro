@@ -45,10 +45,10 @@ restarts it, and the rest of the graph keeps running.
 
 ## A closed loop
 
-`examples/arm.yaml` connects a sine-wave target, a PID controller and a simulated joint:
+`examples/pid.yaml` connects a sine-wave target, a PID controller and a simulated joint:
 
 ```sh
-./target/release/ruro run examples/arm.yaml
+./target/release/ruro run examples/pid.yaml
 ```
 
 Watch `arm.position` and `target.value` in the studio, or tune the controller from a terminal:

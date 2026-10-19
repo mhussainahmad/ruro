@@ -1,24 +1,25 @@
-//! The sim/real example graphs are valid and differ only in the robot nodes.
+//! The SO-100 example graph is valid with every combination of its overlays,
+//! and its `real` overlay changes only the robot nodes.
 
 use std::path::Path;
 
 use ruro_graph::{Graph, validate};
 
-fn load(name: &str) -> Graph {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    Graph::load(root.join(name)).unwrap()
+fn load(overlays: &[&str]) -> Graph {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arm.yaml");
+    Graph::load(path).unwrap().with_overlays(overlays).unwrap()
 }
 
 /// Node types that only exist when their cargo feature is enabled.
 const FEATURE_GATED: &[&str] = &["sim/mujoco", "ml/lerobot-recorder", "ml/onnx", "ml/policy"];
 
 #[test]
-fn sim_and_real_examples_validate() {
+fn every_variant_validates() {
     ruro_nodes_ml::link();
     ruro_host::describe(); // links every node crate of the stock host
     let registry = ruro::node::registry();
-    for name in ["arm-sim.yaml", "arm-real.yaml"] {
-        let g = load(name);
+    for overlays in [&[][..], &["real"], &["policy"], &["real", "policy"]] {
+        let g = load(overlays);
         let gated: Vec<&str> = g
             .nodes
             .iter()
@@ -36,16 +37,21 @@ fn sim_and_real_examples_validate() {
                     .any(|id| i.contains(&format!("{id}:")) || i.contains(&format!("{id}.")))
             })
             .collect();
-        assert!(issues.is_empty(), "{name}: {issues:#?}");
+        assert!(issues.is_empty(), "{overlays:?}: {issues:#?}");
     }
 }
 
 #[test]
 fn only_the_robot_nodes_differ() {
-    let (sim, real) = (load("arm-sim.yaml"), load("arm-real.yaml"));
+    let (sim, real) = (load(&[]), load(&["real"]));
     assert_eq!(sim.wires, real.wires);
+    assert_eq!(
+        sim.nodes.keys().collect::<Vec<_>>(),
+        real.nodes.keys().collect::<Vec<_>>()
+    );
     for (id, node) in &sim.nodes {
         let other = &real.nodes[id];
+        assert_eq!(node.group(), other.group(), "{id}");
         if node.group() == "robot" {
             continue;
         }
@@ -53,8 +59,9 @@ fn only_the_robot_nodes_differ() {
         let mut a = node.params.clone();
         let mut b = other.params.clone();
         // The datasets are kept apart; everything else is identical.
-        a.remove("root");
-        b.remove("root");
+        if id == "recorder" {
+            assert_ne!(a.remove("root"), b.remove("root"));
+        }
         assert_eq!(a, b, "{id}");
     }
     assert_eq!(sim.nodes["arm"].kind, "sim/mujoco");
@@ -62,4 +69,21 @@ fn only_the_robot_nodes_differ() {
     assert_eq!(sim.clock, ruro_graph::ClockSource::Sim);
     assert_eq!(real.clock, ruro_graph::ClockSource::Wall);
     assert_eq!(real.nodes["arm"].kind, "hw/so100-arm");
+    assert!(
+        !real.nodes["arm"].params.contains_key("model"),
+        "the simulator's parameters do not leak into the driver"
+    );
+}
+
+#[test]
+fn the_policy_replaces_the_gamepad() {
+    let g = load(&["real", "policy"]);
+    assert!(!g.nodes.contains_key("gamepad") && !g.nodes.contains_key("jog"));
+    let into_arm: Vec<String> = g
+        .wires
+        .iter()
+        .filter(|w| w.to.node == "arm")
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(into_arm, ["policy.action -> arm.command"]);
 }

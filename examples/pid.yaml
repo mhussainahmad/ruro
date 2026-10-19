@@ -1,0 +1,22 @@
+# Closed-loop control: a PID controller makes a simulated joint follow a sine
+# wave. Tune kp/ki/kd live from the studio or with `ruro param`.
+name: pid-demo
+nodes:
+  target:
+    type: std/sine
+    rate: 100
+    params: { frequency: 0.25, amplitude: 1.5 }
+    pos: [0, 0]
+  pid:
+    type: std/pid
+    params: { kp: 4.0, ki: 0.5, kd: 0.05, limit: 3.0 }
+    pos: [380, 40]
+  arm:
+    type: std/fake-arm
+    rate: 200
+    group: arm
+    pos: [760, 40]
+wires:
+  - target.value -> pid.setpoint
+  - arm.position -> pid.measured
+  - pid.command -> arm.velocity

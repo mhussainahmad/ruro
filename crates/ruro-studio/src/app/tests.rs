@@ -342,11 +342,11 @@ fn command_palette_runs_commands_and_dismisses() {
     // Quick open lists graphs and opens one with Enter.
     key(&mut h, CTRL, egui::Key::P);
     let palette = h.state_mut().palette.as_mut().unwrap();
-    palette.query = examples().join("arm.yaml").display().to_string();
+    palette.query = examples().join("pid.yaml").display().to_string();
     h.run_steps(2);
     h.key_press(egui::Key::Enter);
     h.run_steps(4);
-    assert_eq!(h.state().doc.name, "arm-demo");
+    assert_eq!(h.state().doc.name, "pid-demo");
     assert_eq!(h.state().tabs().len(), 2);
 }
 
@@ -609,16 +609,16 @@ fn select_all_then_align_and_delete() {
 #[test]
 fn tabs_switch_close_and_confirm_unsaved_changes() {
     let mut h = harness(Some(examples().join("camera.yaml")));
-    h.state_mut().push(Cmd::Open(examples().join("arm.yaml")));
+    h.state_mut().push(Cmd::Open(examples().join("pid.yaml")));
     h.run_steps(3);
     assert_eq!(h.state().tabs().len(), 2);
-    assert_eq!(h.state().doc.name, "arm-demo");
+    assert_eq!(h.state().doc.name, "pid-demo");
 
     h.get_by_label("camera.yaml").click();
     h.run_steps(3);
     assert_eq!(h.state().doc.name, "camera-demo");
     // Opening an open file switches to it instead of opening it twice.
-    h.state_mut().push(Cmd::Open(examples().join("arm.yaml")));
+    h.state_mut().push(Cmd::Open(examples().join("pid.yaml")));
     h.run_steps(3);
     assert_eq!(h.state().tabs().len(), 2);
 
@@ -630,7 +630,7 @@ fn tabs_switch_close_and_confirm_unsaved_changes() {
     assert!(!h.state().doc.can_undo());
 
     // Closing a changed tab asks first.
-    h.get_by_label("arm.yaml").click();
+    h.get_by_label("pid.yaml").click();
     h.run_steps(3);
     key(&mut h, CTRL, egui::Key::W);
     assert!(h.state().confirm_close.is_some());
@@ -1755,7 +1755,7 @@ fn screenshots() {
     let tmp = tempdir("shots");
     let path = copy_example("camera.yaml", &tmp);
     let mut h = shot(Some(path));
-    h.state_mut().push(Cmd::Open(examples().join("arm.yaml")));
+    h.state_mut().push(Cmd::Open(examples().join("pid.yaml")));
     h.run_steps(2);
     let first = h.state().tab_order[0];
     h.state_mut().push(Cmd::SwitchTab(first));

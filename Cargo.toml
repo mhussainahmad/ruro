@@ -33,6 +33,8 @@ ruro-pkg = { version = "0.1.0", path = "crates/ruro-pkg" }
 ruro-py = { version = "0.1.0", path = "crates/ruro-py" }
 ruro-ros2 = { version = "0.1.0", path = "crates/ruro-ros2" }
 ruro-nodes-ros2 = { version = "0.1.0", path = "nodes/ruro-nodes-ros2" }
+ruro-gpu = { version = "0.1.0", path = "crates/ruro-gpu" }
+ruro-nodes-gpu = { version = "0.1.0", path = "nodes/ruro-nodes-gpu" }
 
 anyhow = "1"
 thiserror = "2"

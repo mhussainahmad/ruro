@@ -5187,6 +5187,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruro-gpu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "criterion",
+ "libc",
+ "libloading",
+ "parking_lot",
+ "ruro-msg",
+ "ruro-node",
+ "ruro-transport",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "ruro-graph"
 version = "0.1.0"
 dependencies = [
@@ -5212,6 +5228,7 @@ dependencies = [
  "ruro-graph",
  "ruro-msg",
  "ruro-node",
+ "ruro-nodes-gpu",
  "ruro-nodes-hw",
  "ruro-nodes-ml",
  "ruro-nodes-ros2",
@@ -5278,6 +5295,21 @@ dependencies = [
  "ruro-graph",
  "ruro-msg",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ruro-nodes-gpu"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "ruro",
+ "ruro-gpu",
+ "ruro-graph",
+ "ruro-host",
+ "ruro-msg",
+ "ruro-nodes-ml",
+ "ruro-proto",
  "serde_json",
 ]
 

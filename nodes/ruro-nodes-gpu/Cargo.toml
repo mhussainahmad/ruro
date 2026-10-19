@@ -1,0 +1,27 @@
+[package]
+name = "ruro-nodes-gpu"
+description = "GPU nodes for ruro: upload, download and normalize images in CUDA memory"
+keywords = ["robotics", "cuda", "gpu", "nodes"]
+categories = ["science::robotics"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-nodes-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro = { workspace = true }
+ruro-gpu = { workspace = true }
+ruro-nodes-ml = { workspace = true }
+
+[dev-dependencies]
+ruro-graph = { workspace = true }
+ruro-host = { workspace = true }
+ruro-proto = { workspace = true }
+ruro-msg = { workspace = true }
+parking_lot = { workspace = true }
+serde_json = { workspace = true }

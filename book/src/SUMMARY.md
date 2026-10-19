@@ -22,6 +22,7 @@
 - [Simulation](simulation.md)
   - [Simulation and the real robot](sim-to-real.md)
 - [Machine learning](ml.md)
+- [GPU buffers](gpu.md)
 - [ROS 2 bridge](ros2.md)
 - [Deploying on robots](deployment.md)
   - [Multi-machine graphs](multi-machine.md)

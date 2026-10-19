@@ -154,7 +154,7 @@ fn clearance(scan: &LaserScan, sector: f64) -> (f64, f64, f64) {
         }
         if a > 0.0 && a <= std::f64::consts::FRAC_PI_2 {
             left = left.min(r);
-        } else if a < 0.0 && a >= -std::f64::consts::FRAC_PI_2 {
+        } else if (-std::f64::consts::FRAC_PI_2..0.0).contains(&a) {
             right = right.min(r);
         }
     }

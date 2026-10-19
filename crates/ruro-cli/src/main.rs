@@ -5,6 +5,7 @@ mod fleet;
 mod output;
 mod recording;
 mod soak;
+mod update;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,7 +103,19 @@ enum Cmd {
         /// Seconds without metrics after which a host is restarted.
         #[arg(long, default_value_t = 5.0)]
         heartbeat_timeout: f64,
+        /// File listing the public keys (`ruro keygen`) whose signed updates
+        /// this daemon accepts with `ruro update`. Without it, updates are
+        /// refused.
+        #[arg(long, env = "RURO_UPDATE_KEYS")]
+        update_keys: Option<PathBuf>,
     },
+    /// Update daemons over the network to a signed `ruro` (and host)
+    /// binary. Refused while a graph runs, unless the e-stop is engaged.
+    Update(update::UpdateArgs),
+    /// Make a key pair for signing updates.
+    Keygen(update::KeygenArgs),
+    /// Sign a binary for `ruro update`.
+    Sign(update::SignArgs),
     /// Deploy a graph to the daemon and return. With --host-binary, first
     /// upload a host binary that groups can request with `host: <name>`.
     Deploy {
@@ -252,7 +265,7 @@ impl Client {
             .recv_timeout(Duration::from_secs(2))
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .context("daemon sent no status")?;
-        ruro_proto::decode(&sample.payload().to_bytes())
+        ruro_proto::decode_status(&sample.payload().to_bytes())
     }
 }
 
@@ -271,23 +284,28 @@ fn run(cli: Cli) -> Result<()> {
             host,
             peers,
             heartbeat_timeout,
+            update_keys,
         } => {
             let mut config = ruro_daemon::Config::new();
             config.listen = listen;
             config.peers = peers;
             config.security = security.clone();
             config.heartbeat_timeout = Duration::from_secs_f64(heartbeat_timeout.max(0.5));
+            config.update_keys = update_keys;
             if let Some(n) = name {
                 config.name = n;
             }
             if let Some(h) = host {
                 config.host = h;
             }
-            let daemon = ruro_daemon::Daemon::start(config)?;
-            wait_for_ctrl_c()?;
-            daemon.shutdown();
-            Ok(())
+            run_daemon(config)
         }
+        Cmd::Update(args) => {
+            let connect = || ruro_proto::connect_with(&cli.connect, &security);
+            update::update(&connect, cli.daemon.as_deref(), args)
+        }
+        Cmd::Keygen(args) => update::keygen(args),
+        Cmd::Sign(args) => update::sign(args),
         Cmd::Run { graph } => run_graph(&cli.connect, cli.daemon.as_deref(), &security, &graph),
         Cmd::Deploy {
             graph,
@@ -405,6 +423,51 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
+/// `ruro daemon`: runs until SIGINT or SIGTERM, or until an update was
+/// installed, which it then starts in place of this process.
+fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
+    use ruro_daemon::update::{Handoff, Trial};
+    // Started by a daemon to try this binary before installing it.
+    if let Some(trial) = Trial::from_env() {
+        return trial.run(config);
+    }
+    let handoff = Handoff::take(&config.name);
+    if let Some(h) = &handoff {
+        h.configure(&mut config);
+    }
+    let stop = ctrl_c_flag()?;
+    let mut daemon = match ruro_daemon::Daemon::start(config.clone()) {
+        Ok(d) => d,
+        // An update that does not start goes back to the previous binary.
+        Err(e) => match handoff {
+            Some(h) if h.is_pending() => return Err(h.roll_back(&config, e)),
+            // The report of a rollback waits for a start that succeeds.
+            Some(h) => {
+                if let Err(e) = h.save(&config.name) {
+                    tracing::warn!("{e:#}");
+                }
+                return Err(e);
+            }
+            None => return Err(e),
+        },
+    };
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            daemon.shutdown();
+            return Ok(());
+        }
+        if let Some(restart) = daemon.take_restart() {
+            let version = restart.version().to_owned();
+            daemon.shutdown();
+            let err = restart.exec();
+            tracing::error!("{err:#}");
+            config.update_note = Some(format!("the update to {version} failed: {err:#}"));
+            daemon = ruro_daemon::Daemon::start(config.clone())?;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn deploy(c: &Client, path: &Path) -> Result<String> {
     c.request(Ctl::Deploy, &flattened_yaml(path)?)
 }
@@ -507,7 +570,7 @@ fn daemon_of(c: &Client, node: &str) -> Result<Keys> {
     let deadline = std::time::Instant::now() + DISCOVERY;
     while std::time::Instant::now() < deadline {
         if let Ok(Some(s)) = sub.recv_timeout(Duration::from_millis(100))
-            && let Ok(peer) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes())
+            && let Ok(peer) = ruro_proto::decode_status(&s.payload().to_bytes())
             && peer.graph.as_ref() == Some(graph)
             && runs_node(&peer, node)
         {
@@ -558,7 +621,7 @@ fn status(c: &Client) -> Result<()> {
     let mut peers: std::collections::BTreeMap<String, DaemonStatus> = Default::default();
     loop {
         while let Ok(Some(s)) = others.try_recv() {
-            if let Ok(peer) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes())
+            if let Ok(peer) = ruro_proto::decode_status(&s.payload().to_bytes())
                 && peer.name != status.name
                 && peer.graph.is_some()
                 && peer.graph == status.graph
@@ -657,6 +720,8 @@ mod tests {
             recording: None,
             playback: None,
             estopped: false,
+            target: String::new(),
+            update: None,
         };
         assert!(runs_node(&status, "imu"));
         assert!(!runs_node(&status, "drivers"));
@@ -685,6 +750,15 @@ mod tests {
             cli.security.security().is_err(),
             "a missing file is an error"
         );
+    }
+
+    #[test]
+    fn the_command_line_definition_is_consistent() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+        let cli =
+            Cli::try_parse_from(["ruro", "update", "ruro", "--peers", "--to", "robot"]).unwrap();
+        assert!(matches!(cli.cmd, Cmd::Update(_)));
     }
 
     #[test]

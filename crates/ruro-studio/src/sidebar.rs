@@ -128,11 +128,32 @@ fn fleet(s: &mut Studio, ui: &mut Ui) {
                             state
                         };
                         ui.label(RichText::new(state).font(font(12.0)).color(TEXT_DIM()));
-                        ui.label(
-                            RichText::new(format!("v{} · up {}", st.version, uptime(st.uptime_s)))
+                        // The architecture alone; the full target triple on hover.
+                        let arch = st.target.split('-').next().unwrap_or_default();
+                        let build = if arch.is_empty() {
+                            format!("v{}", st.version)
+                        } else {
+                            format!("v{} · {arch}", st.version)
+                        };
+                        let version = ui.label(
+                            RichText::new(format!("{build} · up {}", uptime(st.uptime_s)))
                                 .font(font_mono(11.0))
                                 .color(TEXT_FAINT()),
                         );
+                        if !st.target.is_empty() {
+                            version.on_hover_text(format!("ruro {} built for {}", st.version, st.target));
+                        }
+                        if let Some(note) = &st.update {
+                            let failed = note.starts_with("rolled back") || note.contains("failed");
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(note)
+                                        .font(font(11.5))
+                                        .color(if failed { ERR() } else { TEXT_DIM() }),
+                                )
+                                .wrap(),
+                            );
+                        }
                         if st.recording.is_some() {
                             ui.horizontal(|ui| {
                                 widgets::dot(ui, ERR(), 3.0);

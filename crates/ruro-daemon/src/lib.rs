@@ -8,7 +8,9 @@
 
 mod estop;
 mod session;
+pub mod sign;
 mod supervisor;
+pub mod update;
 mod upload;
 
 use std::collections::{BTreeSet, HashMap};
@@ -27,6 +29,7 @@ use crate::session::{Playback, RecordSession};
 use crate::supervisor::Supervisor;
 
 pub use supervisor::runtime_dir;
+pub use update::{TARGET, version};
 
 /// Default port of the daemon's router.
 pub const DEFAULT_PORT: u16 = 7447;
@@ -50,6 +53,19 @@ pub struct Config {
     pub security: Security,
     /// Hosts that publish no metrics for this long are killed and restarted.
     pub heartbeat_timeout: Duration,
+    /// File listing the public keys whose signed updates the daemon
+    /// accepts; without it the daemon refuses updates.
+    pub update_keys: Option<PathBuf>,
+    /// The daemon's executable and the arguments it was started with: an
+    /// update replaces the executable and starts it with the same
+    /// arguments. Taken when the configuration is made, because once the
+    /// file is replaced the running process can no longer name it.
+    pub executable: PathBuf,
+    pub args: Vec<std::ffi::OsString>,
+    /// Shown in the daemon's status: how its last update went.
+    pub update_note: Option<String>,
+    /// Start with the emergency stop engaged (as if engaged here).
+    pub estopped: bool,
 }
 
 impl Config {
@@ -61,6 +77,11 @@ impl Config {
             peers: Vec::new(),
             security: Security::default(),
             heartbeat_timeout: Duration::from_secs(5),
+            update_keys: None,
+            executable: std::env::current_exe().unwrap_or_default(),
+            args: std::env::args_os().collect(),
+            update_note: None,
+            estopped: false,
         }
     }
 }
@@ -134,6 +155,13 @@ pub(crate) struct State {
     /// The daemon whose graph this one runs part of; `None` when the graph
     /// was deployed here (or nothing runs).
     pub origin: Mutex<Option<String>>,
+    /// Set when the daemon trusts update keys.
+    pub updates: Option<update::Updates>,
+    /// An installed update, waiting for the reply to its request to go out.
+    pub restart: Mutex<Option<update::Restart>>,
+    /// Set once that reply is out: the daemon may stop and restart.
+    pub restart_ready: AtomicBool,
+    pub update_note: Option<String>,
 }
 
 impl State {
@@ -187,6 +215,7 @@ impl State {
 pub struct Daemon {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+    state: Arc<State>,
 }
 
 impl Daemon {
@@ -210,6 +239,7 @@ impl Daemon {
 
     fn start_in(config: Config, dir: &Path) -> Result<Self> {
         let registry = load_registry(&config.host)?;
+        let updates = update::Updates::from_config(&config)?;
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 
         // Hosts reach the router over a private Unix socket, so they need
@@ -262,7 +292,14 @@ impl Daemon {
             heartbeats: Mutex::new(HashMap::new()),
             deployed: Mutex::new(None),
             origin: Mutex::new(None),
+            updates,
+            restart: Mutex::new(None),
+            restart_ready: AtomicBool::new(false),
+            update_note: config.update_note.clone(),
         });
+        if config.estopped {
+            estop::handle(&state, "engage")?;
+        }
 
         let queryable = session
             .declare_queryable(format!("ruro/{}/ctl/*", config.name))
@@ -302,6 +339,13 @@ impl Daemon {
                     let _ = query
                         .reply(format!("ruro/{}/ctl/{op}", ctl_state.name), bytes)
                         .wait();
+                    drop(query);
+                    if ctl_state.restart.lock().is_some() {
+                        // Give the reply time to leave before the daemon
+                        // closes its session.
+                        std::thread::sleep(Duration::from_millis(300));
+                        ctl_state.restart_ready.store(true, Ordering::Relaxed);
+                    }
                 }
             })?;
 
@@ -376,16 +420,32 @@ impl Daemon {
             })?;
 
         tracing::info!(
-            "daemon `{}` listening on {} with {} node types (host: {})",
+            "daemon `{}` {} ({}) listening on {} with {} node types (host: {})",
             config.name,
+            version(),
+            TARGET,
             config.listen,
             state.registry.lock().nodes.len(),
             config.host.display()
         );
+        if let Some(note) = &config.update_note {
+            tracing::warn!("{note}");
+        }
         Ok(Self {
             stop,
             thread: Some(thread),
+            state,
         })
+    }
+
+    /// An update installed through this daemon, once the daemon may stop
+    /// to start it: stop the daemon, then call [`update::Restart::exec`].
+    pub fn take_restart(&self) -> Option<update::Restart> {
+        if !self.state.restart_ready.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.state.restart_ready.store(false, Ordering::Relaxed);
+        self.state.restart.lock().take()
     }
 
     /// Stops the deployed graph and the daemon.
@@ -427,7 +487,7 @@ fn status(st: &State, started: Instant) -> DaemonStatus {
     let s = st.sup.lock();
     DaemonStatus {
         name: st.name.clone(),
-        version: env!("CARGO_PKG_VERSION").into(),
+        version: version().into(),
         pid: std::process::id(),
         uptime_s: started.elapsed().as_secs_f64(),
         graph: s.graph().map(|g| g.name.clone()),
@@ -435,6 +495,8 @@ fn status(st: &State, started: Instant) -> DaemonStatus {
         recording: st.recording.lock().as_ref().map(|r| r.describe()),
         playback: st.playback.lock().as_ref().map(Playback::status),
         estopped: st.estop.load(Ordering::Relaxed),
+        target: TARGET.into(),
+        update: st.update_note.clone(),
     }
 }
 
@@ -479,12 +541,7 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
                     ));
                 }
             }
-            session::stop_playback(st);
-            st.sup.lock().stop_all();
-            *st.origin.lock() = None;
-            let recorded = session::finish_recording(st, false)?;
-            stop_peers(st, std::mem::take(&mut *st.peers.lock()), &BTreeSet::new());
-            Ok(match recorded {
+            Ok(match stop_graph(st)? {
                 Some(r) => format!("stopped; {r}"),
                 None => "stopped".into(),
             })
@@ -540,8 +597,24 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             let dir = st.sup.lock().hosts_dir();
             upload::receive(&dir, &chunk)
         }
+        "update-upload" => update::receive(st, &ruro_proto::decode(payload)?),
+        "update" => {
+            let req = serde_json::from_slice(payload).context("bad update request")?;
+            update::update(st, &req)
+        }
         other => bail!("unknown operation `{other}`"),
     }
+}
+
+/// Stops the running graph, here and on the peers running parts of it,
+/// with any replay and recording. Returns what the recording wrote.
+fn stop_graph(st: &Arc<State>) -> Result<Option<String>> {
+    session::stop_playback(st);
+    st.sup.lock().stop_all();
+    *st.origin.lock() = None;
+    let recorded = session::finish_recording(st, false)?;
+    stop_peers(st, std::mem::take(&mut *st.peers.lock()), &BTreeSet::new());
+    Ok(recorded)
 }
 
 /// Validates `yaml`, sends the groups of other machines to their daemons and

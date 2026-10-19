@@ -36,7 +36,7 @@ pub fn fleet(session: &zenoh::Session) -> Result<()> {
     let deadline = Instant::now() + LISTEN;
     while Instant::now() < deadline {
         while let Ok(Some(s)) = status_sub.try_recv() {
-            if let Ok(st) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes()) {
+            if let Ok(st) = ruro_proto::decode_status(&s.payload().to_bytes()) {
                 daemons.insert(st.name.clone(), st);
             }
         }

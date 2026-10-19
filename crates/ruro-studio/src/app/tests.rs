@@ -1019,12 +1019,19 @@ fn fleet_lists_daemons_and_switches() {
             },
         );
         for (name, graph) in [("laptop", None), ("rover", Some("nav"))] {
-            st.handle_event(&ctx, Event::Fleet(daemon_status(name, graph)));
+            let mut status = daemon_status(name, graph);
+            if name == "rover" {
+                status.update = Some("updated from 0.0.9 to 0.1.0".into());
+            }
+            st.handle_event(&ctx, Event::Fleet(status));
         }
         st.link.take_sent();
         st.push(Cmd::Activity(Activity::Fleet));
     }
     h.run_steps(3);
+    // Each machine's version and architecture, and how its last update went.
+    assert_eq!(h.get_all_by_label("v0.1.0 · x86_64 · up 2h 2m").count(), 2);
+    h.get_by_label("updated from 0.0.9 to 0.1.0");
     h.get_by_label("Connect").click();
     h.run_steps(3);
     let sent = h.state().link.take_sent();
@@ -1360,6 +1367,8 @@ fn daemon_status(name: &str, graph: Option<&str>) -> DaemonStatus {
         recording: None,
         playback: None,
         estopped: false,
+        target: "x86_64-unknown-linux-gnu".into(),
+        update: None,
     }
 }
 
@@ -1401,6 +1410,8 @@ fn camera_status(recording: Option<&str>, playback: Option<PlaybackStatus>) -> D
         recording: recording.map(Into::into),
         playback,
         estopped: false,
+        target: "x86_64-unknown-linux-gnu".into(),
+        update: None,
     }
 }
 

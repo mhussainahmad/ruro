@@ -48,6 +48,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 iceoryx2 = "0.10"
 zenoh = { version = "1.10", default-features = false, features = ["transport_tcp", "transport_unixsock-stream"] }
+zenoh-ext = { version = "1.10", default-features = false, features = ["unstable"] }
 libc = "0.2"
 syn = { version = "2", features = ["full"] }
 quote = "1"

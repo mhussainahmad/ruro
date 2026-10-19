@@ -3,7 +3,7 @@
 
 pub mod action_tutorials_interfaces {
 pub mod action {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `action_tutorials_interfaces/action/Fibonacci_Feedback`
 #[derive(Debug, Clone, PartialEq)]

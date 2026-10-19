@@ -482,7 +482,9 @@ pub fn generate(interfaces: &Interfaces, opts: &Options) -> Result<String> {
         let _ = writeln!(out, "pub mod {pkg} {{");
         for (ns, specs) in namespaces {
             let _ = writeln!(out, "pub mod {ns} {{");
-            out.push_str("#![allow(non_camel_case_types, non_snake_case, clippy::all)]\n\n");
+            out.push_str(
+                "#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]\n\n",
+            );
             for spec in specs {
                 g.message(spec, &mut out)?;
             }

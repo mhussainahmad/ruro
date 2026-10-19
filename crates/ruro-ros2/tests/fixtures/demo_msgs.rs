@@ -3,7 +3,7 @@
 
 pub mod demo_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `demo_msgs/msg/Detail`
 #[derive(Debug, Clone, PartialEq)]
@@ -112,7 +112,7 @@ impl ruro_ros2::RosMessage for Detection {
 
 }
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `demo_msgs/srv/Lookup_Event`
 #[derive(Debug, Clone, PartialEq)]

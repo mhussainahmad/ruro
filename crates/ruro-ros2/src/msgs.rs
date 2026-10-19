@@ -3,7 +3,7 @@
 
 pub mod action_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `action_msgs/msg/GoalInfo`
 #[derive(Debug, Clone, PartialEq)]
@@ -127,7 +127,7 @@ impl crate::RosMessage for GoalStatusArray {
 
 }
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `action_msgs/srv/CancelGoal_Event`
 #[derive(Debug, Clone, PartialEq)]
@@ -267,7 +267,7 @@ impl crate::RosService for CancelGoal {
 
 pub mod builtin_interfaces {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `builtin_interfaces/msg/Duration`
 #[derive(Debug, Clone, PartialEq)]
@@ -350,7 +350,7 @@ impl crate::RosMessage for Time {
 
 pub mod example_interfaces {
 pub mod action {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `example_interfaces/action/Fibonacci_Feedback`
 #[derive(Debug, Clone, PartialEq)]
@@ -805,7 +805,7 @@ impl crate::RosAction for Fibonacci {
 
 }
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `example_interfaces/msg/Bool`
 #[derive(Debug, Clone, PartialEq)]
@@ -1848,7 +1848,7 @@ impl crate::RosMessage for WString {
 
 }
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `example_interfaces/srv/AddTwoInts_Event`
 #[derive(Debug, Clone, PartialEq)]
@@ -2230,7 +2230,7 @@ impl crate::RosService for Trigger {
 
 pub mod geometry_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `geometry_msgs/msg/Accel`
 #[derive(Debug, Clone, PartialEq)]
@@ -3555,7 +3555,7 @@ impl crate::RosMessage for WrenchStamped {
 
 pub mod nav_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `nav_msgs/msg/Goals`
 #[derive(Debug, Clone, PartialEq)]
@@ -3907,7 +3907,7 @@ impl crate::RosMessage for TrajectoryPoint {
 
 }
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `nav_msgs/srv/GetMap_Event`
 #[derive(Debug, Clone, PartialEq)]
@@ -4423,7 +4423,7 @@ impl crate::RosService for SetMap {
 
 pub mod sensor_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `sensor_msgs/msg/BatteryState`
 #[derive(Debug, Clone, PartialEq)]
@@ -5861,7 +5861,7 @@ impl crate::RosMessage for TimeReference {
 
 }
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `sensor_msgs/srv/SetCameraInfo_Event`
 #[derive(Debug, Clone, PartialEq)]
@@ -5994,7 +5994,7 @@ impl crate::RosService for SetCameraInfo {
 
 pub mod service_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `service_msgs/msg/ServiceEventInfo`
 #[derive(Debug, Clone, PartialEq)]
@@ -6054,7 +6054,7 @@ impl crate::RosMessage for ServiceEventInfo {
 
 pub mod std_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `std_msgs/msg/Bool`
 #[derive(Debug, Clone, PartialEq)]
@@ -7150,7 +7150,7 @@ impl crate::RosMessage for UInt8MultiArray {
 
 pub mod std_srvs {
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `std_srvs/srv/Empty_Event`
 #[derive(Debug, Clone, PartialEq)]
@@ -7522,7 +7522,7 @@ impl crate::RosService for Trigger {
 
 pub mod tf2_msgs {
 pub mod action {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `tf2_msgs/action/LookupTransform_Feedback`
 #[derive(Debug, Clone, PartialEq)]
@@ -8002,7 +8002,7 @@ impl crate::RosAction for LookupTransform {
 
 }
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `tf2_msgs/msg/TF2Error`
 #[derive(Debug, Clone, PartialEq)]
@@ -8088,7 +8088,7 @@ impl crate::RosMessage for TFMessage {
 
 }
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `tf2_msgs/srv/FrameGraph_Event`
 #[derive(Debug, Clone, PartialEq)]
@@ -8214,7 +8214,7 @@ impl crate::RosService for FrameGraph {
 
 pub mod unique_identifier_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `unique_identifier_msgs/msg/UUID`
 #[derive(Debug, Clone, PartialEq)]

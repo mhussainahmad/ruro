@@ -18,8 +18,9 @@ by the front 2D lidar, and brings in odometry, the chassis IMU, the front left c
 | `tf` | `/tf` | `tf2_msgs/TFMessage` |
 | `drive` | `/cmd_vel` | `geometry_msgs/Twist` |
 
-The topic names are those of the Nova Carter asset in the Isaac Sim 5.1 and 6.x
-documentation ("Nova Carter" asset page). Which sensors publish depends on the scene: the
+The sensor topic names are those of the Nova Carter asset in the Isaac Sim 5.1 and 6.x
+documentation ("Nova Carter" asset page). That page does not list `/cmd_vel`; the robot
+takes velocity commands on it in Isaac Sim's ROS 2 navigation sample. Which sensors publish depends on the scene: the
 ROS 2 navigation sample enables some of them in its action graphs, and others have to be
 enabled. Check with `ruro ros2 topics` and adjust the `topic` parameters.
 
@@ -54,9 +55,13 @@ When Isaac Sim runs on another machine than the ruro daemon, set
 the daemon with `--listen tcp/0.0.0.0:7447`, and leave the graph's `router` at the daemon's
 own address.
 
-**Isaac Sim on Fast DDS.** `zenoh-bridge-ros2dds` connects DDS to Zenoh, but it uses its own
-key expressions rather than rmw_zenoh's, so ruro's bridge nodes do not see its topics. ruro
-cannot reach a DDS-only Isaac Sim; switch it to rmw_zenoh as above.
+**Isaac Sim on Fast DDS.** `zenoh-bridge-ros2dds` connects DDS to Zenoh, but it maps topics
+to plain key expressions (`chatter`, or `<namespace>/chatter`), while rmw_zenoh's carry the
+domain id, the message type and its hash (`<domain>/chatter/<type>/<hash>`), which is what
+ruro's bridge nodes use. The two do not interoperate without an adapter (as discussed in
+"Using RMW_ZENOH with free_fleet", discourse.openrobotics.org; the bridge's README only
+mentions testing with Cyclone DDS). So ruro cannot reach a DDS-only Isaac Sim this way;
+switch it to rmw_zenoh as above. This was not tried.
 
 ## Known gaps
 

@@ -6,7 +6,7 @@
 #
 #   ruro daemon                                     # also the Zenoh router of the ROS 2 side
 #   examples/gazebo/run.sh                          # Gazebo and ros_gz_bridge, in a container
-#   ruro run examples/gazebo/rover.yaml
+#   ruro run examples/gazebo/rover.yaml               # or --overlay sim, the same
 #   ruro run examples/gazebo/rover.yaml --overlay real
 #
 # Bridge nodes reach ROS 2 through the Zenoh router given as `router`: the
@@ -38,6 +38,13 @@ wires:
   - lidar.out -> avoid.scan
   - avoid.cmd -> drive.input
 overlays:
+  # The simulation, as in the graph itself, for naming it explicitly. `sim`
+  # and `real` are alternatives: `sim` does not undo `real`'s rewiring.
+  sim:
+    nodes:
+      lidar:
+        type: ros2/sub-laser-scan
+        params: { topic: /scan, qos: best_effort, router: tcp/127.0.0.1:7447 }
   # A real rover: an RPLidar on the rover's computer, read by ruro's own
   # driver, and a ROS 2 base driver on the same computer that takes /cmd_vel
   # and publishes /odom (for example a TurtleBot or Create 3 base). The

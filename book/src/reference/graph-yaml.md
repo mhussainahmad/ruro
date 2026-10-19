@@ -188,9 +188,10 @@ file are not applied, and validation reports them.
 
 These are errors: selecting an overlay the graph does not have, patching a node that does not
 exist without a `type`, removing a node or wire that is not there, and removing the settings
-of a group that has none. Validation (`ruro check`, the studio) checks that every overlay
-applies to the base graph, whether or not it is selected; with `--overlay`, `ruro check`
-validates the graph with the overlays applied.
+of a group that has none. `ruro check` and the studio's Problems panel check that every
+overlay applies to the base graph, whether or not it is selected; running the graph without
+it selected is not blocked. With `--overlay`, `ruro check` validates the graph with the
+overlays applied.
 
 ## Validation
 

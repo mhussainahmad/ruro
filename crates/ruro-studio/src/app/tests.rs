@@ -977,17 +977,20 @@ fn overlays_are_shown_read_only_and_run_as_shown() {
             endpoint: "tcp/127.0.0.1:7447".into(),
         },
     );
-    h.state().link.take_sent();
-    h.state_mut().push(Cmd::Deploy);
-    h.run_steps(2);
-    let sent = h.state().link.take_sent();
-    let Some(Command::Deploy(yaml)) = sent.first() else {
-        panic!("{sent:?}")
+    let deploy = |h: &mut Harness<'static, Studio>| {
+        h.state().link.take_sent();
+        h.state_mut().push(Cmd::Deploy);
+        h.run_steps(2);
+        let sent = h.state().link.take_sent();
+        let Some(Command::Deploy(yaml)) = sent.first() else {
+            panic!("{sent:?}")
+        };
+        ruro_graph::Graph::from_yaml(yaml).unwrap()
     };
-    let g = ruro_graph::Graph::from_yaml(yaml).unwrap();
+    let g = deploy(&mut h);
     assert!(
         g.nodes.contains_key("half") && g.overlays.is_empty(),
-        "{yaml}"
+        "{g:?}"
     );
     assert_eq!(g.nodes["pid"].params["kp"], serde_json::json!(12.0));
     h.state_mut().handle_event(
@@ -1007,6 +1010,12 @@ fn overlays_are_shown_read_only_and_run_as_shown() {
     assert!(h.state().variant.is_none());
     assert_eq!(node_ids(h.state()), ["arm", "pid", "target"]);
     assert!(h.state().undeployed_changes());
+    // The base graph runs without the overlays it carries.
+    let g = deploy(&mut h);
+    assert!(
+        !g.nodes.contains_key("half") && g.overlays.is_empty(),
+        "{g:?}"
+    );
 
     // Saving writes the document, not the overlay shown.
     pick_overlay(&mut h, "Base graph", "scaled");

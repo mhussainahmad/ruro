@@ -1,7 +1,9 @@
 # Switching between simulation and the real robot
 
 `examples/arm.yaml` is one graph for the SO-100 arm in two variants. The graph itself is the
-simulation. Its `real` overlay swaps the robot nodes for the hardware:
+simulation; its `sim` overlay says the same thing explicitly, so `--overlay sim` and
+`--overlay real` both name a variant. The `real` overlay swaps the robot nodes for the
+hardware:
 
 | Node | `arm.yaml` | `arm.yaml --overlay real` |
 |---|---|---|
@@ -20,7 +22,7 @@ nothing else differs.
 
 ```sh
 ruro overlays examples/arm.yaml                 # list the overlays and what they change
-ruro run examples/arm.yaml                      # MuJoCo
+ruro run examples/arm.yaml --overlay sim        # MuJoCo (the same as no overlay)
 ruro run examples/arm.yaml --overlay real       # the real arm and camera
 ruro run examples/arm.yaml -o real -o policy    # a trained policy drives the real arm
 ```
@@ -28,7 +30,9 @@ ruro run examples/arm.yaml -o real -o policy    # a trained policy drives the re
 In the studio, pick the overlay next to **Run** (see [Studio](studio.md#overlays)).
 
 The simulation is the base graph on purpose: running the file without an overlay never
-moves hardware.
+moves hardware. Restating it as the `sim` overlay costs a few duplicated lines;
+`nodes/ruro-nodes-ml/tests/examples.rs` checks that the base and `sim` stay identical, and
+that `--overlay real --overlay sim` gives the simulation back.
 
 Both variants need node features that the standard `ruro-host` leaves out, so build a host
 with them and point the daemon at it:
@@ -88,8 +92,9 @@ before validation, so the result is checked like any graph. An overlay can chang
 group settings (such as which `machine` a group runs on), nodes and wires; the exact rules
 are in [Graph files](reference/graph-yaml.md#overlays). Every mistake is an error: selecting
 an overlay the graph does not have, patching a node that does not exist without giving its
-`type`, or removing a node or wire that is not there. `ruro check` and the studio also report
-overlays that do not apply, even when they are not selected.
+`type`, or removing a node or wire that is not there. `ruro check` and the studio's Problems
+panel also report overlays that do not apply, even when they are not selected; running the
+graph without them is not blocked.
 
 `examples/pid.yaml` has two overlays that need nothing beyond the standard host, for trying
 them out: `stiff` changes the controller's gains, and `scaled` puts a `std/gain` node

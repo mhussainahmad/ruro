@@ -34,7 +34,8 @@ podman run --rm --init --network host ruro-gazebo /gazebo/run.sh tcp/127.0.0.1:7
 ruro run examples/gazebo/rover.yaml
 ```
 
-The graph without overlays is the simulation. Its `real` overlay reads a real RPLidar with
+The graph without overlays is the simulation (`--overlay sim` names it explicitly). Its
+`real` overlay reads a real RPLidar with
 `hw/rplidar` and runs the `robot` group on the rover's own daemon; velocity commands and
 odometry then go through ROS 2 to the robot's base driver (see the example's README). It is
 the same pattern as [the SO-100 arm](sim-to-real.md): one file, a variant per robot.
@@ -68,7 +69,9 @@ with Isaac Sim on Linux do not include rmw_zenoh: install ROS 2 Jazzy with
 `ros-jazzy-rmw-zenoh-cpp` on Ubuntu 24.04, source it and set
 `RMW_IMPLEMENTATION=rmw_zenoh_cpp` before starting Isaac Sim, and run `ruro daemon` as the
 router in place of `rmw_zenohd`. `zenoh-bridge-ros2dds` does not help for an Isaac Sim on
-Fast DDS: its key expressions differ from rmw_zenoh's, which are what ruro's bridge speaks.
+Fast DDS: it maps topics to plain key expressions, while rmw_zenoh's (which ruro's bridge
+speaks) carry the domain id, type and type hash, and the two do not interoperate without an
+adapter. This was not tried.
 `examples/isaac-sim/README.md` has the steps.
 
 ## Gaps

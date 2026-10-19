@@ -18,7 +18,13 @@ fn every_variant_validates() {
     ruro_nodes_ml::link();
     ruro_host::describe(); // links every node crate of the stock host
     let registry = ruro::node::registry();
-    for overlays in [&[][..], &["real"], &["policy"], &["real", "policy"]] {
+    for overlays in [
+        &[][..],
+        &["sim"],
+        &["real"],
+        &["policy"],
+        &["real", "policy"],
+    ] {
         let g = load(overlays);
         let gated: Vec<&str> = g
             .nodes
@@ -39,6 +45,14 @@ fn every_variant_validates() {
             .collect();
         assert!(issues.is_empty(), "{overlays:?}: {issues:#?}");
     }
+}
+
+/// The graph is the simulation; `sim` names it and undoes `real`.
+#[test]
+fn the_sim_overlay_is_the_graph_itself() {
+    let base = load(&[]);
+    assert_eq!(load(&["sim"]), base);
+    assert_eq!(load(&["real", "sim"]), base);
 }
 
 #[test]
@@ -97,6 +111,7 @@ fn simulator_examples_validate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     for (file, overlays) in [
         ("gazebo/rover.yaml", &[][..]),
+        ("gazebo/rover.yaml", &["sim"]),
         ("gazebo/rover.yaml", &["real"]),
         ("isaac-sim/carter.yaml", &[]),
     ] {
@@ -110,6 +125,13 @@ fn simulator_examples_validate() {
             .collect();
         assert!(issues.is_empty(), "{file} {overlays:?}: {issues:#?}");
     }
+    let rover = |o: &[&str]| {
+        Graph::load(root.join("gazebo/rover.yaml"))
+            .unwrap()
+            .with_overlays(o)
+            .unwrap()
+    };
+    assert_eq!(rover(&["sim"]), rover(&[]));
     let real = Graph::load(root.join("gazebo/rover.yaml"))
         .unwrap()
         .with_overlays(&["real"])

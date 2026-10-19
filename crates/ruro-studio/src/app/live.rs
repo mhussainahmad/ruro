@@ -184,7 +184,10 @@ impl Studio {
     pub(crate) fn deploy(&mut self) {
         let root = self.root_doc();
         let root_uid = root.uid;
-        let graph = root.to_graph(&self.registry);
+        let mut graph = root.to_graph(&self.registry);
+        // Overlays not shown are not run: the daemon gets the graph as shown,
+        // and an overlay that does not apply does not block it.
+        graph.overlays.clear();
         let base = root.base_dir();
         if graph.nodes.is_empty() {
             self.toast(

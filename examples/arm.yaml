@@ -3,7 +3,7 @@
 # or replace the gamepad with a trained policy. See book/src/sim-to-real.md.
 #
 #   ruro overlays examples/arm.yaml                       # what each overlay changes
-#   ruro run examples/arm.yaml                            # MuJoCo
+#   ruro run examples/arm.yaml                            # MuJoCo (same as --overlay sim)
 #   ruro run examples/arm.yaml --overlay real             # the real arm and camera
 #   ruro run examples/arm.yaml -o real -o policy          # a policy drives the real arm
 #
@@ -72,6 +72,19 @@ wires:
   - jog.command -> recorder.action
   - camera.image -> recorder.image
 overlays:
+  # The simulation, as in the graph itself: lets `-o real -o sim` and the
+  # studio's picker name it, and turns `real` back into the simulation.
+  sim:
+    clock: sim
+    nodes:
+      arm:
+        type: sim/mujoco
+        params: { model: examples/models/so100.xml, real_time_factor: 1.0 }
+      camera:
+        type: std/fake-camera
+        params: { width: 640, height: 480 }
+      recorder:
+        params: { root: datasets/so100-sim }
   # The real SO-100 (Feetech STS3215 servos) and a USB camera. Calibrate
   # first: `offsets` are the raw servo readings (0..4095) with the arm
   # pointing straight up and the gripper closed; flip `directions` for joints

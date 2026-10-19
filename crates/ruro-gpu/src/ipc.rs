@@ -28,6 +28,8 @@
 //! reused after a few newer ones of its size (a ring), so a receiver has a
 //! few frame periods to pin a frame before it goes stale. A receiver that
 //! crashes while holding a pin leaks that allocation until the producer exits.
+//! A receiver lets go of an exited producer's mappings when it next meets a
+//! new producer (a restarted group, typically).
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -100,6 +102,14 @@ pub(crate) struct LeaseTable {
 // SAFETY: the mapping is shared memory accessed only through atomics.
 unsafe impl Send for LeaseTable {}
 unsafe impl Sync for LeaseTable {}
+
+impl Drop for LeaseTable {
+    fn drop(&mut self) {
+        // SAFETY: mapped by `LeaseTable::map` with this length; the last
+        // reference (and so every lease on it) is gone.
+        unsafe { libc::munmap(self.words as *mut libc::c_void, SLOTS as usize * 8) };
+    }
+}
 
 fn table_path(pid: u32, nonce: u64) -> PathBuf {
     PathBuf::from(format!("{TABLE_DIR}/{TABLE_PREFIX}{pid}-{nonce:016x}"))
@@ -198,6 +208,12 @@ extern "C" fn remove_own_table() {
     }
 }
 
+fn process_gone(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists.
+    let failed = unsafe { libc::kill(pid as i32, 0) } != 0;
+    failed && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
 /// Removes the tables of producers that are gone (killed processes do not
 /// run their exit handlers).
 fn remove_stale_tables() {
@@ -212,10 +228,7 @@ fn remove_stale_tables() {
         let Some(pid) = rest.split('-').next().and_then(|p| p.parse::<i32>().ok()) else {
             continue;
         };
-        // SAFETY: signal 0 only checks that the process exists.
-        let gone = unsafe { libc::kill(pid, 0) } != 0
-            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
-        if gone {
+        if process_gone(pid as u32) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
@@ -462,20 +475,50 @@ impl Descriptor {
     }
 }
 
-/// Lease tables of other producers, mapped once each.
+/// What this process has mapped of other producers: their lease tables (by
+/// nonce, with their pid) and their allocations (by nonce and id).
+#[derive(Default)]
+struct Remote {
+    tables: HashMap<u64, (u32, Arc<LeaseTable>)>,
+    mappings: HashMap<(u64, u64), Arc<Mapping>>,
+}
+
+fn remote() -> parking_lot::MutexGuard<'static, Remote> {
+    static REMOTE: OnceLock<Mutex<Remote>> = OnceLock::new();
+    REMOTE.get_or_init(Default::default).lock()
+}
+
+/// The lease table of another producer, mapped once. Mapping a new
+/// producer's table is also when the tables and mappings of producers that
+/// have exited are let go (each is closed once no received buffer uses it),
+/// so a restarted producer does not leave its old allocations mapped here.
 fn remote_table(pid: u32, nonce: u64) -> Result<Arc<LeaseTable>> {
-    static TABLES: OnceLock<Mutex<HashMap<u64, Arc<LeaseTable>>>> = OnceLock::new();
-    let mut tables = TABLES.get_or_init(Default::default).lock();
-    if let Some(t) = tables.get(&nonce) {
+    let mut r = remote();
+    if let Some((_, t)) = r.tables.get(&nonce) {
         return Ok(t.clone());
     }
+    let gone: Vec<u64> = r
+        .tables
+        .iter()
+        .filter(|(_, (pid, _))| process_gone(*pid))
+        .map(|(nonce, _)| *nonce)
+        .collect();
+    for n in &gone {
+        r.tables.remove(n);
+    }
+    r.mappings.retain(|(n, _), _| !gone.contains(n));
     let t = Arc::new(LeaseTable::open(pid, nonce)?);
-    tables.insert(nonce, t.clone());
+    r.tables.insert(nonce, (pid, t.clone()));
     Ok(t)
 }
 
+/// Allocations of other processes currently mapped into this one.
+pub fn mapped_allocations() -> usize {
+    remote().mappings.len()
+}
+
 /// An allocation of another process mapped into this one. Mappings are
-/// cached for the life of the process: CUDA refuses to map one handle twice
+/// cached while their producer lives: CUDA refuses to map one handle twice
 /// in a context, and mapping costs far more than a frame's worth of work.
 struct Mapping {
     device: u32,
@@ -493,11 +536,9 @@ impl Drop for Mapping {
 }
 
 fn mapping(desc: &Descriptor) -> Result<Arc<Mapping>> {
-    type Mappings = HashMap<(u64, u64), Arc<Mapping>>;
-    static MAPPINGS: OnceLock<Mutex<Mappings>> = OnceLock::new();
     let key = (desc.nonce, desc.allocation);
-    let mut maps = MAPPINGS.get_or_init(Default::default).lock();
-    if let Some(m) = maps.get(&key) {
+    let mut r = remote();
+    if let Some(m) = r.mappings.get(&key) {
         return Ok(m.clone());
     }
     let ptr = cuda()?.ipc_open_mem_handle(desc.device, desc.handle)?;
@@ -505,7 +546,7 @@ fn mapping(desc: &Descriptor) -> Result<Arc<Mapping>> {
         device: desc.device,
         ptr,
     });
-    maps.insert(key, m.clone());
+    r.mappings.insert(key, m.clone());
     Ok(m)
 }
 

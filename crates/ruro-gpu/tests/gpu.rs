@@ -567,3 +567,75 @@ impl Drop for Child {
         let _ = self.0.wait();
     }
 }
+
+const PRODUCER_ENV: &str = "RURO_GPU_TEST_PRODUCER";
+
+/// Run in a child process: sends `RURO_GPU_TEST_FRAMES` frames, each in its
+/// own allocation, waits for the parent's acknowledgement and exits.
+#[test]
+fn gpu_producer_child() {
+    let Ok(topic) = std::env::var(PRODUCER_ENV) else {
+        return;
+    };
+    let n: u8 = std::env::var("RURO_GPU_TEST_FRAMES")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let shm = ruro_transport::Shm::new("ruro-gpu-test-producer").unwrap();
+    let tx = shm.publisher(&format!("{topic}/frames")).unwrap();
+    let rx = shm.subscriber(&format!("{topic}/acks"), 4).unwrap();
+    let stream = Stream::new(0).unwrap();
+    let frames: Vec<GpuImage> = (0..n)
+        .map(|i| GpuImage::from_image(0, &pattern(64, 64, Encoding::Rgb8, i), &stream).unwrap())
+        .collect();
+    for f in &frames {
+        tx.send(0, 0, f.encoded_len(), &mut |b| f.encode_into(b))
+            .unwrap();
+    }
+    wait_one(&rx, Duration::from_secs(20));
+}
+
+/// Receives the frames of one producer child, which then exits.
+fn receive_from_producer(topic: &str, n: u8) {
+    let shm = ruro_transport::Shm::new("ruro-gpu-test-consumer").unwrap();
+    let rx = shm.subscriber(&format!("{topic}/frames"), 16).unwrap();
+    let tx = shm.publisher(&format!("{topic}/acks")).unwrap();
+    let mut child = Child(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "gpu_producer_child"])
+            .env(PRODUCER_ENV, topic)
+            .env("RURO_GPU_TEST_FRAMES", n.to_string())
+            .spawn()
+            .unwrap(),
+    );
+    let mut got = Vec::new();
+    let start = Instant::now();
+    while got.len() < n as usize {
+        assert!(start.elapsed() < Duration::from_secs(20), "frames missing");
+        let _ = rx.wait(Duration::from_millis(50));
+        rx.drain(|_, _, body| got.push(GpuImage::decode(body).unwrap()))
+            .unwrap();
+    }
+    for (i, g) in got.iter().enumerate() {
+        assert!(g.to_image().unwrap() == pattern(64, 64, Encoding::Rgb8, i as u8));
+    }
+    drop(got);
+    tx.send(0, 0, 0, &mut |_| {}).unwrap();
+    assert!(child.0.wait().unwrap().success());
+}
+
+#[test]
+fn mappings_of_exited_producers_are_released() {
+    if !gpu() {
+        return;
+    }
+    // This test is the only one that maps other processes' memory in this
+    // process (the child of `frames_cross_processes_without_copies` is the
+    // receiver there).
+    let topic = format!("ruro-gpu-test/{}/producers", std::process::id());
+    receive_from_producer(&format!("{topic}/1"), 3);
+    assert_eq!(ruro_gpu::ipc::mapped_allocations(), 3);
+    // Meeting the next producer lets go of the exited one's allocations.
+    receive_from_producer(&format!("{topic}/2"), 1);
+    assert_eq!(ruro_gpu::ipc::mapped_allocations(), 1);
+}

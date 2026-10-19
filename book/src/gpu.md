@@ -143,8 +143,10 @@ allocates another. A received buffer can be passed on to a third process unchang
 - **One machine.** Descriptors are only valid on the machine (and boot) that made them.
   Wires to other machines and recordings would carry them, so a receiver there refuses them.
   Put `gpu/download` before such wires and before recorded outputs.
-- **Crashes.** A receiver that crashes while holding a buffer keeps it pinned until the
-  producer exits. Mappings of a producer that exited stay open until the receiver restarts.
+- **Crashes.** A receiver that crashes while holding buffers keeps them pinned until the
+  producer exits: each crash of a receiving group costs its producer a few frames' worth of
+  GPU memory (about 18 MiB for 1080p frames in `examples/gpu.yaml`). A receiver releases the
+  mappings of a producer that exited when it meets the restarted one.
 - **Synchronization** is done by the producer before sending; IPC events
   (`cuIpcGetEventHandle`) would let receivers wait on the device instead.
 - **ONNX Runtime** (`ml/onnx`) still runs on the CPU and takes host images. Feeding

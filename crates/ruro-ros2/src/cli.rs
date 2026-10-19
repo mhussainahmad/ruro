@@ -104,17 +104,46 @@ struct GraphArgs {
     json: bool,
 }
 
+/// The credentials to try, in order: those in the environment (`RURO_TOKEN`
+/// and friends, for a ruro daemon that requires them), then the same
+/// without the token, because a router that does not authenticate refuses
+/// sessions that present one. Unreadable credentials are skipped.
+fn credential_attempts() -> Vec<Credentials> {
+    match Credentials::from_env() {
+        Ok(c) if c.token.is_some() => vec![c.clone(), Credentials { token: None, ..c }],
+        Ok(c) => vec![c],
+        Err(_) => vec![Credentials::default()],
+    }
+}
+
+/// Runs `open` with each credential attempt until one succeeds; the first
+/// error otherwise.
+fn with_credentials<T>(mut open: impl FnMut(Credentials) -> Result<T>) -> Result<T> {
+    let mut first = None;
+    for c in credential_attempts() {
+        match open(c) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                first.get_or_insert(e);
+            }
+        }
+    }
+    Err(first.expect("at least one attempt"))
+}
+
 impl GraphArgs {
     /// The graph's entities, and the domain asked.
     fn entities(&self) -> Result<(Vec<crate::discovery::Entity>, u32)> {
-        let cfg = EndpointConfig {
-            connect: vec![self.router.clone()],
-            credentials: Credentials::from_env()?,
-            ..Default::default()
-        };
-        let domain = self.domain.unwrap_or(cfg.domain);
-        let session = zenoh::Wait::wait(zenoh::open(cfg.zenoh_config()?))
-            .map_err(|e| anyhow::anyhow!("cannot reach Zenoh at {}: {e}", self.router))?;
+        let domain = self.domain.unwrap_or(EndpointConfig::default().domain);
+        let session = with_credentials(|credentials| {
+            let cfg = EndpointConfig {
+                connect: vec![self.router.clone()],
+                credentials,
+                ..Default::default()
+            };
+            zenoh::Wait::wait(zenoh::open(cfg.zenoh_config()?))
+                .map_err(|e| anyhow::anyhow!("cannot reach Zenoh at {}: {e}", self.router))
+        })?;
         let entities =
             crate::discovery::entities(&session, domain, Duration::from_millis(self.timeout))?;
         Ok((entities, domain))
@@ -269,16 +298,18 @@ pub fn run(args: Ros2Args) -> Result<()> {
             timeout,
             packages,
         } => {
-            let mut cfg = EndpointConfig {
-                connect: vec![router],
-                node_name: "ruro_ros2_call".into(),
-                credentials: Credentials::from_env()?,
-                ..Default::default()
-            };
-            if let Some(d) = domain {
-                cfg.domain = d;
-            }
-            let endpoint = Endpoint::open(cfg)?;
+            let endpoint = with_credentials(|credentials| {
+                let mut cfg = EndpointConfig {
+                    connect: vec![router.clone()],
+                    node_name: "ruro_ros2_call".into(),
+                    credentials,
+                    ..Default::default()
+                };
+                if let Some(d) = domain {
+                    cfg.domain = d;
+                }
+                Endpoint::open(cfg)
+            })?;
             let response = call(
                 &service,
                 &ty,

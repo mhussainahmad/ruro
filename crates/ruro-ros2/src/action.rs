@@ -317,11 +317,13 @@ impl<A: RosAction> ServerShared<A> {
         })
     }
 
-    fn set_status(&self, id: &GoalId, status: GoalStatus) {
+    /// Marks an accepted goal executing. A goal already canceling stays
+    /// canceling, as in rcl_action's state machine.
+    fn set_executing(&self, id: &GoalId) {
         self.update(|state| {
             let changed = match state.goals.get_mut(id) {
-                Some(g) if !g.status.is_terminal() && g.status != status => {
-                    g.status = status;
+                Some(g) if g.status == GoalStatus::Accepted => {
+                    g.status = GoalStatus::Executing;
                     true
                 }
                 _ => false,
@@ -479,9 +481,9 @@ impl<A: RosAction> GoalHandle<A> {
         &self.goal
     }
 
-    /// Marks the goal executing.
+    /// Marks the goal executing (unless a cancel request already came).
     pub fn execute(&self) {
-        self.shared.set_status(&self.id, GoalStatus::Executing);
+        self.shared.set_executing(&self.id);
     }
 
     /// The goal's status.

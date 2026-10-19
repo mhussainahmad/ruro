@@ -246,11 +246,12 @@ macro_rules! bridge {
     (
         $sub_kind:literal, $Sub:ident, $pub_kind:literal, $Pub:ident,
         $ruro:ty, $ros:ty, $from:path, $to:path, $topic:literal, $ros_name:literal
+        $(, note = $note:literal)?
         $(, estop = $safe:expr, $estop_doc:literal)?
     ) => {
-        #[doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message.")]
+        #[doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message.", $("\n\n", $note)?)]
         #[derive(Node)]
-        #[node(kind = $sub_kind, rate = 1, doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message."))]
+        #[node(kind = $sub_kind, rate = 1, doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message.", $("\n\n", $note)?))]
         pub struct $Sub {
             #[output]
             out: Output<$ruro>,
@@ -309,9 +310,9 @@ macro_rules! bridge {
             }
         }
 
-        #[doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $estop_doc)?)]
+        #[doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $note,)? $("\n\n", $estop_doc)?)]
         #[derive(Node)]
-        #[node(kind = $pub_kind, doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $estop_doc)?))]
+        #[node(kind = $pub_kind, doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $note,)? $("\n\n", $estop_doc)?))]
         pub struct $Pub {
             #[input]
             input: Input<$ruro>,
@@ -553,7 +554,9 @@ bridge!(
     convert::tf_from_ros,
     convert::tf_to_ros,
     "/tf",
-    "tf2_msgs/TFMessage"
+    "tf2_msgs/TFMessage",
+    note = "For `/tf_static`, set `durability: transient_local` and `depth: 1`: static \
+            transforms are then latched, so they reach (and come from) nodes that start later."
 );
 bridge!(
     "ros2/sub-float64",

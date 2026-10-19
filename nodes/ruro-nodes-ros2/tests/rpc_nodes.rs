@@ -1,8 +1,8 @@
 //! Service and action nodes, and transient-local bridges, through a local
 //! Zenoh router; the e-stop behaviour of each.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use ruro::msg::{Flag, Scalar, Text, Transform, Transforms};
@@ -160,7 +160,12 @@ fn set_bool_nodes_let_only_false_through_an_estop() {
 }
 
 /// Serves Fibonacci goals, 50 ms a step, until `stop` is set.
-fn serve(endpoint: String, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
+/// Each ended goal's order and whether it was canceled goes to `ended`.
+fn serve(
+    endpoint: String,
+    stop: Arc<AtomicBool>,
+    ended: mpsc::Sender<(i32, bool)>,
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let node = Endpoint::open(EndpointConfig {
             connect: vec![endpoint],
@@ -191,6 +196,7 @@ fn serve(endpoint: String, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()>
                 std::thread::sleep(Duration::from_millis(50));
             }
             let result = Fibonacci_Result { sequence: seq };
+            let _ = ended.send((goal.goal().order, canceled));
             if canceled {
                 goal.canceled(result);
             } else {
@@ -205,7 +211,8 @@ fn fibonacci_goal_node_and_its_estop() {
     ruro_nodes_ros2::link();
     let (_router, endpoint) = router();
     let stop = Arc::new(AtomicBool::new(false));
-    let server = serve(endpoint.clone(), stop.clone());
+    let (ended, _) = mpsc::channel();
+    let server = serve(endpoint.clone(), stop.clone(), ended);
     let mut node = Harness::new(
         "ros2/fibonacci-goal",
         json!({ "action": "/fib", "router": endpoint, "domain_id": 7 }),
@@ -265,6 +272,56 @@ fn fibonacci_goal_node_and_its_estop() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(node.take::<Text>("status").unwrap().is_empty());
+    drop(node);
+    stop.store(true, Ordering::Relaxed);
+    server.join().unwrap();
+}
+
+#[test]
+fn a_new_goal_cancels_one_awaiting_acceptance() {
+    ruro_nodes_ros2::link();
+    let (_router, endpoint) = router();
+    let stop = Arc::new(AtomicBool::new(false));
+    let (ended, ended_rx) = mpsc::channel();
+    let server = serve(endpoint.clone(), stop.clone(), ended);
+    let mut node = Harness::new(
+        "ros2/fibonacci-goal",
+        json!({ "action": "/fib", "router": endpoint, "domain_id": 7 }),
+    )
+    .unwrap();
+    // Warm up until a goal gets through.
+    let start = Instant::now();
+    loop {
+        node.push("order", Scalar(1.0)).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(800);
+        while Instant::now() < deadline {
+            node.step().unwrap();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if node
+            .take::<Text>("result")
+            .unwrap()
+            .iter()
+            .any(|r| r.0 == "0 1")
+        {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(15), "never served");
+    }
+    while ended_rx.try_recv().is_ok() {}
+
+    // Two goals in one step: the first is still awaiting acceptance when
+    // the second replaces it.
+    node.push("order", Scalar(200.0)).unwrap();
+    node.push("order", Scalar(3.0)).unwrap();
+    let mut result = Vec::new();
+    step_until(&mut [&mut node], "second goal's result", |h| {
+        result.extend(h[0].take::<Text>("result").unwrap());
+        !result.is_empty()
+    });
+    assert_eq!(result[0].0, "0 1 1 2");
+    let ended: Vec<_> = ended_rx.try_iter().collect();
+    assert_eq!(ended, [(200, true), (3, false)]);
     drop(node);
     stop.store(true, Ordering::Relaxed);
     server.join().unwrap();

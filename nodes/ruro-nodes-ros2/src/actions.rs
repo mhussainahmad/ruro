@@ -42,6 +42,8 @@ pub enum GoalEvent<A: RosAction> {
 pub struct GoalDriver<A: RosAction> {
     client: ActionClient<A>,
     pending: Option<PendingGoal<A>>,
+    /// Goals replaced while awaiting acceptance, canceled once accepted.
+    superseded: Vec<PendingGoal<A>>,
     active: Option<ClientGoal<A>>,
     status: GoalStatus,
     /// Cancel the pending goal once it is accepted.
@@ -56,6 +58,7 @@ impl<A: RosAction> GoalDriver<A> {
         Ok(Self {
             client: ActionClient::new(endpoint, name)?,
             pending: None,
+            superseded: Vec::new(),
             active: None,
             status: GoalStatus::Unknown,
             cancel_pending: false,
@@ -73,11 +76,19 @@ impl<A: RosAction> GoalDriver<A> {
         self.pending.is_some() || self.active.is_some()
     }
 
-    /// Sends a goal, canceling the current one.
+    /// Sends a goal, canceling the current one (a goal still awaiting
+    /// acceptance is canceled once accepted).
     pub fn send(&mut self, goal: A::Goal) -> Result {
-        self.cancel();
+        if let Some(active) = self.active.take()
+            && !active.status().is_terminal()
+            && let Err(e) = active.cancel_async(self.timeout)
+        {
+            warn!("canceling a goal of {}: {e:#}", self.client.name());
+        }
+        if let Some(pending) = self.pending.take() {
+            self.superseded.push(pending);
+        }
         self.cancel_pending = false;
-        self.active = None;
         self.status = GoalStatus::Unknown;
         self.pending = Some(self.client.send_goal_async(goal, self.timeout)?);
         Ok(())
@@ -99,6 +110,15 @@ impl<A: RosAction> GoalDriver<A> {
 
     /// Events since the last poll.
     pub fn poll(&mut self) -> Vec<GoalEvent<A>> {
+        let timeout = self.timeout;
+        self.superseded.retain_mut(|p| match p.try_accepted() {
+            None => true,
+            Some(Ok(goal)) => {
+                let _ = goal.cancel_async(timeout);
+                false
+            }
+            Some(Err(_)) => false,
+        });
         let mut events = Vec::new();
         if let Some(pending) = &mut self.pending
             && let Some(answer) = pending.try_accepted()

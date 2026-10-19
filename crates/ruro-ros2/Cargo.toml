@@ -18,3 +18,7 @@ sha2 = { workspace = true }
 zenoh = { workspace = true, features = ["transport_tls", "auth_usrpwd"] }
 clap = { workspace = true }
 xxhash-rust = { workspace = true }
+ruro-graph = { workspace = true }
+roxmltree = { workspace = true }
+serde-saphyr = { workspace = true }
+libc = { workspace = true }

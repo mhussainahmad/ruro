@@ -46,6 +46,9 @@ enum Ros2Cmd {
         #[arg(long, default_value = "crate::ros")]
         root: String,
     },
+    /// Convert a ROS 2 launch file (XML or YAML; Python with --eval) into a
+    /// ruro graph of ros2/node nodes.
+    Import(crate::launch::ImportArgs),
     /// Print the RIHS01 hash of a message type, e.g. `geometry_msgs/msg/Twist`.
     Hash {
         ty: String,
@@ -138,6 +141,7 @@ pub fn run(args: Ros2Args) -> Result<()> {
             }
             Ok(())
         }
+        Ros2Cmd::Import(args) => crate::launch::run(args),
         Ros2Cmd::Hash {
             ty,
             packages,

@@ -21,9 +21,11 @@ pub mod cli;
 pub mod codegen;
 pub mod discovery;
 pub mod dynamic;
+pub mod external;
 pub mod hash;
 pub mod idl;
 pub mod idl_file;
+pub mod launch;
 #[rustfmt::skip]
 pub mod msgs;
 pub mod rmw;

@@ -293,7 +293,7 @@ fn every_installed_interface_parses_and_hashes_like_rosidl() {
     assert!(status.success());
     let mut lib = ruro_ros2::search::TypeLibrary::bundled();
     lib.add_dir(&dir);
-    let mut hashed = 0;
+    let mut hashed = std::collections::BTreeSet::new();
     let mut idl = 0;
     for pkg in std::fs::read_dir(&dir).unwrap().flatten() {
         for sub in ["msg", "srv", "action"] {
@@ -313,7 +313,7 @@ fn every_installed_interface_parses_and_hashes_like_rosidl() {
                                 continue;
                             };
                             assert_eq!(t.hash, h["hash_string"].as_str().unwrap(), "{name}");
-                            hashed += 1;
+                            hashed.insert(name.to_owned());
                         }
                     }
                     Some("idl") => {
@@ -340,6 +340,6 @@ fn every_installed_interface_parses_and_hashes_like_rosidl() {
         }
     }
     assert!(lib.warnings().is_empty(), "{:#?}", lib.warnings());
-    eprintln!("{hashed} type hashes and {idl} .idl types checked");
-    assert!(hashed > 500 && idl > 200, "{hashed} {idl}");
+    eprintln!("{} type hashes and {idl} .idl types checked", hashed.len());
+    assert!(hashed.len() > 350 && idl > 200, "{} {idl}", hashed.len());
 }

@@ -6,10 +6,11 @@ ruro nodes; recorded bags become ruro recordings. You then replace ROS nodes wit
 nodes one at a time, or not at all.
 
 > **Status:** tested against ROS 2 Jazzy with rmw_zenoh in a container: ruro ran
-> demo_nodes_cpp's talker and listener from their launch file, received `/chatter`, and
-> exchanged `example_interfaces` and `rcl_interfaces` messages with ROS in both
-> directions. Type hashes of all 1031 message types installed there match rosidl's. The
-> CI tests use recorded fixtures and do not need ROS.
+> demo_nodes_cpp's talker and listener from their launch file and received `/chatter`;
+> it received `example_interfaces` and `rcl_interfaces` messages from rclpy byte for
+> byte, and `ros2 topic echo` received an `example_interfaces` message ruro published.
+> Type hashes of all 380 message types installed there (services and actions included)
+> match rosidl's. The CI tests use recorded fixtures and do not need ROS.
 
 The pieces:
 

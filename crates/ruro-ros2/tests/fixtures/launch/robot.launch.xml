@@ -17,7 +17,7 @@
     </param>
     <param from="$(var config)/talker.yaml"/>
     <remap from="chatter" to="/$(var robot)/out"/>
-    <env name="EXTRA" value="$(env HOME)"/>
+    <env name="EXTRA" value="$(env HOME /nohome)"/>
   </node>
 
   <group>

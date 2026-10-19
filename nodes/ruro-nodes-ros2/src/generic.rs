@@ -141,7 +141,20 @@ fn hash_for(want: &Want, endpoint: Option<&Endpoint>) -> Result<Option<String>> 
     }
     let local = resolve(&want.ty, &want.interfaces);
     match (local, endpoint) {
-        (Ok(t), _) => Ok(Some(t.hash.clone())),
+        (Ok(t), None) => Ok(Some(t.hash.clone())),
+        // Publishers with another version of the definition use another
+        // key: follow them, so that their messages arrive.
+        (Ok(t), Some(ep)) => match announced_hash(ep, &want.settings.topic, &want.ty) {
+            Ok(Some(h)) if h != t.hash => {
+                warn!(
+                    "{}: the publishers of {} announce hash {h}, but the local definition \
+                     has {}; subscribing with theirs",
+                    want.settings.topic, want.ty, t.hash
+                );
+                Ok(Some(h))
+            }
+            _ => Ok(Some(t.hash.clone())),
+        },
         (Err(e), None) => Err(e),
         (Err(e), Some(ep)) => match announced_hash(ep, &want.settings.topic, &want.ty)? {
             Some(h) => {

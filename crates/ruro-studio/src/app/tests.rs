@@ -183,11 +183,11 @@ fn ros_topic_browser_adds_configured_bridge_nodes() {
         nodes[0].params["router"],
         serde_json::json!(ruro_proto::DEFAULT_ENDPOINT)
     );
-    // Types without a bridge offer no add buttons.
+    // Types without a typed bridge get the generic ros2/sub and ros2/pub.
     assert_eq!(
         h.query_all_by_label("Add a subscriber node for this topic")
             .count(),
-        3
+        4
     );
 }
 

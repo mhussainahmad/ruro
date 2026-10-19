@@ -183,6 +183,19 @@ pub struct ImportOptions {
     pub subscribe: Vec<(String, String)>,
     /// `ros2/pub` bridges to add: topic and type.
     pub publish: Vec<(String, String)>,
+    /// Zenoh router for every `ros2/*` node; `None` keeps their default.
+    pub router: Option<String>,
+}
+
+/// Sets options that apply to every `ros2/*` node of an imported graph.
+fn apply_common(graph: &mut Graph, opts: &ImportOptions) {
+    if let Some(router) = &opts.router {
+        for n in graph.nodes.values_mut() {
+            if n.kind.starts_with("ros2/") {
+                n.params.insert("router".into(), router.clone().into());
+            }
+        }
+    }
 }
 
 struct Importer {
@@ -953,6 +966,10 @@ pub struct ImportArgs {
     /// Add a ros2/pub bridge, e.g. `/cmd_vel=geometry_msgs/msg/Twist` (repeatable).
     #[arg(long = "pub", value_name = "TOPIC=TYPE")]
     publish: Vec<String>,
+    /// Zenoh router for the ROS nodes and bridges (default: theirs,
+    /// tcp/127.0.0.1:7447).
+    #[arg(long)]
+    router: Option<String>,
     /// Evaluate a Python launch file with `ros2 launch` (needs a sourced ROS 2
     /// workspace); its processes are recorded, not run.
     #[arg(long)]
@@ -970,6 +987,7 @@ fn topic_type(s: &str) -> Result<(String, String)> {
 pub fn run(a: ImportArgs) -> Result<()> {
     let mut opts = ImportOptions {
         name: a.name,
+        router: a.router,
         ..Default::default()
     };
     for arg in &a.args {
@@ -1038,6 +1056,7 @@ pub fn import(path: &Path, opts: &ImportOptions) -> Result<Imported> {
     };
     imp.children(&root, &mut scope)?;
     imp.add_bridges();
+    apply_common(&mut imp.graph, opts);
     Ok(Imported {
         graph: imp.graph,
         warnings: imp.warnings,

@@ -299,6 +299,7 @@ pub fn eval_python(path: &Path, opts: &ImportOptions) -> Result<Imported> {
     };
     extra.add_bridges();
     imported.graph = extra.graph;
+    super::apply_common(&mut imported.graph, opts);
     let _ = std::fs::remove_dir_all(&dir);
     Ok(imported)
 }

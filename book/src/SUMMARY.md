@@ -21,12 +21,15 @@
 - [Hardware drivers](hardware.md)
 - [Simulation](simulation.md)
   - [Simulation and the real robot](sim-to-real.md)
+  - [Gazebo and Isaac Sim](gazebo-isaac.md)
 - [Machine learning](ml.md)
+- [GPU buffers](gpu.md)
 - [ROS 2 bridge](ros2.md)
   - [Bringing a ROS 2 system to ruro](ros2-migration.md)
 - [Deploying on robots](deployment.md)
   - [Multi-machine graphs](multi-machine.md)
   - [Security](security.md)
+  - [Updating daemons](updates.md)
 
 # Reference
 

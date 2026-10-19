@@ -50,7 +50,10 @@ or in an uploaded host are known. Offline, unknown types in groups with `machine
 Recording and replay span machines: each peer records its own groups, and stopping the
 recording collects every machine's part into one file at the daemon you asked. Replay mutes
 recorded nodes on the machines that run them. The reply to `ruro record --stop` names the
-groups recorded on each machine and any machine that could not record. A very large peer
+groups recorded on each machine and any machine that could not record. Peers' clocks are
+measured when the recording starts and their parts are shifted onto the daemon's clock when
+the offset is measurable; see
+[Recordings across machines](record-replay.md#recordings-across-machines). A very large peer
 part can take longer than the CLI's 10 s request timeout to collect.
 
 `ruro kill`, `ruro echo` and `ruro param` reach the machine that runs the group or node.
@@ -71,8 +74,8 @@ ruro deploy --to robot --host-binary target/release/my-host
 uploads a host binary (checked against its SHA-256) that groups select with
 `groups.<name>.host: my-host`. `--host-name` stores it under another name (a valid
 identifier); a graph can be given in the same command. Uploads live in the daemon's
-runtime directory and are lost on reboot. Updating the daemon itself remotely is not
-supported.
+runtime directory and are lost on reboot. To update the daemon itself, and its default
+host, see [Updating daemons](updates.md).
 
 An uploaded [Python host](python.md) needs the `ruro` Python package installed on the
 target machine.

@@ -1,36 +1,50 @@
-//! ROS 2 publish/subscribe over Zenoh, following rmw_zenoh's conventions.
+//! ROS 2 topics and services over Zenoh, following rmw_zenoh's conventions
+//! (rmw_zenoh_cpp 0.2.11, the version ROS 2 Jazzy ships; see its
+//! `docs/design.md`).
 //!
 //! What a ROS 2 node using `rmw_zenoh_cpp` expects from a peer:
 //!
-//! - **Data key**: `<domain>/<topic without outer slashes>/<DDS type>/<hash>`,
-//!   e.g. `0/chatter/std_msgs::msg::dds_::String_/RIHS01_df66…`.
+//! - **Data key**: `<domain>/<name without outer slashes>/<DDS type>/<hash>`,
+//!   e.g. `0/chatter/std_msgs::msg::dds_::String_/RIHS01_df66…`, for topics
+//!   and services alike. A service's DDS type and hash are those of the
+//!   service type (`example_interfaces::srv::dds_::AddTwoInts_`).
 //! - **Payload**: the CDR encoding with its 4-byte encapsulation header.
-//! - **Attachment** on every sample (samples without one are dropped):
-//!   sequence number (`i64` LE, from 1), source timestamp (`i64` LE, ns since
-//!   the epoch), then the 16-byte publisher GID prefixed by its length (`0x10`).
+//! - **Attachment** on every sample, request and reply (ones without it are
+//!   dropped): sequence number (`i64` LE), source timestamp (`i64` LE, ns
+//!   since the epoch), then a 16-byte GID prefixed by its length (`0x10`).
+//!   Publishers number samples from 1 and send their own GID. Clients number
+//!   requests from 1 and send their GID; servers echo both in the reply,
+//!   with a new timestamp.
+//! - **Topics** are Zenoh (advanced) publishers and subscribers. Durability
+//!   transient-local uses the advanced publisher's cache and the advanced
+//!   subscriber's history queries, so latched topics such as `/tf_static`
+//!   reach late joiners in both directions.
+//! - **Services** are Zenoh queryables, declared complete; a call is a
+//!   `get` with target all-complete and no consolidation.
 //! - **Liveliness tokens** announce nodes and endpoints for graph discovery
-//!   (`ros2 topic list`, `ros2 node list`, type lookup in `ros2 topic echo`):
-//!   `@ros2_lv/<domain>/<zid>/<node id>/<entity id>/<kind>/<enclave>/<namespace>/<node>[/<topic>/<type>/<hash>/<qos>]`
-//!   with `/` inside names replaced by `%`.
+//!   (`ros2 topic list`, `ros2 service list`, type lookup in `ros2 topic echo`):
+//!   `@ros2_lv/<domain>/<zid>/<node id>/<entity id>/<kind>/<enclave>/<namespace>/<node>[/<name>/<type>/<hash>/<qos>]`
+//!   with `/` inside names replaced by `%`; kinds `NN` (node), `MP`/`MS`
+//!   (publisher, subscriber), `SS`/`SC` (service server, client).
 //! - **GID**: XXH3-128 of the endpoint's liveliness key, low half first.
-//!
-//! Only volatile durability is implemented: transient-local late joiners
-//! (e.g. `/tf_static` subscribers that start after the publisher) need
-//! zenoh's advanced publisher cache, which this module does not use. The
-//! reliability setting is announced in liveliness tokens, so ROS 2 tools
-//! report it, but samples are always sent with zenoh's default reliability
-//! because zenoh only exposes that setting as an unstable API.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use zenoh::Wait;
 use zenoh::liveliness::LivelinessToken;
+use zenoh::qos::CongestionControl;
+use zenoh::query::{ConsolidationMode, QueryTarget};
+use zenoh_ext::{
+    AdvancedPublisher, AdvancedPublisherBuilderExt, AdvancedSubscriber,
+    AdvancedSubscriberBuilderExt, CacheConfig, HistoryConfig, MissDetectionConfig, RecoveryConfig,
+};
 
-use crate::RosMessage;
 use crate::cdr::{self, CdrError};
+use crate::{RosMessage, RosService};
 
 /// Default endpoint of a Zenoh router (rmw_zenohd, or a ruro daemon).
 pub const DEFAULT_ROUTER: &str = "tcp/127.0.0.1:7447";
@@ -60,58 +74,259 @@ impl std::str::FromStr for Reliability {
     }
 }
 
-/// The QoS settings ruro supports (history is always keep-last, durability
-/// always volatile).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Qos {
-    pub reliability: Reliability,
-    /// Keep-last history depth.
-    pub depth: usize,
+/// Whether late-joining subscribers get past samples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Durability {
+    /// Only samples published while a subscriber exists reach it.
+    #[default]
+    Volatile,
+    /// The publisher keeps its last `depth` samples and late subscribers
+    /// that ask for them (transient-local themselves) receive them, as
+    /// `/tf_static` needs.
+    TransientLocal,
 }
 
-impl Default for Qos {
-    fn default() -> Self {
-        Self {
-            reliability: Reliability::Reliable,
-            depth: 10,
+impl std::str::FromStr for Durability {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_ascii_lowercase().replace('-', "_").as_str() {
+            "volatile" => Ok(Self::Volatile),
+            "transient_local" | "transientlocal" | "latched" => Ok(Self::TransientLocal),
+            other => Err(anyhow!(
+                "unknown durability `{other}` (expected volatile or transient_local)"
+            )),
         }
     }
 }
 
+/// How many samples are kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum History {
+    /// The last `depth` samples.
+    #[default]
+    KeepLast,
+    /// All of them; a reliable publisher blocks rather than drop samples
+    /// when the network is congested.
+    KeepAll,
+}
+
+/// How an endpoint's liveliness is asserted. rmw_zenoh only implements
+/// automatic liveliness (through its tokens); other values are announced
+/// but have no effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Liveliness {
+    #[default]
+    Automatic,
+    ManualByTopic,
+}
+
+/// The QoS settings of an endpoint, as ROS 2 defines them.
+///
+/// On the wire they work as in rmw_zenoh: reliability picks Zenoh's
+/// reliability, history keep-all with reliable delivery blocks a congested
+/// publisher instead of dropping, transient-local durability turns on
+/// Zenoh's advanced publisher cache (`depth` samples) and the advanced
+/// subscriber's history queries. Deadline, lifespan and liveliness are
+/// only announced in liveliness tokens (rmw_zenoh does not enforce them
+/// either). Subscribers deliver every sample to their callback as it
+/// arrives, so `depth` does not limit a subscriber's queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Qos {
+    pub reliability: Reliability,
+    /// Keep-last history depth; 0 means rmw_zenoh's default of 42.
+    pub depth: usize,
+    pub durability: Durability,
+    pub history: History,
+    /// `None` is infinite (the default).
+    pub deadline: Option<Duration>,
+    /// `None` is infinite (the default).
+    pub lifespan: Option<Duration>,
+    pub liveliness: Liveliness,
+    /// `None` is infinite (the default).
+    pub liveliness_lease: Option<Duration>,
+}
+
+impl Default for Qos {
+    /// ROS 2's default profile: reliable, volatile, keep-last 10.
+    fn default() -> Self {
+        Self {
+            reliability: Reliability::Reliable,
+            depth: 10,
+            durability: Durability::Volatile,
+            history: History::KeepLast,
+            deadline: None,
+            lifespan: None,
+            liveliness: Liveliness::Automatic,
+            liveliness_lease: None,
+        }
+    }
+}
+
+/// `RMW_DURATION_INFINITE`, as the `(sec, nsec)` pair rmw_zenoh compares
+/// each component of a duration with.
+const INFINITE: (u64, u64) = (9_223_372_036, 854_775_807);
+
+/// rmw_zenoh's default depth when a profile asks for 0.
+const DEFAULT_DEPTH: usize = 42;
+
+fn duration_to_keyexpr(d: Option<Duration>) -> String {
+    let (s, ns) = d.map_or(INFINITE, |d| (d.as_secs(), u64::from(d.subsec_nanos())));
+    let part = |v: u64, inf: u64| {
+        if v == inf {
+            String::new()
+        } else {
+            v.to_string()
+        }
+    };
+    format!("{},{}", part(s, INFINITE.0), part(ns, INFINITE.1))
+}
+
+fn duration_from_keyexpr(s: &str) -> Option<Option<Duration>> {
+    let (sec, nsec) = s.split_once(',')?;
+    let num = |v: &str, inf: u64| {
+        if v.is_empty() {
+            Some(inf)
+        } else {
+            v.parse().ok()
+        }
+    };
+    let (sec, nsec) = (num(sec, INFINITE.0)?, num(nsec, INFINITE.1)?);
+    Some(if (sec, nsec) == INFINITE {
+        None
+    } else {
+        Some(Duration::from_secs(sec).checked_add(Duration::from_nanos(nsec))?)
+    })
+}
+
 impl Qos {
-    /// rmw_zenoh's QoS rendering for liveliness keys. Values equal to its
-    /// defaults (reliable, volatile, keep-last 42, infinite durations,
-    /// automatic liveliness) are left empty.
+    /// ROS 2's sensor data profile: best effort, keep-last 5.
+    pub fn sensor_data() -> Self {
+        Self {
+            reliability: Reliability::BestEffort,
+            depth: 5,
+            ..Self::default()
+        }
+    }
+
+    /// ROS 2's default profile for services: reliable, volatile, keep-last 10.
+    pub fn services() -> Self {
+        Self::default()
+    }
+
+    /// A latched topic such as `/tf_static`: reliable, transient-local,
+    /// keep-last `depth`.
+    pub fn transient_local(depth: usize) -> Self {
+        Self {
+            durability: Durability::TransientLocal,
+            depth,
+            ..Self::default()
+        }
+    }
+
+    /// The depth rmw_zenoh uses: `depth`, or 42 if it is 0.
+    pub fn effective_depth(&self) -> usize {
+        if self.depth == 0 {
+            DEFAULT_DEPTH
+        } else {
+            self.depth
+        }
+    }
+
+    /// rmw_zenoh's QoS rendering for liveliness keys
+    /// (`qos_to_keyexpr` in `liveliness_utils.cpp`):
+    /// `<reliability>:<durability>:<history>,<depth>:<deadline s>,<ns>:<lifespan s>,<ns>:<liveliness>,<lease s>,<ns>`
+    /// with the `rmw_qos_*_policy_e` numbers, and every value equal to
+    /// rmw_zenoh's defaults (reliable, volatile, keep-last 42, infinite
+    /// durations, automatic liveliness) left empty.
     pub fn to_keyexpr(&self) -> String {
         let reliability = match self.reliability {
             Reliability::Reliable => "",
             Reliability::BestEffort => "2",
         };
-        let depth = if self.depth == 42 || self.depth == 0 {
-            String::new()
-        } else {
-            self.depth.to_string()
+        let durability = match self.durability {
+            Durability::Volatile => "",
+            Durability::TransientLocal => "1",
         };
-        format!("{reliability}::,{depth}:,:,:,,")
+        let history = match self.history {
+            History::KeepLast => "",
+            History::KeepAll => "2",
+        };
+        let depth = match self.effective_depth() {
+            DEFAULT_DEPTH => String::new(),
+            d => d.to_string(),
+        };
+        let liveliness = match self.liveliness {
+            Liveliness::Automatic => "",
+            Liveliness::ManualByTopic => "3",
+        };
+        format!(
+            "{reliability}:{durability}:{history},{depth}:{}:{}:{liveliness},{}",
+            duration_to_keyexpr(self.deadline),
+            duration_to_keyexpr(self.lifespan),
+            duration_to_keyexpr(self.liveliness_lease),
+        )
     }
 
-    /// Parses [`to_keyexpr`](Self::to_keyexpr) output (other fields ignored).
+    /// Parses [`to_keyexpr`](Self::to_keyexpr) output, as rmw_zenoh's
+    /// `keyexpr_to_qos` does.
     pub fn from_keyexpr(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() != 6 {
             return None;
         }
         let reliability = match parts[0] {
-            "" | "1" => Reliability::Reliable,
+            "" | "0" | "1" => Reliability::Reliable,
             "2" => Reliability::BestEffort,
             _ => return None,
         };
-        let depth = parts[2]
-            .split_once(',')
-            .map(|(_, d)| d)
-            .filter(|d| !d.is_empty())
-            .map_or(Some(42), |d| d.parse().ok())?;
-        Some(Self { reliability, depth })
+        let durability = match parts[1] {
+            "" | "0" | "2" => Durability::Volatile,
+            "1" => Durability::TransientLocal,
+            _ => return None,
+        };
+        let (history, depth) = parts[2].split_once(',')?;
+        let history = match history {
+            "" | "0" | "1" => History::KeepLast,
+            "2" => History::KeepAll,
+            _ => return None,
+        };
+        let depth = if depth.is_empty() {
+            DEFAULT_DEPTH
+        } else {
+            depth.parse().ok()?
+        };
+        let (liveliness, lease) = parts[5].split_once(',')?;
+        let liveliness = match liveliness {
+            "" | "0" | "1" => Liveliness::Automatic,
+            "3" => Liveliness::ManualByTopic,
+            _ => return None,
+        };
+        Some(Self {
+            reliability,
+            depth,
+            durability,
+            history,
+            deadline: duration_from_keyexpr(parts[3])?,
+            lifespan: duration_from_keyexpr(parts[4])?,
+            liveliness,
+            liveliness_lease: duration_from_keyexpr(lease)?,
+        })
+    }
+
+    fn congestion_control(&self) -> CongestionControl {
+        if self.reliability == Reliability::Reliable && self.history == History::KeepAll {
+            CongestionControl::Block
+        } else {
+            CongestionControl::Drop
+        }
+    }
+
+    fn zenoh_reliability(&self) -> zenoh::qos::Reliability {
+        match self.reliability {
+            Reliability::Reliable => zenoh::qos::Reliability::Reliable,
+            Reliability::BestEffort => zenoh::qos::Reliability::BestEffort,
+        }
     }
 }
 
@@ -316,6 +531,12 @@ impl EndpointConfig {
             serde_json::to_string(&self.connect)?,
         )?;
         set(&mut c, "scouting/multicast/enabled", "false".into())?;
+        // As rmw_zenoh's default session configuration.
+        set(
+            &mut c,
+            "timestamping/enabled",
+            "{ router: true, peer: true, client: true }".into(),
+        )?;
         self.credentials.apply(&mut c)?;
         Ok(c)
     }
@@ -365,7 +586,8 @@ fn shared_session(cfg: &EndpointConfig) -> Result<Arc<SharedSession>> {
 }
 
 /// A ROS 2 node: a Zenoh session plus the node's liveliness token. Create
-/// publishers and subscribers from it.
+/// publishers, subscribers, service servers and clients from it (and
+/// action servers and clients with [`crate::action`]).
 pub struct Endpoint {
     shared: Arc<SharedSession>,
     cfg: EndpointConfig,
@@ -412,6 +634,16 @@ impl Endpoint {
         self.cfg.domain
     }
 
+    /// The settings this endpoint was opened with.
+    pub fn config(&self) -> &EndpointConfig {
+        &self.cfg
+    }
+
+    /// A fully qualified name for `name`, resolved in the node's namespace.
+    pub fn qualify(&self, name: &str) -> String {
+        qualify(name, &self.cfg.namespace)
+    }
+
     fn entity_key(&self, kind: &str, topic: &str, dds: &str, hash: &str, qos: &Qos) -> String {
         let eid = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
         format!(
@@ -426,6 +658,14 @@ impl Endpoint {
         )
     }
 
+    fn token(&self, key: &str, what: &str) -> Result<LivelinessToken> {
+        self.session()
+            .liveliness()
+            .declare_token(key.to_owned())
+            .wait()
+            .map_err(|e| anyhow!("declaring {what} token: {e}"))
+    }
+
     /// A publisher of raw CDR payloads for any type.
     pub fn raw_publisher(
         &self,
@@ -434,20 +674,32 @@ impl Endpoint {
         type_hash: &str,
         qos: Qos,
     ) -> Result<RawPublisher> {
-        let topic = qualify(topic, &self.cfg.namespace);
+        let topic = self.qualify(topic);
         let token_key = self.entity_key("MP", &topic, dds_type, type_hash, &qos);
         let key = topic_key(self.cfg.domain, &topic, dds_type, type_hash);
-        let publisher = self
+        // As rmw_zenoh: always an advanced publisher; transient-local adds
+        // a cache that late subscribers query, and reliable transient-local
+        // heartbeats so subscribers notice missed samples.
+        let mut builder = self
             .session()
             .declare_publisher(key.clone())
+            .congestion_control(qos.congestion_control())
+            .reliability(qos.zenoh_reliability())
+            .advanced();
+        if qos.durability == Durability::TransientLocal {
+            builder = builder
+                .publisher_detection()
+                .cache(CacheConfig::default().max_samples(qos.effective_depth()));
+            if qos.reliability == Reliability::Reliable {
+                builder = builder.sample_miss_detection(
+                    MissDetectionConfig::default().sporadic_heartbeat(HEARTBEAT_PERIOD),
+                );
+            }
+        }
+        let publisher = builder
             .wait()
             .map_err(|e| anyhow!("declaring publisher on {key}: {e}"))?;
-        let token = self
-            .session()
-            .liveliness()
-            .declare_token(token_key.clone())
-            .wait()
-            .map_err(|e| anyhow!("declaring publisher token: {e}"))?;
+        let token = self.token(&token_key, "publisher")?;
         Ok(RawPublisher {
             publisher,
             gid: gid(&token_key),
@@ -474,26 +726,38 @@ impl Endpoint {
         qos: Qos,
         callback: impl Fn(&[u8], Option<SampleInfo>) + Send + Sync + 'static,
     ) -> Result<Subscriber> {
-        let topic = qualify(topic, &self.cfg.namespace);
+        let topic = self.qualify(topic);
         let token_key = self.entity_key("MS", &topic, dds_type, type_hash, &qos);
         let key = topic_key(self.cfg.domain, &topic, dds_type, type_hash);
-        let subscriber = self
+        let mut builder = self
             .session()
             .declare_subscriber(key.clone())
+            .advanced()
             .callback(move |sample| {
                 let info = sample
                     .attachment()
                     .and_then(|a| parse_attachment(&a.to_bytes()));
                 callback(&sample.payload().to_bytes(), info);
-            })
+            });
+        // As rmw_zenoh: a transient-local subscriber asks publishers that
+        // keep a cache (including ones that appear later) for their history.
+        if qos.durability == Durability::TransientLocal {
+            builder = builder
+                .subscriber_detection()
+                .query_timeout(FOREVER)
+                .history(
+                    HistoryConfig::default()
+                        .detect_late_publishers()
+                        .max_samples(qos.effective_depth()),
+                );
+            if qos.reliability == Reliability::Reliable {
+                builder = builder.recovery(RecoveryConfig::default().heartbeat());
+            }
+        }
+        let subscriber = builder
             .wait()
             .map_err(|e| anyhow!("declaring subscriber on {key}: {e}"))?;
-        let token = self
-            .session()
-            .liveliness()
-            .declare_token(token_key)
-            .wait()
-            .map_err(|e| anyhow!("declaring subscriber token: {e}"))?;
+        let token = self.token(&token_key, "subscriber")?;
         Ok(Subscriber {
             _subscriber: subscriber,
             _token: token,
@@ -517,11 +781,140 @@ impl Endpoint {
             move |b, info| callback(cdr::from_slice::<T>(b), info),
         )
     }
+
+    /// A service server for raw CDR payloads of any type. `callback` gets
+    /// every request; reply with [`ServiceRequest::reply`], from the
+    /// callback or later from any thread. Requests without a valid
+    /// rmw_zenoh attachment are ignored, as rmw_zenoh ignores them.
+    pub fn raw_service(
+        &self,
+        name: &str,
+        dds_type: &str,
+        type_hash: &str,
+        qos: Qos,
+        callback: impl Fn(ServiceRequest) + Send + Sync + 'static,
+    ) -> Result<RawService> {
+        let name = self.qualify(name);
+        let token_key = self.entity_key("SS", &name, dds_type, type_hash, &qos);
+        let key = topic_key(self.cfg.domain, &name, dds_type, type_hash);
+        let reply_key = key.clone();
+        // Complete: rmw_zenoh clients only query complete queryables.
+        let queryable = self
+            .session()
+            .declare_queryable(key.clone())
+            .complete(true)
+            .callback(move |query| {
+                let Some(info) = query
+                    .attachment()
+                    .and_then(|a| parse_attachment(&a.to_bytes()))
+                else {
+                    return;
+                };
+                let payload = query
+                    .payload()
+                    .map(|p| p.to_bytes().into_owned())
+                    .unwrap_or_default();
+                callback(ServiceRequest {
+                    query,
+                    payload,
+                    info,
+                    key: reply_key.clone(),
+                });
+            })
+            .wait()
+            .map_err(|e| anyhow!("declaring service on {key}: {e}"))?;
+        let token = self.token(&token_key, "service")?;
+        Ok(RawService {
+            _queryable: queryable,
+            _token: token,
+            key,
+        })
+    }
+
+    /// A service server answering each request with `handler`, called on a
+    /// Zenoh thread: keep it short, and use [`service_deferred`] for
+    /// handlers that block or wait. Requests that fail to decode are not
+    /// answered.
+    ///
+    /// [`service_deferred`]: Self::service_deferred
+    pub fn service<S: RosService>(
+        &self,
+        name: &str,
+        qos: Qos,
+        handler: impl Fn(S::Request) -> S::Response + Send + Sync + 'static,
+    ) -> Result<RawService> {
+        self.raw_service(name, S::DDS_TYPE_NAME, S::TYPE_HASH, qos, move |req| {
+            if let Ok(r) = cdr::from_slice::<S::Request>(req.payload()) {
+                let _ = req.reply(cdr::to_vec(&handler(r)));
+            }
+        })
+    }
+
+    /// A service server handing each request to `callback` as a
+    /// [`PendingRequest`] to answer whenever ready, from any thread.
+    pub fn service_deferred<S: RosService>(
+        &self,
+        name: &str,
+        qos: Qos,
+        callback: impl Fn(PendingRequest<S>) + Send + Sync + 'static,
+    ) -> Result<RawService> {
+        self.raw_service(name, S::DDS_TYPE_NAME, S::TYPE_HASH, qos, move |req| {
+            if let Ok(request) = cdr::from_slice::<S::Request>(req.payload()) {
+                callback(PendingRequest {
+                    request,
+                    raw: req,
+                    _type: std::marker::PhantomData,
+                });
+            }
+        })
+    }
+
+    /// A service client for raw CDR payloads of any type.
+    pub fn raw_client(
+        &self,
+        name: &str,
+        dds_type: &str,
+        type_hash: &str,
+        qos: Qos,
+    ) -> Result<RawClient> {
+        let name = self.qualify(name);
+        let token_key = self.entity_key("SC", &name, dds_type, type_hash, &qos);
+        let key = topic_key(self.cfg.domain, &name, dds_type, type_hash);
+        let token = self.token(&token_key, "client")?;
+        Ok(RawClient {
+            session: self.session().clone(),
+            domain: self.cfg.domain,
+            name,
+            dds_type: dds_type.to_owned(),
+            key,
+            gid: gid(&token_key),
+            seq: AtomicI64::new(0),
+            _token: token,
+        })
+    }
+
+    /// A typed service client.
+    pub fn client<S: RosService>(&self, name: &str, qos: Qos) -> Result<Client<S>> {
+        Ok(Client {
+            raw: self.raw_client(name, S::DDS_TYPE_NAME, S::TYPE_HASH, qos)?,
+            _type: std::marker::PhantomData,
+        })
+    }
 }
+
+/// Period of the heartbeats a reliable transient-local publisher sends so
+/// subscribers notice missed samples (rmw_zenoh's
+/// `SAMPLE_MISS_DETECTION_HEARTBEAT_PERIOD`).
+const HEARTBEAT_PERIOD: Duration = Duration::from_millis(500);
+
+/// A timeout long enough to never expire in practice, for queries that
+/// rmw_zenoh makes without one. (`Duration::MAX` would overflow when Zenoh
+/// adds it to the current time.)
+pub const FOREVER: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
 
 /// Publishes CDR payloads with rmw_zenoh attachments.
 pub struct RawPublisher {
-    publisher: zenoh::pubsub::Publisher<'static>,
+    publisher: AdvancedPublisher<'static>,
     gid: [u8; 16],
     seq: AtomicI64,
     key: String,
@@ -571,7 +964,7 @@ impl<T: RosMessage> Publisher<T> {
 
 /// An active subscription; dropping it unsubscribes.
 pub struct Subscriber {
-    _subscriber: zenoh::pubsub::Subscriber<()>,
+    _subscriber: AdvancedSubscriber<()>,
     _token: LivelinessToken,
     key: String,
 }
@@ -580,6 +973,282 @@ impl Subscriber {
     /// The data key expression.
     pub fn key(&self) -> &str {
         &self.key
+    }
+}
+
+/// A request received by a service server, answered with
+/// [`reply`](Self::reply). Dropping it unanswered leaves the client
+/// waiting until its timeout.
+pub struct ServiceRequest {
+    query: zenoh::query::Query,
+    payload: Vec<u8>,
+    info: SampleInfo,
+    key: String,
+}
+
+impl ServiceRequest {
+    /// The encoded request (encapsulation header included).
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    /// The request's attachment: the client's sequence number, its source
+    /// timestamp and the client GID.
+    pub fn info(&self) -> SampleInfo {
+        self.info
+    }
+
+    /// Sends the encoded response, with the attachment rmw_zenoh expects:
+    /// the request's sequence number and client GID and a new timestamp.
+    pub fn reply(self, payload: Vec<u8>) -> Result<()> {
+        let a = attachment(
+            self.info.sequence,
+            ruro_now_ns() as i64,
+            &self.info.publisher_gid,
+        );
+        self.query
+            .reply(self.key.clone(), payload)
+            .attachment(a)
+            .wait()
+            .map_err(|e| anyhow!("replying on {}: {e}", self.key))
+    }
+}
+
+/// A decoded request of service type `S`, to answer when ready.
+pub struct PendingRequest<S: RosService> {
+    /// The request.
+    pub request: S::Request,
+    raw: ServiceRequest,
+    _type: std::marker::PhantomData<fn(S)>,
+}
+
+impl<S: RosService> PendingRequest<S> {
+    /// The request's attachment.
+    pub fn info(&self) -> SampleInfo {
+        self.raw.info
+    }
+
+    /// Encodes and sends the response.
+    pub fn respond(self, response: &S::Response) -> Result<()> {
+        self.raw.reply(cdr::to_vec(response))
+    }
+}
+
+/// An active service server; dropping it withdraws the service.
+pub struct RawService {
+    _queryable: zenoh::query::Queryable<()>,
+    _token: LivelinessToken,
+    key: String,
+}
+
+impl RawService {
+    /// The service's key expression.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+/// Calls a service with raw CDR payloads the way rmw_zenoh clients do: a
+/// Zenoh `get` on the service key with target all-complete, no
+/// consolidation, and an attachment carrying a per-client sequence number
+/// (from 1), a timestamp and the client GID.
+pub struct RawClient {
+    session: zenoh::Session,
+    domain: u32,
+    name: String,
+    dds_type: String,
+    key: String,
+    gid: [u8; 16],
+    seq: AtomicI64,
+    _token: LivelinessToken,
+}
+
+impl RawClient {
+    /// Sends an encoded request; the reply arrives on the returned
+    /// [`PendingCall`]. The call fails if no reply comes within `timeout`.
+    pub fn send(&self, payload: Vec<u8>, timeout: Duration) -> Result<PendingCall> {
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let replies = self
+            .session
+            .get(self.key.clone())
+            .payload(payload)
+            .attachment(attachment(seq, ruro_now_ns() as i64, &self.gid))
+            .target(QueryTarget::AllComplete)
+            .consolidation(ConsolidationMode::None)
+            .timeout(timeout)
+            .wait()
+            .map_err(|e| anyhow!("calling {}: {e}", self.name))?;
+        Ok(PendingCall {
+            replies,
+            sequence: seq,
+            name: self.name.clone(),
+        })
+    }
+
+    /// Sends an encoded request and waits for the encoded response.
+    pub fn call(&self, payload: Vec<u8>, timeout: Duration) -> Result<(Vec<u8>, SampleInfo)> {
+        self.send(payload, timeout)?.wait()
+    }
+
+    /// Whether a server for this service (same name and type) is in the
+    /// ROS graph, waiting up to `timeout` for liveliness answers.
+    pub fn server_available(&self, timeout: Duration) -> bool {
+        let pattern = format!(
+            "{ADMIN_SPACE}/{}/*/*/*/SS/*/*/*/{}/{}/*/*",
+            self.domain,
+            mangle(&self.name),
+            self.dds_type
+        );
+        let Ok(replies) = self
+            .session
+            .liveliness()
+            .get(pattern)
+            .timeout(timeout)
+            .wait()
+        else {
+            return false;
+        };
+        while let Ok(reply) = replies.recv() {
+            if reply.result().is_ok() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Polls [`server_available`](Self::server_available) until it holds or
+    /// `timeout` passes.
+    pub fn wait_for_server(&self, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self.server_available(Duration::from_millis(200)) {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The service's key expression.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The client GID.
+    pub fn gid(&self) -> [u8; 16] {
+        self.gid
+    }
+}
+
+/// A request in flight.
+pub struct PendingCall {
+    replies: zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>,
+    sequence: i64,
+    name: String,
+}
+
+impl PendingCall {
+    /// The request's sequence number.
+    pub fn sequence(&self) -> i64 {
+        self.sequence
+    }
+
+    fn accept(&self, reply: zenoh::query::Reply) -> Option<Result<(Vec<u8>, SampleInfo)>> {
+        match reply.result() {
+            Ok(sample) => {
+                let info = sample
+                    .attachment()
+                    .and_then(|a| parse_attachment(&a.to_bytes()))?;
+                // Replies to another request of this client are not ours.
+                (info.sequence == self.sequence)
+                    .then(|| Ok((sample.payload().to_bytes().into_owned(), info)))
+            }
+            Err(e) => Some(Err(anyhow!(
+                "{} failed: {}",
+                self.name,
+                e.payload().try_to_string().unwrap_or_default()
+            ))),
+        }
+    }
+
+    /// The response if it has arrived (`None` while waiting); an error if
+    /// the call failed or timed out.
+    pub fn try_recv(&self) -> Option<Result<(Vec<u8>, SampleInfo)>> {
+        loop {
+            match self.replies.try_recv() {
+                Ok(Some(reply)) => {
+                    if let Some(r) = self.accept(reply) {
+                        return Some(r);
+                    }
+                }
+                Ok(None) => return None,
+                Err(_) => return Some(Err(self.no_reply())),
+            }
+        }
+    }
+
+    /// Waits for the response.
+    pub fn wait(self) -> Result<(Vec<u8>, SampleInfo)> {
+        while let Ok(reply) = self.replies.recv() {
+            if let Some(r) = self.accept(reply) {
+                return r;
+            }
+        }
+        Err(self.no_reply())
+    }
+
+    fn no_reply(&self) -> anyhow::Error {
+        anyhow!("no reply from service {} (timed out)", self.name)
+    }
+}
+
+/// Calls a service of type `S`.
+pub struct Client<S> {
+    raw: RawClient,
+    _type: std::marker::PhantomData<fn(S)>,
+}
+
+impl<S: RosService> Client<S> {
+    /// Sends a request; the response arrives on the returned
+    /// [`PendingResponse`].
+    pub fn send(&self, request: &S::Request, timeout: Duration) -> Result<PendingResponse<S>> {
+        Ok(PendingResponse {
+            call: self.raw.send(cdr::to_vec(request), timeout)?,
+            _type: std::marker::PhantomData,
+        })
+    }
+
+    /// Sends a request and waits for the response.
+    pub fn call(&self, request: &S::Request, timeout: Duration) -> Result<S::Response> {
+        self.send(request, timeout)?.wait()
+    }
+
+    /// The underlying raw client.
+    pub fn raw(&self) -> &RawClient {
+        &self.raw
+    }
+}
+
+/// A typed request in flight.
+pub struct PendingResponse<S: RosService> {
+    call: PendingCall,
+    _type: std::marker::PhantomData<fn(S)>,
+}
+
+impl<S: RosService> PendingResponse<S> {
+    /// The response if it has arrived (`None` while waiting).
+    pub fn try_recv(&self) -> Option<Result<S::Response>> {
+        self.call
+            .try_recv()
+            .map(|r| r.and_then(|(b, _)| Ok(cdr::from_slice(&b)?)))
+    }
+
+    /// Waits for the response.
+    pub fn wait(self) -> Result<S::Response> {
+        let (b, _) = self.call.wait()?;
+        Ok(cdr::from_slice(&b)?)
     }
 }
 
@@ -617,10 +1286,7 @@ mod tests {
     #[test]
     fn qos_strings_match_rmw_zenoh() {
         assert_eq!(Qos::default().to_keyexpr(), "::,10:,:,:,,");
-        let sensor = Qos {
-            reliability: Reliability::BestEffort,
-            depth: 5,
-        };
+        let sensor = Qos::sensor_data();
         assert_eq!(sensor.to_keyexpr(), "2::,5:,:,:,,");
         assert_eq!(
             Qos {
@@ -635,6 +1301,57 @@ mod tests {
         assert_eq!(Qos::from_keyexpr("::,:,:,:,,").unwrap().depth, 42);
         assert!("best_effort".parse::<Reliability>().is_ok());
         assert!("sometimes".parse::<Reliability>().is_err());
+        assert_eq!(
+            "transient_local".parse::<Durability>().unwrap(),
+            Durability::TransientLocal
+        );
+        assert!("forever".parse::<Durability>().is_err());
+
+        // Every field, round trip.
+        let all = Qos {
+            reliability: Reliability::BestEffort,
+            depth: 7,
+            durability: Durability::TransientLocal,
+            history: History::KeepAll,
+            deadline: Some(Duration::from_millis(1500)),
+            lifespan: Some(Duration::from_secs(10)),
+            liveliness: Liveliness::ManualByTopic,
+            liveliness_lease: Some(Duration::from_nanos(5)),
+        };
+        assert_eq!(all.to_keyexpr(), "2:1:2,7:1,500000000:10,0:3,0,5");
+        assert_eq!(Qos::from_keyexpr(&all.to_keyexpr()), Some(all));
+        assert_eq!(Qos::from_keyexpr("::,10:,:,:,"), None);
+        assert_eq!(Qos::from_keyexpr("9::,10:,:,:,,"), None);
+    }
+
+    /// QoS strings of real ROS 2 Jazzy endpoints (tests/data/jazzy_tokens.txt).
+    #[test]
+    fn qos_strings_of_real_ros_endpoints() {
+        let tokens = include_str!("../tests/data/jazzy_tokens.txt");
+        let mut n = 0;
+        for key in tokens.lines().filter(|l| l.starts_with(ADMIN_SPACE)) {
+            let qos = key.rsplit('/').next().unwrap();
+            let parsed = Qos::from_keyexpr(qos).unwrap_or_else(|| panic!("{key}"));
+            assert_eq!(parsed.to_keyexpr(), qos, "{key}");
+            n += 1;
+        }
+        assert!(n >= 10);
+        // Services and action feedback: the services default profile.
+        assert_eq!(Qos::services().to_keyexpr(), "::,10:,:,:,,");
+        // Action status and /tf_static: reliable, transient-local, depth 1.
+        assert_eq!(Qos::transient_local(1).to_keyexpr(), ":1:,1:,:,:,,");
+        // `ros2 topic pub --qos-durability transient_local --qos-depth 3
+        // --qos-reliability best_effort`.
+        let latched = Qos {
+            reliability: Reliability::BestEffort,
+            ..Qos::transient_local(3)
+        };
+        assert_eq!(latched.to_keyexpr(), "2:1:,3:,:,:,,");
+        // /rosout: transient-local, depth 1000, lifespan 10 s.
+        let rosout = Qos::from_keyexpr(":1:,1000:,:10,0:,,").unwrap();
+        assert_eq!(rosout.lifespan, Some(Duration::from_secs(10)));
+        assert_eq!(rosout.deadline, None);
+        assert_eq!(rosout.depth, 1000);
     }
 
     #[test]

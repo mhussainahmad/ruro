@@ -33,6 +33,8 @@ ruro-pkg = { version = "0.1.0", path = "crates/ruro-pkg" }
 ruro-py = { version = "0.1.0", path = "crates/ruro-py" }
 ruro-ros2 = { version = "0.1.0", path = "crates/ruro-ros2" }
 ruro-nodes-ros2 = { version = "0.1.0", path = "nodes/ruro-nodes-ros2" }
+ruro-gpu = { version = "0.1.0", path = "crates/ruro-gpu" }
+ruro-nodes-gpu = { version = "0.1.0", path = "nodes/ruro-nodes-gpu" }
 
 anyhow = "1"
 thiserror = "2"
@@ -48,6 +50,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 iceoryx2 = "0.10"
 zenoh = { version = "1.10", default-features = false, features = ["transport_tcp", "transport_unixsock-stream"] }
+zenoh-ext = { version = "1.10", default-features = false, features = ["unstable"] }
 libc = "0.2"
 syn = { version = "2", features = ["full"] }
 quote = "1"
@@ -63,6 +66,7 @@ serialport = { version = "4.7", default-features = false }
 zune-jpeg = "0.5.15"
 roxmltree = "0.21"
 libloading = "0.8"
+openh264 = { version = "0.9.9", default-features = false, features = ["source"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls", "api-24"] }
 arrow-array = "57"
 arrow-schema = "57"

@@ -1,0 +1,9 @@
+# ROS 2 Jazzy with rmw_zenoh and Gazebo Harmonic (ros_gz), for run.sh.
+#   podman build -t ruro-gazebo -f examples/gazebo/Containerfile examples/gazebo
+#   podman run --rm --init --network host ruro-gazebo /gazebo/run.sh tcp/127.0.0.1:7447
+FROM docker.io/library/ros:jazzy-ros-base
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ros-jazzy-rmw-zenoh-cpp ros-jazzy-ros-gz \
+    && rm -rf /var/lib/apt/lists/*
+COPY run.sh rover.sdf /gazebo/

@@ -1,0 +1,33 @@
+# An RTSP network camera (H.264 or Motion JPEG) feeding the image nodes.
+# See book/src/hardware.md. Decoding H.264 needs a host built with the h264
+# feature; without it the camera publishes only `encoded` for H.264 streams.
+#   cargo build --release -p ruro-host --features ruro-nodes-hw/h264
+#   ruro run examples/rtsp-camera.yaml
+# Put user:password@ in the URL for cameras that require a login, and set
+# `transport: udp` only on a network without NAT or firewalls in between.
+# `ruro record` keeps `camera.encoded`, the stream as received, which is far
+# smaller than the decoded images.
+name: rtsp-camera
+nodes:
+  camera:
+    type: hw/rtsp-camera
+    group: camera
+    rate: 30
+    params:
+      url: rtsp://192.168.1.64:554/stream1
+      transport: tcp
+      # A ROS camera_calibration file adds `camera_info`.
+      calibration: ""
+      frame_id: front_camera
+    pos: [0, 0]
+  gray:
+    type: std/grayscale
+    group: vision
+    pos: [400, 0]
+  stats:
+    type: std/image-stats
+    group: vision
+    pos: [400, 230]
+wires:
+  - camera.image -> gray.image
+  - gray.out -> stats.image

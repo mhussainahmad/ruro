@@ -306,7 +306,7 @@ fn serve(
     let _status = session
         .declare_subscriber(keys.status())
         .callback(move |s| {
-            if let Ok(st) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes()) {
+            if let Ok(st) = ruro_proto::decode_status(&s.payload().to_bytes()) {
                 seen.touch();
                 e.emit(Event::Status(st));
             }
@@ -318,7 +318,7 @@ fn serve(
     let _fleet = session
         .declare_subscriber(Keys::all_status())
         .callback(move |s| {
-            if let Ok(st) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes()) {
+            if let Ok(st) = ruro_proto::decode_status(&s.payload().to_bytes()) {
                 e.emit(Event::Fleet(st));
             }
         })

@@ -1,22 +1,126 @@
-# Closed-loop control: a PID controller makes a simulated joint follow a sine
-# wave. Tune kp/ki/kd live from the studio or with `ruro param`.
-name: arm-demo
+# SO-100 arm teleoperated with a gamepad, recording a LeRobot dataset. The
+# graph itself is the simulation (MuJoCo); overlays switch it to the real arm
+# or replace the gamepad with a trained policy. See book/src/sim-to-real.md.
+#
+#   ruro overlays examples/arm.yaml                       # what each overlay changes
+#   ruro run examples/arm.yaml                            # MuJoCo (same as --overlay sim)
+#   ruro run examples/arm.yaml --overlay real             # the real arm and camera
+#   ruro run examples/arm.yaml -o real -o policy          # a policy drives the real arm
+#
+# Needs a host built with the MuJoCo and LeRobot features (and ONNX for the
+# policy) and, in simulation, the MuJoCo library. Model paths are relative to
+# the working directory of the daemon (hosts inherit it), so start the daemon
+# from the repository root or use absolute paths:
+#   cargo build --release -p ruro-host --features ruro-nodes-sim/mujoco,ruro-nodes-ml/lerobot
+#   RURO_MUJOCO_LIB=/path/to/libmujoco.so ruro run examples/arm.yaml
+#
+# In simulation the graph runs on simulated time: `arm` publishes the MuJoCo
+# clock on its std/Clock output and every timer (jogging, the recorder's frame
+# rate) steps on it. The real arm runs on the wall clock.
+name: arm
+clock: sim
 nodes:
-  target:
-    type: std/sine
-    rate: 100
-    params: { frequency: 0.25, amplitude: 1.5 }
-    pos: [0, 0]
-  pid:
-    type: std/pid
-    params: { kp: 4.0, ki: 0.5, kd: 0.05, limit: 3.0 }
-    pos: [380, 40]
+  # --- robot: simulated here, real in the `real` overlay ---
   arm:
-    type: std/fake-arm
-    rate: 200
-    group: arm
-    pos: [760, 40]
+    type: sim/mujoco
+    group: robot
+    rate: 100
+    params: { model: examples/models/so100.xml, real_time_factor: 1.0 }
+    pos: [400, 0]
+  camera:
+    type: std/fake-camera
+    group: robot
+    rate: 30
+    params: { width: 640, height: 480 }
+    pos: [400, 260]
+  # --- shared downstream nodes ---
+  gamepad:
+    type: hw/gamepad
+    rate: 100
+    pos: [0, 0]
+  jog:
+    type: hw/joint-jog
+    rate: 50
+    params:
+      axes: "0,1,4,3,6,7"
+      lower: "-2,-1.8,-1.7,-1.8,-3,0"
+      upper: "2,1.8,1.7,1.8,3,1.5"
+    pos: [200, 0]
+  kinematics:
+    type: sim/robot-state
+    params: { model: examples/models/so100.xml }
+    pos: [700, 0]
+  recorder:
+    type: ml/lerobot-recorder
+    rate: 30
+    params:
+      root: datasets/so100-sim
+      fps: 30
+      task: "move the arm around"
+      robot_type: so100
+      camera: front
+      joint_names: "shoulder_pan,shoulder_lift,elbow_flex,wrist_flex,wrist_roll,gripper"
+      auto_start: true
+      episode_seconds: 30
+    pos: [700, 200]
 wires:
-  - target.value -> pid.setpoint
-  - arm.position -> pid.measured
-  - pid.command -> arm.velocity
+  - gamepad.joy -> jog.joy
+  - arm.state -> jog.state
+  - jog.command -> arm.command
+  - arm.state -> kinematics.joints
+  - arm.state -> recorder.state
+  - jog.command -> recorder.action
+  - camera.image -> recorder.image
+overlays:
+  # The simulation, as in the graph itself: lets `-o real -o sim` and the
+  # studio's picker name it, and turns `real` back into the simulation.
+  sim:
+    clock: sim
+    nodes:
+      arm:
+        type: sim/mujoco
+        params: { model: examples/models/so100.xml, real_time_factor: 1.0 }
+      camera:
+        type: std/fake-camera
+        params: { width: 640, height: 480 }
+      recorder:
+        params: { root: datasets/so100-sim }
+  # The real SO-100 (Feetech STS3215 servos) and a USB camera. Calibrate
+  # first: `offsets` are the raw servo readings (0..4095) with the arm
+  # pointing straight up and the gripper closed; flip `directions` for joints
+  # that turn the wrong way compared with the simulation.
+  real:
+    clock: wall
+    nodes:
+      arm:
+        type: hw/so100-arm
+        params:
+          device: /dev/ttyACM0
+          baud: 1000000
+          ids: "1,2,3,4,5,6"
+          offsets: "2048,2048,2048,2048,2048,2048"
+          directions: "1,1,1,1,1,1"
+          max_step: 0.3
+      camera:
+        type: hw/v4l2-camera
+        params: { device: /dev/video0, width: 640, height: 480, fps: 30 }
+      # Real and simulated episodes go to separate datasets.
+      recorder:
+        params: { root: datasets/so100-real }
+  # A trained policy (ONNX, --features ruro-nodes-ml/onnx) in place of the
+  # gamepad. Combine with `real` to run it on the robot.
+  policy:
+    nodes:
+      gamepad: null
+      jog: null
+      policy:
+        type: ml/policy
+        rate: 30
+        params: { model: models/so100-policy.onnx }
+        pos: [0, 120]
+    wires:
+      add:
+        - arm.state -> policy.state
+        - camera.image -> policy.image
+        - policy.action -> arm.command
+        - policy.action -> recorder.action

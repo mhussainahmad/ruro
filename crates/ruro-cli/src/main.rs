@@ -5,6 +5,7 @@ mod fleet;
 mod output;
 mod recording;
 mod soak;
+mod update;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -80,10 +81,23 @@ impl SecurityArgs {
     }
 }
 
+/// Overlays to apply to a graph file.
+#[derive(Args, Clone, Default)]
+pub struct OverlayArgs {
+    /// Apply the graph's overlay of this name. Repeatable; overlays are
+    /// applied in the order given.
+    #[arg(long = "overlay", short = 'o', value_name = "NAME")]
+    pub overlays: Vec<String>,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Run a graph in the foreground. Starts a daemon if none is reachable.
-    Run { graph: PathBuf },
+    Run {
+        graph: PathBuf,
+        #[command(flatten)]
+        overlay: OverlayArgs,
+    },
     /// Run the per-machine daemon in the foreground.
     Daemon {
         /// Name other tools use to address this daemon (default: hostname).
@@ -102,7 +116,19 @@ enum Cmd {
         /// Seconds without metrics after which a host is restarted.
         #[arg(long, default_value_t = 5.0)]
         heartbeat_timeout: f64,
+        /// File listing the public keys (`ruro keygen`) whose signed updates
+        /// this daemon accepts with `ruro update`. Without it, updates are
+        /// refused.
+        #[arg(long, env = "RURO_UPDATE_KEYS")]
+        update_keys: Option<PathBuf>,
     },
+    /// Update daemons over the network to a signed `ruro` (and host)
+    /// binary. Refused while a graph runs, unless the e-stop is engaged.
+    Update(update::UpdateArgs),
+    /// Make a key pair for signing updates.
+    Keygen(update::KeygenArgs),
+    /// Sign a binary for `ruro update`.
+    Sign(update::SignArgs),
     /// Deploy a graph to the daemon and return. With --host-binary, first
     /// upload a host binary that groups can request with `host: <name>`.
     Deploy {
@@ -116,11 +142,19 @@ enum Cmd {
         /// Name to store the binary under (default: its file name).
         #[arg(long, requires = "host_binary")]
         host_name: Option<String>,
+        #[command(flatten)]
+        overlay: OverlayArgs,
     },
     /// Stop the running graph.
     Stop,
     /// Validate a graph against the available node types.
-    Check { graph: PathBuf },
+    Check {
+        graph: PathBuf,
+        #[command(flatten)]
+        overlay: OverlayArgs,
+    },
+    /// List the overlays of a graph file and what each changes.
+    Overlays { graph: PathBuf },
     /// Show the daemon, its groups and live node metrics.
     Status,
     /// List every daemon reachable through the connected one.
@@ -174,6 +208,8 @@ enum Cmd {
         /// Deploy this graph first.
         #[arg(long)]
         graph: Option<PathBuf>,
+        #[command(flatten)]
+        overlay: OverlayArgs,
     },
     /// Control a running replay.
     Playback {
@@ -201,7 +237,8 @@ enum Cmd {
     New(ruro_pkg::cli::NewArgs),
     /// Build a host binary that links the packages listed in ruro.toml.
     Build(ruro_pkg::cli::BuildArgs),
-    /// ROS 2 interop: list topics, generate message types, compute type hashes.
+    /// ROS 2 interop: list topics, services and actions, call services,
+    /// generate message types, compute type hashes.
     Ros2(ruro_ros2::cli::Ros2Args),
 }
 
@@ -252,7 +289,7 @@ impl Client {
             .recv_timeout(Duration::from_secs(2))
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .context("daemon sent no status")?;
-        ruro_proto::decode(&sample.payload().to_bytes())
+        ruro_proto::decode_status(&sample.payload().to_bytes())
     }
 }
 
@@ -271,29 +308,41 @@ fn run(cli: Cli) -> Result<()> {
             host,
             peers,
             heartbeat_timeout,
+            update_keys,
         } => {
             let mut config = ruro_daemon::Config::new();
             config.listen = listen;
             config.peers = peers;
             config.security = security.clone();
             config.heartbeat_timeout = Duration::from_secs_f64(heartbeat_timeout.max(0.5));
+            config.update_keys = update_keys;
             if let Some(n) = name {
                 config.name = n;
             }
             if let Some(h) = host {
                 config.host = h;
             }
-            let daemon = ruro_daemon::Daemon::start(config)?;
-            wait_for_ctrl_c()?;
-            daemon.shutdown();
-            Ok(())
+            run_daemon(config)
         }
-        Cmd::Run { graph } => run_graph(&cli.connect, cli.daemon.as_deref(), &security, &graph),
+        Cmd::Update(args) => {
+            let connect = || ruro_proto::connect_with(&cli.connect, &security);
+            update::update(&connect, cli.daemon.as_deref(), args)
+        }
+        Cmd::Keygen(args) => update::keygen(args),
+        Cmd::Sign(args) => update::sign(args),
+        Cmd::Run { graph, overlay } => run_graph(
+            &cli.connect,
+            cli.daemon.as_deref(),
+            &security,
+            &graph,
+            &overlay.overlays,
+        ),
         Cmd::Deploy {
             graph,
             to,
             host_binary,
             host_name,
+            overlay,
         } => {
             if graph.is_none() && host_binary.is_none() {
                 bail!("nothing to deploy: give a graph, --host-binary, or both");
@@ -303,7 +352,9 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{}", fleet::upload_host(&c, &bin, host_name.as_deref())?);
             }
             if let Some(graph) = graph {
-                println!("{}", deploy(&c, &graph)?);
+                println!("{}", deploy(&c, &graph, &overlay.overlays)?);
+            } else if !overlay.overlays.is_empty() {
+                bail!("--overlay needs a graph");
             }
             Ok(())
         }
@@ -311,9 +362,21 @@ fn run(cli: Cli) -> Result<()> {
             println!("{}", client()?.request(Ctl::Stop, "")?);
             Ok(())
         }
-        Cmd::Check { graph: path } => {
+        Cmd::Check {
+            graph: path,
+            overlay,
+        } => {
             let daemon = daemon_session(&cli.connect, cli.daemon.as_deref(), &security)?;
-            check::check(&path, daemon.as_ref().map(|(s, k)| (s, k)))
+            check::check(
+                &path,
+                &overlay.overlays,
+                daemon.as_ref().map(|(s, k)| (s, k)),
+            )
+        }
+        Cmd::Overlays { graph } => {
+            let g = Graph::load(&graph).with_context(|| format!("loading {}", graph.display()))?;
+            print!("{}", output::overlays(&g));
+            Ok(())
         }
         Cmd::Status => status(&client()?),
         Cmd::Fleet => {
@@ -377,10 +440,17 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Record { file, stop } => recording::record(&client()?, file, stop),
-        Cmd::Play { file, rate, graph } => {
+        Cmd::Play {
+            file,
+            rate,
+            graph,
+            overlay,
+        } => {
             let c = client()?;
             if let Some(g) = graph {
-                println!("{}", deploy(&c, &g)?);
+                println!("{}", deploy(&c, &g, &overlay.overlays)?);
+            } else if !overlay.overlays.is_empty() {
+                bail!("--overlay needs --graph");
             }
             recording::play(&c, &file, rate)
         }
@@ -405,15 +475,69 @@ fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn deploy(c: &Client, path: &Path) -> Result<String> {
-    c.request(Ctl::Deploy, &flattened_yaml(path)?)
+/// `ruro daemon`: runs until SIGINT or SIGTERM, or until an update was
+/// installed, which it then starts in place of this process.
+fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
+    use ruro_daemon::update::{Handoff, Trial};
+    // Started by a daemon to try this binary before installing it.
+    if let Some(trial) = Trial::from_env() {
+        return trial.run(config);
+    }
+    let handoff = Handoff::take(&config.executable, &config.name);
+    if let Some(h) = &handoff {
+        h.configure(&mut config);
+    }
+    let stop = ctrl_c_flag()?;
+    let mut daemon = match ruro_daemon::Daemon::start(config.clone()) {
+        Ok(d) => d,
+        // An update that does not start goes back to the previous binary.
+        Err(e) => match handoff {
+            Some(h) if h.is_pending() => return Err(h.roll_back(&config, e)),
+            // The report of a rollback waits for a start that succeeds.
+            Some(h) => {
+                if let Err(e) = h.save(&config.executable, &config.name) {
+                    tracing::warn!("{e:#}");
+                }
+                return Err(e);
+            }
+            None => return Err(e),
+        },
+    };
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            daemon.shutdown();
+            return Ok(());
+        }
+        if let Some(restart) = daemon.take_restart() {
+            let version = restart.version().to_owned();
+            daemon.shutdown();
+            let err = restart.exec();
+            tracing::error!("{err:#}");
+            config.update_note = Some(format!("the update to {version} failed: {err:#}"));
+            daemon = ruro_daemon::Daemon::start(config.clone())?;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
-/// Loads a graph and expands its subgraphs, resolving `graph:` file
-/// references relative to the graph's own directory. The daemon may run on
-/// another machine, so it must receive a self-contained graph.
-fn flattened_yaml(path: &Path) -> Result<String> {
+fn deploy(c: &Client, path: &Path, overlays: &[String]) -> Result<String> {
+    c.request(Ctl::Deploy, &flattened_yaml(path, overlays)?)
+}
+
+/// Loads a graph file and applies `overlays` to it, in order.
+fn load_graph(path: &Path, overlays: &[String]) -> Result<Graph> {
     let graph = Graph::load(path).with_context(|| format!("loading {}", path.display()))?;
+    graph
+        .with_overlays(overlays)
+        .with_context(|| format!("applying overlays to {}", path.display()))
+}
+
+/// Loads a graph, applies `overlays` and expands its subgraphs, resolving
+/// `graph:` file references relative to the graph's own directory. The
+/// daemon may run on another machine, so it must receive a self-contained
+/// graph.
+fn flattened_yaml(path: &Path, overlays: &[String]) -> Result<String> {
+    let graph = load_graph(path, overlays)?;
     let flat = graph
         .flatten_in(&base_dir(path))
         .with_context(|| format!("expanding subgraphs of {}", path.display()))?;
@@ -460,9 +584,17 @@ pub fn connect_or_start(
 }
 
 /// `ruro run`: deploy to a reachable daemon, or start one in this process.
-fn run_graph(endpoint: &str, name: Option<&str>, security: &Security, path: &Path) -> Result<()> {
+fn run_graph(
+    endpoint: &str,
+    name: Option<&str>,
+    security: &Security,
+    path: &Path,
+    overlays: &[String],
+) -> Result<()> {
+    // A typo in an overlay name is reported before a daemon is started.
+    load_graph(path, overlays)?;
     let (daemon, c) = connect_or_start(endpoint, name, security)?;
-    println!("{}", deploy(&c, path)?);
+    println!("{}", deploy(&c, path, overlays)?);
     if daemon.is_none() {
         // Host output goes to the remote daemon's terminal; mirror it here.
         stream_logs(&c.session, &c.keys)?;
@@ -507,7 +639,7 @@ fn daemon_of(c: &Client, node: &str) -> Result<Keys> {
     let deadline = std::time::Instant::now() + DISCOVERY;
     while std::time::Instant::now() < deadline {
         if let Ok(Some(s)) = sub.recv_timeout(Duration::from_millis(100))
-            && let Ok(peer) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes())
+            && let Ok(peer) = ruro_proto::decode_status(&s.payload().to_bytes())
             && peer.graph.as_ref() == Some(graph)
             && runs_node(&peer, node)
         {
@@ -558,7 +690,7 @@ fn status(c: &Client) -> Result<()> {
     let mut peers: std::collections::BTreeMap<String, DaemonStatus> = Default::default();
     loop {
         while let Ok(Some(s)) = others.try_recv() {
-            if let Ok(peer) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes())
+            if let Ok(peer) = ruro_proto::decode_status(&s.payload().to_bytes())
                 && peer.name != status.name
                 && peer.graph.is_some()
                 && peer.graph == status.graph
@@ -657,6 +789,8 @@ mod tests {
             recording: None,
             playback: None,
             estopped: false,
+            target: String::new(),
+            update: None,
         };
         assert!(runs_node(&status, "imu"));
         assert!(!runs_node(&status, "drivers"));
@@ -688,6 +822,15 @@ mod tests {
     }
 
     #[test]
+    fn the_command_line_definition_is_consistent() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+        let cli =
+            Cli::try_parse_from(["ruro", "update", "ruro", "--peers", "--to", "robot"]).unwrap();
+        assert!(matches!(cli.cmd, Cmd::Update(_)));
+    }
+
+    #[test]
     fn releasing_every_stop_needs_release() {
         assert!(Cli::try_parse_from(["ruro", "estop", "--all"]).is_err());
         let cli = Cli::try_parse_from(["ruro", "estop", "--release", "--all"]).unwrap();
@@ -707,6 +850,68 @@ mod tests {
     }
 
     #[test]
+    fn overlays_are_applied_in_the_order_given() {
+        let cli = Cli::try_parse_from(["ruro", "run", "g.yaml", "--overlay", "sim", "-o", "bench"])
+            .unwrap();
+        assert!(
+            matches!(cli.cmd, Cmd::Run { overlay, .. } if overlay.overlays == ["sim", "bench"])
+        );
+        for args in [
+            &["ruro", "check", "g.yaml", "--overlay", "real"][..],
+            &["ruro", "deploy", "g.yaml", "--overlay", "real"],
+            &[
+                "ruro",
+                "play",
+                "r.mcap",
+                "--graph",
+                "g.yaml",
+                "--overlay",
+                "real",
+            ],
+            &["ruro", "soak", "g.yaml", "--overlay", "real"],
+            &["ruro", "overlays", "g.yaml"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_ok(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn deploys_send_graphs_with_overlays_applied() {
+        let dir = std::env::temp_dir().join(format!("ruro-cli-overlay-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("parts")).unwrap();
+        std::fs::write(
+            dir.join("parts/source.yaml"),
+            "name: source\noutputs:\n  value: s.value\nnodes:\n  s: { type: std/sine, rate: 10 }\n",
+        )
+        .unwrap();
+        let top = dir.join("top.yaml");
+        std::fs::write(
+            &top,
+            "name: top\nnodes:\n  src: { type: std/sine, rate: 10 }\n  g: { type: std/gain }\nwires: [src.value -> g.input]\noverlays:\n  file:\n    nodes:\n      src: { type: graph:parts/source.yaml }\n  fast:\n    clock: sim\n    nodes:\n      g: { params: { k: 3 } }\n",
+        )
+        .unwrap();
+        let load = |overlays: &[&str]| {
+            let overlays: Vec<String> = overlays.iter().map(|s| s.to_string()).collect();
+            flattened_yaml(&top, &overlays).map(|y| Graph::from_yaml(&y).unwrap())
+        };
+        let base = load(&[]).unwrap();
+        assert!(base.overlays.is_empty(), "the daemon gets no overlays");
+        assert_eq!(base.nodes["src"].kind, "std/sine");
+        // Overlays apply before subgraphs are expanded, in order.
+        let flat = load(&["file", "fast"]).unwrap();
+        let ids: Vec<&str> = flat.nodes.keys().map(String::as_str).collect();
+        assert_eq!(ids, ["src__s", "g"]);
+        assert_eq!(flat.nodes["g"].params["k"], serde_json::json!(3));
+        assert_eq!(flat.clock, ruro_graph::ClockSource::Sim);
+        let e = format!("{:#}", load(&["slow"]).unwrap_err());
+        assert!(
+            e.contains("overlay `slow`") && e.contains("file, fast"),
+            "{e}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn deploys_send_graphs_with_file_subgraphs_expanded() {
         let dir = std::env::temp_dir().join(format!("ruro-cli-flatten-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("parts")).unwrap();
@@ -723,7 +928,7 @@ mod tests {
         .unwrap();
 
         // Resolved against the graph's directory, not the working directory.
-        let flat = Graph::from_yaml(&flattened_yaml(&top).unwrap()).unwrap();
+        let flat = Graph::from_yaml(&flattened_yaml(&top, &[]).unwrap()).unwrap();
         let kinds: Vec<&str> = flat.nodes.values().map(|n| n.kind.as_str()).collect();
         assert_eq!(kinds, ["std/sine", "std/gain"]);
         assert_eq!(flat.wires.len(), 1);

@@ -1,40 +1,55 @@
 # Switching between simulation and the real robot
 
-`examples/arm-sim.yaml` and `examples/arm-real.yaml` are the same graph with different
-robots:
+`examples/arm.yaml` is one graph for the SO-100 arm in two variants. The graph itself is the
+simulation; its `sim` overlay says the same thing explicitly, so `--overlay sim` and
+`--overlay real` both name a variant. The `real` overlay swaps the robot nodes for the
+hardware:
 
-| Node | arm-sim.yaml | arm-real.yaml |
+| Node | `arm.yaml` | `arm.yaml --overlay real` |
 |---|---|---|
 | `arm` | `sim/mujoco` with `examples/models/so100.xml` | `hw/so100-arm` on `/dev/ttyACM0` |
 | `camera` | `std/fake-camera` | `hw/v4l2-camera` on `/dev/video0` |
-| `gamepad`, `jog`, `kinematics`, `recorder` | identical | identical |
+| `recorder` | dataset `datasets/so100-sim` | dataset `datasets/so100-real` |
+| `gamepad`, `jog`, `kinematics` | identical | identical |
+| `clock` | `sim` (MuJoCo's time) | `wall` |
 
-Both robot nodes speak the same messages: `std/JointCommand` in (joint position
-targets in radians, LeRobot joint order) and `std/JointState` out. Everything
-downstream (gamepad teleoperation, forward kinematics, LeRobot recording, or a policy
-in place of the gamepad) neither knows nor cares which one is running. The only other
-differences are the dataset directory (`datasets/so100-sim` and `datasets/so100-real`), so
-simulated and real episodes are not mixed in one dataset by accident, and the clock: the
-simulated graph runs on MuJoCo's time (`clock: sim`), the real one on the wall clock.
-`nodes/ruro-nodes-ml/tests/examples.rs` checks that nothing else differs between the two
-files.
+Both robot nodes speak the same messages: `std/JointCommand` in (joint position targets in
+radians, LeRobot joint order) and `std/JointState` out. Everything downstream (gamepad
+teleoperation, forward kinematics, LeRobot recording, or a policy in place of the gamepad)
+neither knows nor cares which one is running. The datasets differ so that simulated and real
+episodes are not mixed by accident. `nodes/ruro-nodes-ml/tests/examples.rs` checks that
+nothing else differs.
 
-Both graphs need node features that the standard `ruro-host` leaves out, so build a host
+```sh
+ruro overlays examples/arm.yaml                 # list the overlays and what they change
+ruro run examples/arm.yaml --overlay sim        # MuJoCo (the same as no overlay)
+ruro run examples/arm.yaml --overlay real       # the real arm and camera
+ruro run examples/arm.yaml -o real -o policy    # a trained policy drives the real arm
+```
+
+In the studio, pick the overlay next to **Run** (see [Studio](studio.md#overlays)).
+
+The simulation is the base graph on purpose: running the file without an overlay never
+moves hardware. Restating it as the `sim` overlay costs a few duplicated lines;
+`nodes/ruro-nodes-ml/tests/examples.rs` checks that the base and `sim` stay identical, and
+that `--overlay real --overlay sim` gives the simulation back.
+
+Both variants need node features that the standard `ruro-host` leaves out, so build a host
 with them and point the daemon at it:
 
 ```sh
-# arm-sim.yaml: MuJoCo and LeRobot recording
+# simulation: MuJoCo and LeRobot recording
 cargo build --release -p ruro-host --features ruro-nodes-sim/mujoco,ruro-nodes-ml/lerobot
-# arm-real.yaml: LeRobot recording
+# real only: LeRobot recording
 cargo build --release -p ruro-host --features ruro-nodes-ml/lerobot
 
 ruro daemon --host target/release/ruro-host   # from the repository root
-ruro run examples/arm-sim.yaml
+ruro run examples/arm.yaml
 ```
 
-The model path in the graphs (`examples/models/so100.xml`) is relative to the daemon's
-working directory, so start the daemon from the repository root. `arm-sim.yaml` also
-needs `RURO_MUJOCO_LIB` (see [Simulation](simulation.md#mujoco-simmujoco)).
+The model path in the graph (`examples/models/so100.xml`) is relative to the daemon's
+working directory, so start the daemon from the repository root. The simulation also needs
+`RURO_MUJOCO_LIB` (see [Simulation](simulation.md#mujoco-simmujoco)).
 
 To make switching work for your own graphs:
 
@@ -47,10 +62,40 @@ To make switching work for your own graphs:
    driver does not take the recorder down.
 3. **Keep the joint order** of the model's actuators and of the servo `ids` the same.
 
-To drive the arm with a trained policy instead of a gamepad, replace `gamepad` and
-`jog` with an `ml/policy` node (`--features ruro-nodes-ml/onnx`) wired
-`arm.state -> policy.state`, `camera.image -> policy.image`,
-`policy.action -> arm.command`.
+The `policy` overlay replaces `gamepad` and `jog` with an `ml/policy` node
+(`--features ruro-nodes-ml/onnx`) wired `arm.state -> policy.state`,
+`camera.image -> policy.image` and `policy.action -> arm.command`. Combined with `real`, the
+policy drives the real arm; alone, it drives the simulation.
 
-Selecting a variant from one file (graph overlays) is not supported yet; for now the
-two files are kept side by side.
+## Overlays
+
+An overlay is a named patch kept in the graph file under `overlays:`. The `real` overlay of
+`arm.yaml`:
+
+```yaml
+overlays:
+  real:
+    clock: wall
+    nodes:
+      arm:
+        type: hw/so100-arm        # a new type: the simulator's params are dropped
+        params: { device: /dev/ttyACM0, baud: 1000000, ids: "1,2,3,4,5,6" }
+      camera:
+        type: hw/v4l2-camera
+        params: { device: /dev/video0, width: 640, height: 480, fps: 30 }
+      recorder:
+        params: { root: datasets/so100-real }   # same type: merged into the base params
+```
+
+Overlays are applied in the order they are selected, before subgraphs are flattened and
+before validation, so the result is checked like any graph. An overlay can change the clock,
+group settings (such as which `machine` a group runs on), nodes and wires; the exact rules
+are in [Graph files](reference/graph-yaml.md#overlays). Every mistake is an error: selecting
+an overlay the graph does not have, patching a node that does not exist without giving its
+`type`, or removing a node or wire that is not there. `ruro check` and the studio's Problems
+panel also report overlays that do not apply, even when they are not selected; running the
+graph without them is not blocked.
+
+`examples/pid.yaml` has two overlays that need nothing beyond the standard host, for trying
+them out: `stiff` changes the controller's gains, and `scaled` puts a `std/gain` node
+between the target and the controller.

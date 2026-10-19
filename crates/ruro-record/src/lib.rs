@@ -17,7 +17,7 @@ pub mod rosbag;
 mod writer;
 
 pub use player::{PlaybackControl, Player};
-pub use reader::{ChannelInfo, Info, RecordedMessage, Recording, merge};
+pub use reader::{ChannelInfo, Info, RecordedMessage, Recording, merge, merge_shifted};
 pub use writer::McapWriter;
 
 /// Message encoding of channels whose payload is postcard (`#[derive(Message)]` types).

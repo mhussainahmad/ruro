@@ -16,8 +16,24 @@ pub struct Findings {
 /// Checks the graph at `path`. With a daemon to ask (`daemon`), against the
 /// hosts each group would run on, including peers and uploaded hosts;
 /// otherwise against this machine's default host.
-pub fn check(path: &Path, daemon: Option<(&zenoh::Session, &Keys)>) -> Result<()> {
-    let graph = Graph::load(path).with_context(|| format!("loading {}", path.display()))?;
+pub fn check(
+    path: &Path,
+    overlays: &[String],
+    daemon: Option<(&zenoh::Session, &Keys)>,
+) -> Result<()> {
+    let raw = Graph::load(path).with_context(|| format!("loading {}", path.display()))?;
+    // Without a selection, also check that each overlay applies.
+    let overlay_issues: Vec<String> = if overlays.is_empty() {
+        raw.overlay_issues()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let graph = raw
+        .with_overlays(overlays)
+        .with_context(|| format!("applying overlays to {}", path.display()))?;
     let base = crate::base_dir(path);
     // Composites are expanded first: their own problems are reported with
     // the node that uses them, and the summary counts the nodes that run.
@@ -33,13 +49,16 @@ pub fn check(path: &Path, daemon: Option<(&zenoh::Session, &Keys)>) -> Result<()
                 path,
                 &graph,
                 Findings {
-                    issues: issues.iter().map(ToString::to_string).collect(),
+                    issues: overlay_issues
+                        .into_iter()
+                        .chain(issues.iter().map(ToString::to_string))
+                        .collect(),
                     warnings: Vec::new(),
                 },
             );
         }
     };
-    let findings = match daemon {
+    let mut findings = match daemon {
         Some((session, keys)) => {
             let body = ruro_proto::request(
                 session,
@@ -56,6 +75,7 @@ pub fn check(path: &Path, daemon: Option<(&zenoh::Session, &Keys)>) -> Result<()
         }
         None => offline(&flat, &local_registry()?),
     };
+    findings.issues.splice(0..0, overlay_issues);
     report(path, &flat, findings)
 }
 

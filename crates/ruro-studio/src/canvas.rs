@@ -59,8 +59,11 @@ pub struct Viewer<'a> {
     pub focused: Option<NodeId>,
     /// Nodes the studio selected (select all, paste); drawn highlighted.
     pub marked: &'a HashSet<NodeId>,
-    /// Comparison highlights.
+    /// Comparison or overlay highlights.
     pub marks: &'a Marks,
+    /// The canvas shows a graph with overlays applied: nodes can be moved
+    /// and inspected, but not added, removed or rewired.
+    pub read_only: bool,
     /// Node under the pointer this frame, reported back to the app.
     pub hovered: Option<NodeId>,
     /// When set, the view is fitted to the graph inside this screen rect.
@@ -72,6 +75,9 @@ pub struct Viewer<'a> {
     pub pins: PinPositions,
     pub actions: Vec<Action>,
 }
+
+/// Shown when wiring is tried while an overlay is on the canvas.
+const READ_ONLY: &str = "An overlay is shown. Select the base graph to edit wires.";
 
 /// Approximate on-canvas size of a node, for fitting before nodes are measured.
 const NODE_EXTENT: Vec2 = vec2(330.0, 150.0);
@@ -677,7 +683,7 @@ impl SnarlViewer<GNode> for Viewer<'_> {
     }
 
     fn has_graph_menu(&mut self, _pos: egui::Pos2, _snarl: &mut Snarl<GNode>) -> bool {
-        true
+        !self.read_only
     }
 
     fn show_graph_menu(&mut self, pos: egui::Pos2, ui: &mut Ui, snarl: &mut Snarl<GNode>) {
@@ -687,7 +693,7 @@ impl SnarlViewer<GNode> for Viewer<'_> {
     }
 
     fn has_dropped_wire_menu(&mut self, _src: AnyPins, _snarl: &mut Snarl<GNode>) -> bool {
-        true
+        !self.read_only
     }
 
     fn show_dropped_wire_menu(
@@ -766,9 +772,10 @@ impl SnarlViewer<GNode> for Viewer<'_> {
             }
             ui.close();
         }
-        if row(ui, icons::LAYERS, "Run in Its Own Process", TEXT_DIM())
-            .on_hover_text("Isolates crashes; costs one shared-memory hop per wire")
-            .clicked()
+        if !self.read_only
+            && row(ui, icons::LAYERS, "Run in Its Own Process", TEXT_DIM())
+                .on_hover_text("Isolates crashes; costs one shared-memory hop per wire")
+                .clicked()
         {
             snarl[node].group = Some(n.id.clone());
             self.actions.push(Action::StructureChanged);
@@ -788,7 +795,7 @@ impl SnarlViewer<GNode> for Viewer<'_> {
             cmd(ui, &mut self.actions, Cmd::GroupSelection);
         }
         ui.separator();
-        if row(ui, icons::TRASH_2, "Delete", ERR()).clicked() {
+        if !self.read_only && row(ui, icons::TRASH_2, "Delete", ERR()).clicked() {
             snarl.remove_node(node);
             self.actions.push(Action::StructureChanged);
             ui.close();
@@ -796,6 +803,10 @@ impl SnarlViewer<GNode> for Viewer<'_> {
     }
 
     fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<GNode>) {
+        if self.read_only {
+            self.actions.push(Action::Toast(READ_ONLY.into()));
+            return;
+        }
         let (Some(a), Some(b)) = (
             self.output_type(snarl, from.id),
             self.input_type(snarl, to.id),
@@ -814,16 +825,26 @@ impl SnarlViewer<GNode> for Viewer<'_> {
     }
 
     fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<GNode>) {
+        if self.read_only {
+            self.actions.push(Action::Toast(READ_ONLY.into()));
+            return;
+        }
         snarl.disconnect(from.id, to.id);
         self.actions.push(Action::StructureChanged);
     }
 
     fn drop_outputs(&mut self, pin: &OutPin, snarl: &mut Snarl<GNode>) {
+        if self.read_only {
+            return;
+        }
         snarl.drop_outputs(pin.id);
         self.actions.push(Action::StructureChanged);
     }
 
     fn drop_inputs(&mut self, pin: &InPin, snarl: &mut Snarl<GNode>) {
+        if self.read_only {
+            return;
+        }
         snarl.drop_inputs(pin.id);
         self.actions.push(Action::StructureChanged);
     }

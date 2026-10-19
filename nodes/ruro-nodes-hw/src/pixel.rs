@@ -59,7 +59,7 @@ pub fn yuyv_to_rgb(src: &[u8], width: usize, height: usize, stride: usize, rgb: 
 
 /// The default Huffman tables of ITU-T T.81 Annex K.3, as one DHT segment.
 /// UVC cameras commonly omit them from MJPEG frames.
-const DEFAULT_DHT: [u8; 420] = {
+pub(crate) const DEFAULT_DHT: [u8; 420] = {
     const BITS_DC_L: [u8; 16] = [0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0];
     const BITS_DC_C: [u8; 16] = [0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
     const BITS_AC_L: [u8; 16] = [0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7d];

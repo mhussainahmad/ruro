@@ -5,6 +5,12 @@
 //! `const`s, CDR encode/decode impls and a [`RosMessage`](crate::RosMessage)
 //! impl carrying the type name and RIHS01 hash.
 //!
+//! Services and actions become unit structs implementing
+//! [`RosService`](crate::RosService) and [`RosAction`](crate::RosAction),
+//! next to the messages they are made of (`<Srv>_Request`,
+//! `<Srv>_Response`, `<Srv>_Event`; `<Action>_Goal`, `<Action>_SendGoal`,
+//! `<Action>_FeedbackMessage` and so on).
+//!
 //! The output is the body of a module: put it in a file and declare it with
 //! `#[rustfmt::skip] mod my_msgs;`. Types from packages that are generated
 //! elsewhere (e.g. the ones bundled with this crate) are referenced through
@@ -16,7 +22,10 @@ use std::fmt::Write as _;
 use anyhow::{Context, Result, bail};
 
 use crate::hash::type_hash;
-use crate::idl::{Array, BaseType, Field, FieldType, Interfaces, MessageSpec, Primitive, TypeName};
+use crate::idl::{
+    ActionSpec, Array, BaseType, Field, FieldType, Interfaces, MessageSpec, Primitive, ServiceSpec,
+    TypeName,
+};
 
 /// Code generation settings.
 #[derive(Debug, Clone)]
@@ -289,6 +298,109 @@ impl Gen<'_> {
     }
 }
 
+impl Gen<'_> {
+    fn hash(&self, name: &TypeName) -> Result<String> {
+        type_hash(self.interfaces, name)
+            .map_err(|missing| anyhow::anyhow!("{name} references unknown {missing}"))
+    }
+
+    /// A unit struct implementing `RosService`.
+    fn service(&self, spec: &ServiceSpec, out: &mut String) -> Result<()> {
+        let rt = &self.opts.runtime;
+        let name = &spec.name.name;
+        let hash = self.hash(&spec.name)?;
+        let _ = writeln!(out, "/// `{}`", spec.name);
+        out.push_str("#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]\n");
+        let _ = writeln!(out, "pub struct {name};\n");
+        let _ = writeln!(out, "impl {rt}::RosService for {name} {{");
+        let _ = writeln!(
+            out,
+            "    const TYPE_NAME: &'static str = \"{}\";",
+            spec.name
+        );
+        let _ = writeln!(
+            out,
+            "    const DDS_TYPE_NAME: &'static str = \"{}\";",
+            spec.name.dds_name()
+        );
+        let _ = writeln!(out, "    const TYPE_HASH: &'static str = \"{hash}\";");
+        let _ = writeln!(out, "    type Request = {};", spec.request.name.name);
+        let _ = writeln!(out, "    type Response = {};", spec.response.name.name);
+        out.push_str("}\n\n");
+        Ok(())
+    }
+
+    /// A unit struct implementing `RosAction`.
+    fn action(&self, spec: &ActionSpec, out: &mut String) -> Result<()> {
+        let rt = &self.opts.runtime;
+        let n = &spec.name.name;
+        let hash = self.hash(&spec.name)?;
+        let uuid = self.type_path(&TypeName::msg("unique_identifier_msgs", "UUID"));
+        let time = format!("{rt}::msgs::builtin_interfaces::msg::Time");
+        let id = format!("{rt}::GoalId");
+        let _ = writeln!(out, "/// `{}`", spec.name);
+        out.push_str("#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]\n");
+        let _ = writeln!(out, "pub struct {n};\n");
+        let _ = write!(
+            out,
+            "impl {rt}::RosAction for {n} {{
+    const TYPE_NAME: &'static str = \"{ty}\";
+    const TYPE_HASH: &'static str = \"{hash}\";
+    type Goal = {n}_Goal;
+    type Result = {n}_Result;
+    type Feedback = {n}_Feedback;
+    type SendGoal = {n}_SendGoal;
+    type GetResult = {n}_GetResult;
+    type FeedbackMessage = {n}_FeedbackMessage;
+
+    fn send_goal_request(goal_id: {id}, goal: {n}_Goal) -> {n}_SendGoal_Request {{
+        {n}_SendGoal_Request {{ goal_id: {uuid} {{ uuid: goal_id }}, goal }}
+    }}
+
+    fn split_send_goal_request(request: {n}_SendGoal_Request) -> ({id}, {n}_Goal) {{
+        (request.goal_id.uuid, request.goal)
+    }}
+
+    fn send_goal_response(accepted: bool, stamp: {time}) -> {n}_SendGoal_Response {{
+        {n}_SendGoal_Response {{ accepted, stamp }}
+    }}
+
+    fn split_send_goal_response(response: {n}_SendGoal_Response) -> (bool, {time}) {{
+        (response.accepted, response.stamp)
+    }}
+
+    fn get_result_request(goal_id: {id}) -> {n}_GetResult_Request {{
+        {n}_GetResult_Request {{ goal_id: {uuid} {{ uuid: goal_id }} }}
+    }}
+
+    fn split_get_result_request(request: {n}_GetResult_Request) -> {id} {{
+        request.goal_id.uuid
+    }}
+
+    fn get_result_response(status: i8, result: {n}_Result) -> {n}_GetResult_Response {{
+        {n}_GetResult_Response {{ status, result }}
+    }}
+
+    fn split_get_result_response(response: {n}_GetResult_Response) -> (i8, {n}_Result) {{
+        (response.status, response.result)
+    }}
+
+    fn feedback_message(goal_id: {id}, feedback: {n}_Feedback) -> {n}_FeedbackMessage {{
+        {n}_FeedbackMessage {{ goal_id: {uuid} {{ uuid: goal_id }}, feedback }}
+    }}
+
+    fn split_feedback_message(message: {n}_FeedbackMessage) -> ({id}, {n}_Feedback) {{
+        (message.goal_id.uuid, message.feedback)
+    }}
+}}
+
+",
+            ty = spec.name,
+        );
+        Ok(())
+    }
+}
+
 /// Splits `a, "b, c", d` at top-level commas.
 fn split_items(s: &str) -> Vec<String> {
     let mut items = Vec::new();
@@ -347,7 +459,8 @@ pub fn generate(interfaces: &Interfaces, opts: &Options) -> Result<String> {
     let g = Gen { interfaces, opts };
     let mut by_pkg: BTreeMap<&str, BTreeMap<&str, Vec<&MessageSpec>>> = BTreeMap::new();
     for spec in interfaces.messages.values() {
-        if opts.packages.contains(&spec.name.package) {
+        // Service and action descriptions become marker types below.
+        if opts.packages.contains(&spec.name.package) && !interfaces.is_description(&spec.name) {
             by_pkg
                 .entry(&spec.name.package)
                 .or_default()
@@ -369,9 +482,18 @@ pub fn generate(interfaces: &Interfaces, opts: &Options) -> Result<String> {
         let _ = writeln!(out, "pub mod {pkg} {{");
         for (ns, specs) in namespaces {
             let _ = writeln!(out, "pub mod {ns} {{");
-            out.push_str("#![allow(non_camel_case_types, non_snake_case, clippy::all)]\n\n");
+            out.push_str(
+                "#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]\n\n",
+            );
             for spec in specs {
                 g.message(spec, &mut out)?;
+            }
+            let here = |t: &TypeName| t.package == pkg && t.namespace == ns;
+            for spec in interfaces.services.values().filter(|s| here(&s.name)) {
+                g.service(spec, &mut out)?;
+            }
+            for spec in interfaces.actions.values().filter(|a| here(&a.name)) {
+                g.action(spec, &mut out)?;
             }
             out.push_str("}\n");
         }

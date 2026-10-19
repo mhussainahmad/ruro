@@ -22,6 +22,8 @@ use zenoh::Wait;
 #[derive(Args)]
 pub struct SoakArgs {
     graph: PathBuf,
+    #[command(flatten)]
+    overlay: crate::OverlayArgs,
     /// Seconds to run.
     #[arg(long, default_value_t = 600.0)]
     duration: f64,
@@ -81,7 +83,10 @@ pub fn soak(endpoint: &str, name: Option<&str>, security: &Security, args: SoakA
         bail!("--duration must be longer than --warmup");
     }
     let (daemon, c) = crate::connect_or_start(endpoint, name, security)?;
-    println!("{}", crate::deploy(&c, &args.graph)?);
+    println!(
+        "{}",
+        crate::deploy(&c, &args.graph, &args.overlay.overlays)?
+    );
 
     let latest: Arc<Mutex<HashMap<String, GroupMetrics>>> = Arc::default();
     let l = latest.clone();
@@ -101,7 +106,7 @@ pub fn soak(endpoint: &str, name: Option<&str>, security: &Security, args: SoakA
         .session
         .declare_subscriber(c.keys.status())
         .callback(move |s| {
-            if let Ok(st) = ruro_proto::decode::<DaemonStatus>(&s.payload().to_bytes()) {
+            if let Ok(st) = ruro_proto::decode_status(&s.payload().to_bytes()) {
                 *s2.lock() = Some(st);
             }
         })

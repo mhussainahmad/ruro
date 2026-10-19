@@ -68,6 +68,8 @@ or external dependencies:
 | `ruro-nodes-sim/mujoco` | `sim/mujoco` | MuJoCo 3.15.0 at run time ([Simulation](simulation.md)) |
 | `ruro-nodes-ml/onnx` | `ml/onnx`, `ml/policy` | downloads ONNX Runtime at build time ([Machine learning](ml.md)) |
 | `ruro-nodes-ml/lerobot` | `ml/lerobot-recorder` | nothing extra |
+| `ruro-nodes-hw/h264` | H.264 decoding in `hw/rtsp-camera` | a C++ compiler at build time ([Hardware](hardware.md#rtsp-cameras)) |
+| `ruro-nodes-hw/realsense` | `hw/realsense` | librealsense2 at run time ([Hardware](hardware.md#intel-realsense)) |
 
 ```sh
 cargo build --release -p ruro-host --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot

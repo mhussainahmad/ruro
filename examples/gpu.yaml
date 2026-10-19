@@ -1,0 +1,37 @@
+# Frames in GPU memory, across two processes.
+# Needs an NVIDIA GPU and driver (no CUDA toolkit). The camera process
+# uploads each frame once; the vision process receives a CUDA IPC handle,
+# not the pixels, normalizes the frame on the GPU into model input and
+# downloads it only for the statistics node. Watch `upload.out` in the
+# studio or with `ruro echo upload.out`: previews are downloaded only while
+# someone watches.
+name: gpu-demo
+nodes:
+  camera:
+    type: std/fake-camera
+    group: camera
+    rate: 30
+    params: { width: 1920, height: 1080 }
+    pos: [0, 0]
+  upload:
+    type: gpu/upload
+    group: camera
+    pos: [400, 0]
+  normalize:
+    type: gpu/normalize
+    group: vision
+    params: { width: 640, height: 640, mean: "0.485,0.456,0.406", std: "0.229,0.224,0.225" }
+    pos: [800, 0]
+  download:
+    type: gpu/download
+    group: vision
+    pos: [400, 230]
+  stats:
+    type: std/image-stats
+    group: vision
+    pos: [800, 230]
+wires:
+  - camera.image -> upload.image
+  - upload.out -> normalize.image
+  - upload.out -> download.image
+  - download.out -> stats.image

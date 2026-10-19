@@ -24,9 +24,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use anyhow::{Result, anyhow};
 
 use crate::dynamic::MessageType;
-use crate::idl::{
-    Array, BaseType, Field, FieldType, Interfaces, MessageSpec, Primitive, TypeName, parse_message,
-};
+use crate::idl::{BaseType, Interfaces, TypeName};
 
 /// Message types found on disk, in the environment and bundled with ruro.
 #[derive(Debug, Default)]
@@ -69,170 +67,9 @@ fn packages_in(root: &Path) -> BTreeMap<String, PathBuf> {
     out
 }
 
-fn named(package: &str, namespace: &str, name: &str) -> TypeName {
-    TypeName {
-        package: package.into(),
-        namespace: namespace.into(),
-        name: name.into(),
-    }
-}
-
-fn field(name: &str, base: BaseType, array: Array) -> Field {
-    Field {
-        name: name.into(),
-        ty: FieldType { base, array },
-        default: None,
-    }
-}
-
-fn nested(t: TypeName) -> BaseType {
-    BaseType::Named(t)
-}
-
-/// Splits a `.srv` or `.action` file at its `---` lines.
-fn sections(text: &str) -> Vec<String> {
-    let mut parts = vec![String::new()];
-    for line in text.lines() {
-        if line.trim() == "---" {
-            parts.push(String::new());
-        } else {
-            let last = parts.last_mut().expect("one part");
-            last.push_str(line);
-            last.push('\n');
-        }
-    }
-    parts
-}
-
-/// The `<Srv>_Event` message of service introspection.
-fn service_event(package: &str, ns: &str, srv: &str) -> MessageSpec {
-    MessageSpec {
-        name: named(package, ns, &format!("{srv}_Event")),
-        fields: vec![
-            field(
-                "info",
-                nested(TypeName::msg("service_msgs", "ServiceEventInfo")),
-                Array::None,
-            ),
-            field(
-                "request",
-                nested(named(package, ns, &format!("{srv}_Request"))),
-                Array::Bounded(1),
-            ),
-            field(
-                "response",
-                nested(named(package, ns, &format!("{srv}_Response"))),
-                Array::Bounded(1),
-            ),
-        ],
-        constants: Vec::new(),
-    }
-}
-
-/// The messages of a `.srv` file.
-pub fn service_messages(
-    package: &str,
-    srv: &str,
-    text: &str,
-    file: &str,
-) -> Result<Vec<MessageSpec>> {
-    let parts = sections(text);
-    if parts.len() != 2 {
-        return Err(anyhow!("{file}: a service needs exactly one `---` line"));
-    }
-    let mut out = Vec::new();
-    for (part, suffix) in parts.iter().zip(["Request", "Response"]) {
-        out.push(parse_message(
-            named(package, "srv", &format!("{srv}_{suffix}")),
-            part,
-            file,
-        )?);
-    }
-    out.push(service_event(package, "srv", srv));
-    Ok(out)
-}
-
-/// The messages of a `.action` file: `<A>_Goal`, `<A>_Result`,
-/// `<A>_Feedback`, the `SendGoal` and `GetResult` services and
-/// `<A>_FeedbackMessage`.
-pub fn action_messages(
-    package: &str,
-    action: &str,
-    text: &str,
-    file: &str,
-) -> Result<Vec<MessageSpec>> {
-    let parts = sections(text);
-    if parts.len() != 3 {
-        return Err(anyhow!("{file}: an action needs exactly two `---` lines"));
-    }
-    let t = |suffix: &str| named(package, "action", &format!("{action}_{suffix}"));
-    let uuid = || nested(TypeName::msg("unique_identifier_msgs", "UUID"));
-    let mut out = Vec::new();
-    for (part, suffix) in parts.iter().zip(["Goal", "Result", "Feedback"]) {
-        out.push(parse_message(t(suffix), part, file)?);
-    }
-    let spec = |name: TypeName, fields: Vec<Field>| MessageSpec {
-        name,
-        fields,
-        constants: Vec::new(),
-    };
-    out.push(spec(
-        t("SendGoal_Request"),
-        vec![
-            field("goal_id", uuid(), Array::None),
-            field("goal", nested(t("Goal")), Array::None),
-        ],
-    ));
-    out.push(spec(
-        t("SendGoal_Response"),
-        vec![
-            field(
-                "accepted",
-                BaseType::Primitive(Primitive::Bool),
-                Array::None,
-            ),
-            field(
-                "stamp",
-                nested(TypeName::msg("builtin_interfaces", "Time")),
-                Array::None,
-            ),
-        ],
-    ));
-    out.push(spec(
-        t("GetResult_Request"),
-        vec![field("goal_id", uuid(), Array::None)],
-    ));
-    out.push(spec(
-        t("GetResult_Response"),
-        vec![
-            field("status", BaseType::Primitive(Primitive::Int8), Array::None),
-            field("result", nested(t("Result")), Array::None),
-        ],
-    ));
-    out.push(spec(
-        t("FeedbackMessage"),
-        vec![
-            field("goal_id", uuid(), Array::None),
-            field("feedback", nested(t("Feedback")), Array::None),
-        ],
-    ));
-    out.push(service_event(
-        package,
-        "action",
-        &format!("{action}_SendGoal"),
-    ));
-    out.push(service_event(
-        package,
-        "action",
-        &format!("{action}_GetResult"),
-    ));
-    Ok(out)
-}
-
-/// Parses every definition of the package at `dir`. Files that fail are
-/// reported in the returned warnings.
-pub fn load_package(name: &str, dir: &Path) -> (Vec<MessageSpec>, Vec<String>) {
-    let mut specs = Vec::new();
+/// Parses every definition of the package at `dir` into `interfaces`.
+/// Files that fail are skipped and reported in the returned warnings.
+pub fn load_package(name: &str, dir: &Path, interfaces: &mut Interfaces) -> Vec<String> {
     let mut warnings = Vec::new();
     for sub in ["msg", "srv", "action"] {
         let Ok(entries) = std::fs::read_dir(dir.join(sub)) else {
@@ -252,13 +89,21 @@ pub fn load_package(name: &str, dir: &Path) -> (Vec<MessageSpec>, Vec<String>) {
             .collect();
         files.sort();
         for path in files {
+            let file = path.display().to_string();
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(e) => {
+                    warnings.push(format!("skipped {file}: {e}"));
+                    continue;
+                }
+            };
             if path.extension().is_some_and(|e| e == "idl") {
-                let file = path.display().to_string();
-                let parsed = std::fs::read_to_string(&path)
-                    .map_err(anyhow::Error::from)
-                    .and_then(|text| crate::idl_file::parse_idl(&text));
-                match parsed {
-                    Ok(s) => specs.extend(s.into_iter().filter(|s| s.name.package == name)),
+                match crate::idl_file::parse_idl(&text) {
+                    Ok(specs) => {
+                        for s in specs.into_iter().filter(|s| s.name.package == name) {
+                            interfaces.add(s);
+                        }
+                    }
                     Err(e) => warnings.push(format!("skipped {file}: {e:#}")),
                 }
                 continue;
@@ -267,25 +112,12 @@ pub fn load_package(name: &str, dir: &Path) -> (Vec<MessageSpec>, Vec<String>) {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let file = path.display().to_string();
-            let parsed = std::fs::read_to_string(&path)
-                .map_err(anyhow::Error::from)
-                .and_then(|text| match sub {
-                    "msg" => Ok(vec![parse_message(
-                        TypeName::msg(name, &stem),
-                        &text,
-                        &file,
-                    )?]),
-                    "srv" => service_messages(name, &stem, &text, &file),
-                    _ => action_messages(name, &stem, &text, &file),
-                });
-            match parsed {
-                Ok(s) => specs.extend(s),
-                Err(e) => warnings.push(format!("skipped {file}: {e:#}")),
+            if let Err(e) = interfaces.add_text(name, sub, &stem, &text, &file) {
+                warnings.push(format!("skipped {file}: {e}"));
             }
         }
     }
-    (specs, warnings)
+    warnings
 }
 
 impl TypeLibrary {
@@ -334,7 +166,7 @@ impl TypeLibrary {
         // Packages the new directory provides are looked up again.
         for p in packages.keys() {
             if self.loaded.remove(p) {
-                self.interfaces.messages.retain(|t, _| &t.package != p);
+                self.interfaces.remove_package(p);
             }
         }
         self.roots.insert(0, (dir.to_owned(), packages));
@@ -364,18 +196,15 @@ impl TypeLibrary {
             return;
         }
         if let Some(dir) = self.package_dir(package).map(Path::to_owned) {
-            let (specs, warnings) = load_package(package, &dir);
-            for s in specs {
-                self.interfaces.add(s);
-            }
+            let warnings = load_package(package, &dir, &mut self.interfaces);
             self.warnings.extend(warnings);
             return;
         }
-        for (pkg, msg, text) in crate::bundled::BUNDLED {
+        for (pkg, kind, name, text) in crate::bundled::BUNDLED {
             if *pkg == package {
-                let spec = parse_message(TypeName::msg(*pkg, *msg), text, msg)
+                self.interfaces
+                    .add_text(pkg, kind, name, text, name)
                     .expect("bundled definitions parse");
-                self.interfaces.add(spec);
             }
         }
     }
@@ -424,6 +253,12 @@ impl TypeLibrary {
             return Ok(t.clone());
         }
         self.load(name)?;
+        if self.interfaces.is_description(name) {
+            anyhow::bail!(
+                "{name} is a service or action, not a message; use its request, response, \
+                 goal, result or feedback message type"
+            );
+        }
         crate::dynamic::compile(&self.interfaces, name, &mut self.compiled)
     }
 
@@ -508,33 +343,5 @@ mod tests {
         let text = format!("{err:#}");
         assert!(text.contains("package `nope_msgs` was not found"), "{text}");
         assert!(lib.resolve_str("not a type").is_err());
-    }
-
-    #[test]
-    fn actions_expand_like_rosidl() {
-        let specs = action_messages(
-            "p",
-            "Count",
-            "int32 target\n---\nint32 reached\n---\nint32 current\n",
-            "f",
-        )
-        .unwrap();
-        let names: Vec<String> = specs.iter().map(|s| s.name.name.clone()).collect();
-        assert_eq!(
-            names,
-            [
-                "Count_Goal",
-                "Count_Result",
-                "Count_Feedback",
-                "Count_SendGoal_Request",
-                "Count_SendGoal_Response",
-                "Count_GetResult_Request",
-                "Count_GetResult_Response",
-                "Count_FeedbackMessage",
-                "Count_SendGoal_Event",
-                "Count_GetResult_Event"
-            ]
-        );
-        assert!(action_messages("p", "A", "int32 a\n---\n", "f").is_err());
     }
 }

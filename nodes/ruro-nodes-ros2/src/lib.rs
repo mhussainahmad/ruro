@@ -28,23 +28,34 @@
 //! `ros2/pub` nodes as `ros2/Any`, unchanged; `ros2/field` and `ros2/decode`
 //! read them (see [`generic`]).
 //!
-//! Limitations: durability is always volatile, so a `ros2/sub-tf` on
-//! `/tf_static` only sees static transforms published after it starts, and a
-//! `ros2/pub-tf` on `/tf_static` is not latched for late ROS subscribers.
+//! QoS: `qos` (reliable or best_effort), `durability` (volatile or
+//! transient_local) and `depth` set the endpoint's QoS as in ROS 2. For
+//! latched topics such as `/tf_static`, use `durability: transient_local`
+//! with `depth: 1` on both kinds: a `ros2/pub-tf` then keeps its last
+//! message for ROS subscribers that start later, and a `ros2/sub-tf` gets
+//! the static transforms published before it started.
+//!
 //! Subscriber nodes send from the Zenoh callback; their own step runs at
 //! 1 Hz only to apply parameter changes. `ruro status` shows the rate of
 //! the messages they send.
+//!
+//! Services and actions: [`services`] has `ros2/call-trigger`,
+//! `ros2/call-set-bool`, `ros2/serve-trigger` and `ros2/serve-set-bool`;
+//! [`actions`] has `ros2/fibonacci-goal` and [`actions::GoalDriver`], which
+//! drives goals of any action type from a node.
 
+pub mod actions;
 pub mod convert;
 pub mod external;
 pub mod generic;
+pub mod services;
 
 use std::sync::Arc;
 
 use ruro::prelude::*;
 use ruro_ros2::RosMessage;
 use ruro_ros2::rmw::{
-    Credentials, Endpoint, EndpointConfig, Publisher, Qos, Reliability, Subscriber,
+    Credentials, Endpoint, EndpointConfig, History, Publisher, Qos, Reliability, Subscriber,
 };
 
 /// Forces this crate to be linked so its nodes are registered.
@@ -116,6 +127,18 @@ impl Settings {
             credentials,
             token_from_env,
         })
+    }
+
+    /// Sets durability (`volatile` or `transient_local`) and history depth
+    /// (keep-last; 0 keeps all).
+    fn with_durability(mut self, durability: &str, depth: i64) -> Result<Self> {
+        self.qos.durability = durability.parse()?;
+        if depth == 0 {
+            self.qos.history = History::KeepAll;
+        } else {
+            self.qos.depth = usize::try_from(depth).context("depth")?;
+        }
+        Ok(self)
     }
 
     /// The credentials to try, in order. A router that does not
@@ -229,11 +252,12 @@ macro_rules! bridge {
     (
         $sub_kind:literal, $Sub:ident, $pub_kind:literal, $Pub:ident,
         $ruro:ty, $ros:ty, $from:path, $to:path, $topic:literal, $ros_name:literal
+        $(, note = $note:literal)?
         $(, estop = $safe:expr, $estop_doc:literal)?
     ) => {
-        #[doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message.")]
+        #[doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message.", $("\n\n", $note)?)]
         #[derive(Node)]
-        #[node(kind = $sub_kind, rate = 1, doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message."))]
+        #[node(kind = $sub_kind, rate = 1, doc = concat!("Subscribes to a ROS 2 `", $ros_name, "` topic and outputs each message.", $("\n\n", $note)?))]
         pub struct $Sub {
             #[output]
             out: Output<$ruro>,
@@ -246,6 +270,12 @@ macro_rules! bridge {
             /// `reliable` or `best_effort`.
             #[param(default = "reliable")]
             qos: String,
+            /// `volatile` or `transient_local` (latched, e.g. `/tf_static`).
+            #[param(default = "volatile")]
+            durability: String,
+            /// History depth (keep-last); 0 keeps all.
+            #[param(default = 10, min = 0)]
+            depth: i64,
             /// Zenoh router shared with the ROS 2 nodes.
             #[param(default = "tcp/127.0.0.1:7447")]
             router: String,
@@ -260,7 +290,8 @@ macro_rules! bridge {
 
         impl $Sub {
             fn ensure(&mut self, ctx: &Ctx) -> Result {
-                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router, &self.token)?;
+                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router, &self.token)?
+                    .with_durability(&self.durability, self.depth)?;
                 if self.state.as_ref().is_none_or(|s| s.settings != want) {
                     self.state = None;
                     self.state = Some(subscribe::<$ros, $ruro>(want, self.out.clone(), $from)?);
@@ -285,9 +316,9 @@ macro_rules! bridge {
             }
         }
 
-        #[doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $estop_doc)?)]
+        #[doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $note,)? $("\n\n", $estop_doc)?)]
         #[derive(Node)]
-        #[node(kind = $pub_kind, doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $estop_doc)?))]
+        #[node(kind = $pub_kind, doc = concat!("Publishes every input message on a ROS 2 `", $ros_name, "` topic.", $("\n\n", $note,)? $("\n\n", $estop_doc)?))]
         pub struct $Pub {
             #[input]
             input: Input<$ruro>,
@@ -300,6 +331,12 @@ macro_rules! bridge {
             /// `reliable` or `best_effort`.
             #[param(default = "reliable")]
             qos: String,
+            /// `volatile` or `transient_local` (latched, e.g. `/tf_static`).
+            #[param(default = "volatile")]
+            durability: String,
+            /// History depth (keep-last); 0 keeps all.
+            #[param(default = 10, min = 0)]
+            depth: i64,
             /// Zenoh router shared with the ROS 2 nodes.
             #[param(default = "tcp/127.0.0.1:7447")]
             router: String,
@@ -319,7 +356,8 @@ macro_rules! bridge {
 
         impl $Pub {
             fn ensure(&mut self, ctx: &Ctx) -> Result {
-                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router, &self.token)?;
+                let want = Settings::new(ctx.id(), &self.topic, self.domain_id, &self.qos, &self.router, &self.token)?
+                    .with_durability(&self.durability, self.depth)?;
                 if self.state.as_ref().is_none_or(|s| s.settings != want) {
                     self.state = None;
                     self.state = Some(advertise::<$ros>(want)?);
@@ -522,7 +560,9 @@ bridge!(
     convert::tf_from_ros,
     convert::tf_to_ros,
     "/tf",
-    "tf2_msgs/TFMessage"
+    "tf2_msgs/TFMessage",
+    note = "For `/tf_static`, set `durability: transient_local` and `depth: 1`: static \
+            transforms are then latched, so they reach (and come from) nodes that start later."
 );
 bridge!(
     "ros2/sub-float64",

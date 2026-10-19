@@ -3,7 +3,7 @@
 
 pub mod demo_msgs {
 pub mod msg {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
 
 /// `demo_msgs/msg/Detail`
 #[derive(Debug, Clone, PartialEq)]
@@ -112,7 +112,49 @@ impl ruro_ros2::RosMessage for Detection {
 
 }
 pub mod srv {
-#![allow(non_camel_case_types, non_snake_case, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
+
+/// `demo_msgs/srv/Lookup_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lookup_Event {
+    pub info: ruro_ros2::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::demo::demo_msgs::srv::Lookup_Request>,
+    pub response: ::std::vec::Vec<crate::demo::demo_msgs::srv::Lookup_Response>,
+}
+
+impl ::core::default::Default for Lookup_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl ruro_ros2::cdr::CdrEncode for Lookup_Event {
+    fn encode(&self, w: &mut ruro_ros2::cdr::CdrWriter) {
+        ruro_ros2::cdr::CdrEncode::encode(&self.info, w);
+        ruro_ros2::cdr::CdrEncode::encode(&self.request, w);
+        ruro_ros2::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl ruro_ros2::cdr::CdrDecode for Lookup_Event {
+    fn decode(r: &mut ruro_ros2::cdr::CdrReader<'_>) -> ::core::result::Result<Self, ruro_ros2::cdr::CdrError> {
+        Ok(Self {
+            info: ruro_ros2::cdr::CdrDecode::decode(r)?,
+            request: ruro_ros2::cdr::CdrDecode::decode(r)?,
+            response: ruro_ros2::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl ruro_ros2::RosMessage for Lookup_Event {
+    const TYPE_NAME: &'static str = "demo_msgs/srv/Lookup_Event";
+    const DDS_TYPE_NAME: &'static str = "demo_msgs::srv::dds_::Lookup_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_cde32960c56046e084c7b977c7dd6cafd6fd903c61f090668800cd043c6bbf1d";
+}
 
 /// `demo_msgs/srv/Lookup_Request`
 #[derive(Debug, Clone, PartialEq)]
@@ -184,6 +226,18 @@ impl ruro_ros2::RosMessage for Lookup_Response {
     const TYPE_NAME: &'static str = "demo_msgs/srv/Lookup_Response";
     const DDS_TYPE_NAME: &'static str = "demo_msgs::srv::dds_::Lookup_Response_";
     const TYPE_HASH: &'static str = "RIHS01_97550845ab2edd39c00385dd112bab41b6a16d0347c3289a9a05a51ea255801b";
+}
+
+/// `demo_msgs/srv/Lookup`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Lookup;
+
+impl ruro_ros2::RosService for Lookup {
+    const TYPE_NAME: &'static str = "demo_msgs/srv/Lookup";
+    const DDS_TYPE_NAME: &'static str = "demo_msgs::srv::dds_::Lookup_";
+    const TYPE_HASH: &'static str = "RIHS01_aadbe6eb708278850a309871c33996fd0f18ebe267daf4b083b0f4d44368c73a";
+    type Request = Lookup_Request;
+    type Response = Lookup_Response;
 }
 
 }

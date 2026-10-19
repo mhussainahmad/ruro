@@ -103,3 +103,86 @@ impl Node for FakeArm {
         self.held = true;
     }
 }
+
+/// Reactive obstacle avoidance for a differential-drive base. Drives forward
+/// while nothing is within `stop_distance` in the sector ahead, slowing down
+/// as obstacles get nearer, and otherwise turns on the spot towards the side
+/// with more room. Runs when a scan arrives; angles follow ROS (x forward,
+/// counter-clockwise positive, so positive angles are on the left).
+///
+/// E-stop: sends a zero twist for every scan while stopped.
+#[derive(Node)]
+#[node(kind = "std/scan-avoid")]
+pub struct ScanAvoid {
+    #[input]
+    scan: Input<LaserScan>,
+    /// Velocity command: `linear.x` in m/s, `angular.z` in rad/s.
+    #[output]
+    cmd: Output<Twist>,
+    /// Forward speed in m/s when the way ahead is clear.
+    #[param(default = 0.3, min = 0, max = 10)]
+    speed: f64,
+    /// Turn rate in rad/s while avoiding.
+    #[param(default = 0.8, min = 0, max = 10)]
+    turn: f64,
+    /// Obstacles nearer than this, in metres, stop forward motion.
+    #[param(default = 0.7, min = 0.05, max = 50)]
+    stop_distance: f64,
+    /// Half-width of the sector ahead, in degrees.
+    #[param(default = 30.0, min = 1, max = 180)]
+    sector_deg: f64,
+    /// Keeps turning the same way until the way is clear again.
+    turning: Option<f64>,
+}
+
+/// Nearest valid return in each region: ahead (within `sector` radians of
+/// straight ahead), to the left and to the right. Infinite where none.
+fn clearance(scan: &LaserScan, sector: f64) -> (f64, f64, f64) {
+    let (mut ahead, mut left, mut right) = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    for (i, &r) in scan.ranges.iter().enumerate() {
+        if !(r.is_finite() && r >= scan.range_min && r <= scan.range_max) {
+            continue;
+        }
+        let (r, a) = (
+            r as f64,
+            (scan.angle_min + i as f32 * scan.angle_increment) as f64,
+        );
+        // Wrap to [-pi, pi) so scans given as 0..2pi work too.
+        let a = (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        if a.abs() <= sector {
+            ahead = ahead.min(r);
+        }
+        if a > 0.0 && a <= std::f64::consts::FRAC_PI_2 {
+            left = left.min(r);
+        } else if (-std::f64::consts::FRAC_PI_2..0.0).contains(&a) {
+            right = right.min(r);
+        }
+    }
+    (ahead, left, right)
+}
+
+impl Node for ScanAvoid {
+    fn step(&mut self, ctx: &mut Ctx) -> Result {
+        let Some(scan) = self.scan.latest() else {
+            return Ok(());
+        };
+        if ctx.estopped() {
+            self.turning = None;
+            return self.cmd.send(Twist::default());
+        }
+        let (ahead, left, right) = clearance(&scan, self.sector_deg.to_radians());
+        let mut cmd = Twist::default();
+        if ahead > self.stop_distance {
+            self.turning = None;
+            // Full speed from twice the stop distance, slower before it.
+            let room = ((ahead - self.stop_distance) / self.stop_distance).min(1.0);
+            cmd.linear.x = self.speed * room.max(0.2);
+        } else {
+            let dir = *self
+                .turning
+                .get_or_insert(if left >= right { 1.0 } else { -1.0 });
+            cmd.angular.z = dir * self.turn;
+        }
+        self.cmd.send(cmd)
+    }
+}

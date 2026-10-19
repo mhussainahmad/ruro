@@ -1,0 +1,62 @@
+# A differential-drive rover that wanders around and avoids obstacles. The
+# graph itself drives the rover simulated in Gazebo Harmonic (rover.sdf),
+# through ros_gz_bridge and the ROS 2 bridge; the `real` overlay reads a real
+# RPLidar directly and runs the robot group on the rover's computer. See
+# README.md next to this file.
+#
+#   ruro daemon                                     # also the Zenoh router of the ROS 2 side
+#   examples/gazebo/run.sh                          # Gazebo and ros_gz_bridge, in a container
+#   ruro run examples/gazebo/rover.yaml               # or --overlay sim, the same
+#   ruro run examples/gazebo/rover.yaml --overlay real
+#
+# Bridge nodes reach ROS 2 through the Zenoh router given as `router`: the
+# daemon the graph runs on, on its default port.
+name: rover
+nodes:
+  # --- robot: Gazebo here, real hardware in the `real` overlay ---
+  lidar:
+    type: ros2/sub-laser-scan
+    group: robot
+    params: { topic: /scan, qos: best_effort, router: tcp/127.0.0.1:7447 }
+    pos: [0, 0]
+  odom:
+    type: ros2/sub-odometry
+    group: robot
+    params: { topic: /odom, router: tcp/127.0.0.1:7447 }
+    pos: [0, 180]
+  drive:
+    type: ros2/pub-twist
+    group: robot
+    params: { topic: /cmd_vel, router: tcp/127.0.0.1:7447 }
+    pos: [700, 0]
+  # --- shared ---
+  avoid:
+    type: std/scan-avoid
+    params: { speed: 0.3, turn: 0.8, stop_distance: 0.7 }
+    pos: [350, 0]
+wires:
+  - lidar.out -> avoid.scan
+  - avoid.cmd -> drive.input
+overlays:
+  # The simulation, as in the graph itself, for naming it explicitly. `sim`
+  # and `real` are alternatives: `sim` does not undo `real`'s rewiring.
+  sim:
+    nodes:
+      lidar:
+        type: ros2/sub-laser-scan
+        params: { topic: /scan, qos: best_effort, router: tcp/127.0.0.1:7447 }
+  # A real rover: an RPLidar on the rover's computer, read by ruro's own
+  # driver, and a ROS 2 base driver on the same computer that takes /cmd_vel
+  # and publishes /odom (for example a TurtleBot or Create 3 base). The
+  # `robot` group runs on the daemon named `rover`.
+  real:
+    groups:
+      robot: { machine: rover }
+    nodes:
+      lidar:
+        type: hw/rplidar
+        rate: 200
+        params: { device: /dev/ttyUSB0, baud: 115200, frame_id: laser }
+    wires:
+      remove: [lidar.out -> avoid.scan]
+      add: [lidar.scan -> avoid.scan]

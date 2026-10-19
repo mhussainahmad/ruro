@@ -34,6 +34,27 @@ impl GraphDiff {
             && self.graph.is_empty()
     }
 
+    /// Canvas highlights, by node id.
+    pub fn marks(&self) -> Marks {
+        Marks {
+            nodes: self
+                .added
+                .iter()
+                .map(|id| (id.clone(), Mark::Added))
+                .chain(
+                    self.changed
+                        .iter()
+                        .map(|(id, _)| (id.clone(), Mark::Changed)),
+                )
+                .collect(),
+            ghosts: self
+                .removed
+                .iter()
+                .filter_map(|(id, n)| Some((id.clone(), n.kind.clone(), n.pos?)))
+                .collect(),
+        }
+    }
+
     pub fn count(&self) -> usize {
         self.added.len()
             + self.removed.len()
@@ -96,6 +117,10 @@ fn node_changes(a: &NodeInstance, b: &NodeInstance) -> Vec<String> {
     out
 }
 
+fn clock_name(c: ruro_graph::ClockSource) -> &'static str {
+    if c.is_wall() { "wall" } else { "sim" }
+}
+
 /// What changed from `base` to `current`.
 pub fn diff(base: &Graph, current: &Graph) -> GraphDiff {
     let mut d = GraphDiff::default();
@@ -105,6 +130,16 @@ pub fn diff(base: &Graph, current: &Graph) -> GraphDiff {
     }
     if base.groups != current.groups {
         d.graph.push("process settings changed".into());
+    }
+    if base.clock != current.clock {
+        d.graph.push(format!(
+            "clock {} → {}",
+            clock_name(base.clock),
+            clock_name(current.clock)
+        ));
+    }
+    if base.overlays != current.overlays {
+        d.graph.push("overlays changed".into());
     }
     if base.inputs != current.inputs || base.outputs != current.outputs {
         d.graph.push("exposed ports changed".into());
@@ -169,26 +204,7 @@ impl Compare {
 
     /// Canvas highlights, by node id.
     pub fn marks(&self) -> Marks {
-        Marks {
-            nodes: self
-                .diff
-                .added
-                .iter()
-                .map(|id| (id.clone(), Mark::Added))
-                .chain(
-                    self.diff
-                        .changed
-                        .iter()
-                        .map(|(id, _)| (id.clone(), Mark::Changed)),
-                )
-                .collect(),
-            ghosts: self
-                .diff
-                .removed
-                .iter()
-                .filter_map(|(id, n)| Some((id.clone(), n.kind.clone(), n.pos?)))
-                .collect(),
-        }
+        self.diff.marks()
     }
 }
 

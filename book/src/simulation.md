@@ -69,7 +69,7 @@ export RURO_MUJOCO_LIB=$(ls ~/.venvs/mujoco/lib/python3*/site-packages/mujoco/li
 With [`clock: sim`](runtime.md#graph-time-and-simulation) in the graph, the `clock`
 output drives graph time: every timer-driven node steps on simulated time, so a slow or
 paused simulation slows the whole graph down with it. No wire is needed; the runtime finds
-the graph's one `std/Clock` output. `examples/arm-sim.yaml` runs this way. Message stamps,
+the graph's one `std/Clock` output. `examples/arm.yaml` runs this way. Message stamps,
 including those of `bodies`, stay wall time.
 
 **Emergency stop.** The physics keeps running and commands are ignored while stopped. With
@@ -102,24 +102,6 @@ inside an executor. With MuJoCo 3.15.0 the measured period was 1.804534 s agains
 
 ## Gazebo and Isaac Sim
 
-There is no native Gazebo or Isaac Sim node. Both simulators integrate through ROS 2, so
-the route is ROS 2 → [ruro's ROS 2 bridge](ros2.md) → ruro:
-
-- **Gazebo (gz sim).** Run `ros_gz_bridge` to expose the simulated robot's topics
-  (`/joint_states`, camera images, `/tf`, lidar scans) on ROS 2, with
-  `RMW_IMPLEMENTATION=rmw_zenoh_cpp`, then bring them into a graph with `ros2/sub-*`
-  nodes.
-- **Isaac Sim.** Enable its ROS 2 bridge extension and publish joint states, cameras and
-  TF from the action graph, again over rmw_zenoh.
-
-Not tried yet, and with known gaps:
-
-- The bridge has no node for joint commands (`std/JointCommand`), so commands cannot be
-  sent back to the simulator's controllers yet; `ros2/pub-twist` covers velocity-driven
-  mobile bases.
-- There is no `/clock` bridge, so the graph cannot follow simulated time.
-- Whether Isaac Sim's bridge works with rmw_zenoh depends on the Isaac Sim version.
-
-The intended setup keeps the downstream nodes of `examples/arm-sim.yaml` as they are and
-swaps only the `arm` and `camera` nodes for bridge nodes. No example graph is shipped for
-this path yet.
+There is no native Gazebo or Isaac Sim node; both connect through the ROS 2 bridge. See
+[Gazebo and Isaac Sim](gazebo-isaac.md) for the example graphs, what was verified and the
+remaining gaps.

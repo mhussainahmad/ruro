@@ -134,7 +134,7 @@ impl Describe for Encoding {
         };
         Schema::Enum {
             name: "Encoding".into(),
-            variants: vec![unit("Rgb8"), unit("Rgba8"), unit("Mono8")],
+            variants: vec![unit("Rgb8"), unit("Rgba8"), unit("Mono8"), unit("Mono16")],
         }
     }
 }
@@ -144,7 +144,7 @@ impl Describe for Image {
         Schema::Custom {
             name: "Image".into(),
             encoding: "ruro/image-v1: u32 LE width, u32 LE height, u8 encoding \
-                       (0 rgb8, 1 rgba8, 2 mono8), then width*height*channels pixel bytes"
+                       (0 rgb8, 1 rgba8, 2 mono8, 3 mono16 LE), then width*height*bytes-per-pixel bytes"
                 .into(),
             fields: vec![
                 Field::new("width", Schema::U32),

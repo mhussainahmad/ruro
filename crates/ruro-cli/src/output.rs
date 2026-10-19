@@ -1,6 +1,6 @@
 //! Terminal formatting.
 
-use ruro_graph::Registry;
+use ruro_graph::{Graph, Registry};
 use ruro_proto::{DaemonStatus, GroupMetrics, GroupState, Level, LogLine, NodeState, Preview};
 
 /// Prints a line from a background callback. Exits quietly when stdout is
@@ -140,14 +140,34 @@ pub fn peer_estop_lines(peers: &[DaemonStatus]) -> Vec<String> {
 }
 
 /// `peers` are the statuses of the other daemons running parts of the graph.
+/// `v0.1.0 (x86_64-unknown-linux-gnu)`; daemons that predate the target
+/// show only the version.
+pub fn version_cell(status: &DaemonStatus) -> String {
+    if status.target.is_empty() {
+        format!("v{}", status.version)
+    } else {
+        format!("v{} ({})", status.version, status.target)
+    }
+}
+
 pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics], peers: &[DaemonStatus]) {
     println!(
-        "daemon {}  v{}  pid {}  up {}",
+        "daemon {}  {}  pid {}  up {}",
         status.name,
-        status.version,
+        version_cell(status),
         status.pid,
         duration(status.uptime_s)
     );
+    if let Some(u) = &status.update {
+        println!("last update: {u}");
+    }
+    if !peers.is_empty() {
+        let others: Vec<String> = peers
+            .iter()
+            .map(|p| format!("{} {}", p.name, version_cell(p)))
+            .collect();
+        println!("other machines: {}", others.join(", "));
+    }
     if status.estopped {
         println!(
             "{} (release with `ruro estop --release`)",
@@ -261,9 +281,35 @@ pub fn duration(s: f64) -> String {
     }
 }
 
+/// `ruro overlays`: each overlay of `graph` and what it changes.
+pub fn overlays(graph: &Graph) -> String {
+    if graph.overlays.is_empty() {
+        return format!("{} has no overlays\n", graph.name);
+    }
+    let mut out = String::new();
+    for (name, overlay) in &graph.overlays {
+        out.push_str(name);
+        out.push('\n');
+        for line in overlay.summary() {
+            out.push_str(&format!("    {line}\n"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlays_are_listed_with_their_changes() {
+        let g = Graph::from_yaml(
+            "name: g\nnodes:\n  a: { type: t/a }\noverlays:\n  sim: { clock: sim }\n  real: { nodes: { a: { type: t/b } } }\n",
+        )
+        .unwrap();
+        assert_eq!(overlays(&g), "sim\n    clock sim\nreal\n    a: type t/b\n");
+        assert_eq!(overlays(&Graph::new("p")), "p has no overlays\n");
+    }
 
     #[test]
     fn colour_codes_only_when_colouring() {
@@ -291,6 +337,8 @@ mod tests {
             recording: None,
             playback: None,
             estopped,
+            target: String::new(),
+            update: None,
         };
         let lines = peer_estop_lines(&[peer("robot", true), peer("arm", false)]);
         assert_eq!(lines.len(), 1);

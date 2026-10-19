@@ -1,4 +1,5 @@
-//! The ROS 2 graph as seen through rmw_zenoh liveliness tokens.
+//! The ROS 2 graph (nodes, topics, services, actions) as seen through
+//! rmw_zenoh liveliness tokens.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -146,6 +147,130 @@ pub fn topics(entities: &[Entity]) -> Vec<TopicInfo> {
     by_topic.into_values().collect()
 }
 
+/// A service and who serves and calls it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ServiceInfo {
+    /// Fully qualified name, e.g. `/add_two_ints`.
+    pub name: String,
+    /// ROS type name, e.g. `example_interfaces/srv/AddTwoInts`.
+    pub ros_type: String,
+    /// RIHS01 hash announced by the endpoints.
+    pub type_hash: String,
+    pub servers: usize,
+    pub clients: usize,
+    /// Fully qualified names of the nodes serving or calling it.
+    pub nodes: Vec<String>,
+}
+
+/// An action and who serves and uses it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActionInfo {
+    /// Fully qualified name, e.g. `/fibonacci`.
+    pub name: String,
+    /// ROS type name, e.g. `example_interfaces/action/Fibonacci`.
+    pub ros_type: String,
+    pub servers: usize,
+    pub clients: usize,
+    /// Fully qualified names of the nodes serving or using it.
+    pub nodes: Vec<String>,
+}
+
+/// Whether a topic or service name belongs to an action
+/// (`<action>/_action/...`).
+pub fn is_action_part(name: &str) -> bool {
+    name.contains("/_action/")
+}
+
+/// Groups service server and client tokens into services, sorted by name.
+/// The services actions are made of are left out (see [`actions`]).
+pub fn services(entities: &[Entity]) -> Vec<ServiceInfo> {
+    let mut by_name: BTreeMap<(String, String, String), ServiceInfo> = BTreeMap::new();
+    for e in entities {
+        let (Some(name), Some(ty), Some(hash)) = (&e.topic, &e.ros_type, &e.type_hash) else {
+            continue;
+        };
+        if !matches!(e.kind, EntityKind::Service | EntityKind::Client) || is_action_part(name) {
+            continue;
+        }
+        let info = by_name
+            .entry((name.clone(), ty.clone(), hash.clone()))
+            .or_insert_with(|| ServiceInfo {
+                name: name.clone(),
+                ros_type: ty.clone(),
+                type_hash: hash.clone(),
+                servers: 0,
+                clients: 0,
+                nodes: Vec::new(),
+            });
+        if e.kind == EntityKind::Service {
+            info.servers += 1;
+        } else {
+            info.clients += 1;
+        }
+        let node = e.node_fqn();
+        if !info.nodes.contains(&node) {
+            info.nodes.push(node);
+        }
+    }
+    by_name.into_values().collect()
+}
+
+/// Actions, found through their `send_goal` services, sorted by name.
+pub fn actions(entities: &[Entity]) -> Vec<ActionInfo> {
+    let mut by_name: BTreeMap<(String, String), ActionInfo> = BTreeMap::new();
+    for e in entities {
+        let (Some(name), Some(ty)) = (&e.topic, &e.ros_type) else {
+            continue;
+        };
+        if !matches!(e.kind, EntityKind::Service | EntityKind::Client) {
+            continue;
+        }
+        let (Some(action), Some(action_type)) = (
+            name.strip_suffix("/_action/send_goal"),
+            ty.strip_suffix("_SendGoal"),
+        ) else {
+            continue;
+        };
+        let info = by_name
+            .entry((action.to_owned(), action_type.to_owned()))
+            .or_insert_with(|| ActionInfo {
+                name: action.to_owned(),
+                ros_type: action_type.to_owned(),
+                servers: 0,
+                clients: 0,
+                nodes: Vec::new(),
+            });
+        if e.kind == EntityKind::Service {
+            info.servers += 1;
+        } else {
+            info.clients += 1;
+        }
+        let node = e.node_fqn();
+        if !info.nodes.contains(&node) {
+            info.nodes.push(node);
+        }
+    }
+    by_name.into_values().collect()
+}
+
+/// The services of a ROS 2 system reachable through `session`.
+pub fn list_services(
+    session: &zenoh::Session,
+    domain: u32,
+    timeout: Duration,
+) -> Result<Vec<ServiceInfo>> {
+    Ok(services(&entities(session, domain, timeout)?))
+}
+
+/// The actions of a ROS 2 system reachable through `session`.
+pub fn list_actions(
+    session: &zenoh::Session,
+    domain: u32,
+    timeout: Duration,
+) -> Result<Vec<ActionInfo>> {
+    Ok(actions(&entities(session, domain, timeout)?))
+}
+
 /// Every rmw_zenoh entity alive in `domain`, queried through `session`.
 pub fn entities(session: &zenoh::Session, domain: u32, timeout: Duration) -> Result<Vec<Entity>> {
     let replies = session
@@ -224,6 +349,29 @@ mod tests {
         assert_eq!(node.topic, None);
         assert!(Entity::parse("@ros2_lv/0/abc/3/3/MP/%/%/x").is_none());
         assert!(Entity::parse("ruro/x/status").is_none());
+    }
+
+    #[test]
+    fn services_and_actions_from_real_tokens() {
+        let es: Vec<Entity> = include_str!("../tests/data/jazzy_tokens.txt")
+            .lines()
+            .filter_map(Entity::parse)
+            .collect();
+        let s = services(&es);
+        assert_eq!(s.len(), 1, "action services are not listed: {s:#?}");
+        assert_eq!(s[0].name, "/add_two_ints");
+        assert_eq!(s[0].ros_type, "example_interfaces/srv/AddTwoInts");
+        assert_eq!((s[0].servers, s[0].clients), (1, 0));
+        let a = actions(&es);
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0].name, "/fibonacci");
+        assert_eq!(
+            a[0].ros_type,
+            "action_tutorials_interfaces/action/Fibonacci"
+        );
+        assert_eq!((a[0].servers, a[0].clients), (1, 1));
+        assert_eq!(a[0].nodes[0], "/fibonacci_action_server");
+        assert!(is_action_part("/fibonacci/_action/status"));
     }
 
     #[test]

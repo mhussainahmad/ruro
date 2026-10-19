@@ -3,11 +3,12 @@
 //! surface triggers it, goes through [`Cmd`].
 //!
 //! Behaviour is split by concern: documents and files (`docs`), editing
-//! (`edit`) and the connection to a daemon (`live`).
+//! (`edit`), the connection to a daemon (`live`) and overlays (`variant`).
 
 mod docs;
 mod edit;
 mod live;
+mod variant;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -153,6 +154,8 @@ pub enum Cmd {
     CompareDialog,
     CompareWith(PathBuf),
     CloseCompare,
+    /// Shows the graph with these overlays applied (none: the graph itself).
+    SetVariant(Vec<String>),
     // Running.
     Deploy,
     Stop,
@@ -183,6 +186,45 @@ pub enum Cmd {
     ClearOutput,
     FitView,
     SetTheme(ThemeKind),
+}
+
+impl Cmd {
+    /// Commands that keep an overlay on the canvas. Every other command acts
+    /// on the document itself, which is put back first.
+    fn keeps_variant(&self) -> bool {
+        matches!(
+            self,
+            Cmd::SetVariant(_)
+                | Cmd::QuickOpen
+                | Cmd::ClearRecent
+                | Cmd::Copy
+                | Cmd::SelectAll
+                | Cmd::Focus(_)
+                | Cmd::RosDiscover
+                | Cmd::OpenNodeSource(_)
+                | Cmd::CloseCompare
+                | Cmd::Deploy
+                | Cmd::Stop
+                | Cmd::Estop(_)
+                | Cmd::Kill(_)
+                | Cmd::StartRecording(_)
+                | Cmd::StopRecording
+                | Cmd::ReplayDialog
+                | Cmd::Playback(_)
+                | Cmd::ConnectDaemon(_)
+                | Cmd::Watch { .. }
+                | Cmd::Unwatch { .. }
+                | Cmd::Activity(_)
+                | Cmd::ToggleSidebar
+                | Cmd::ToggleInspector
+                | Cmd::TogglePanel
+                | Cmd::ShowPanel(_)
+                | Cmd::CommandPalette
+                | Cmd::ClearOutput
+                | Cmd::FitView
+                | Cmd::SetTheme(_)
+        )
+    }
 }
 
 /// A daemon seen on the network.
@@ -229,6 +271,9 @@ pub struct Studio {
     /// `doc.structure_rev` at the last successful deploy from this window.
     pub(crate) deployed_rev: Option<u64>,
     pub(crate) pending_deploy: Option<u64>,
+    /// Overlays of the last successful deploy, and of the one in flight.
+    pub(crate) deployed_variant: Vec<String>,
+    pub(crate) pending_variant: Vec<String>,
     /// Name of the graph last deployed from this window.
     pub(crate) deployed_graph: Option<String>,
     pub(crate) watches: Vec<Watch>,
@@ -265,6 +310,8 @@ pub struct Studio {
     pub(crate) canvas_rect: egui::Rect,
     /// Comparison shown on the canvas, by document uid.
     pub(crate) compare: Option<Compare>,
+    /// Overlays applied to the active document on the canvas.
+    pub(crate) variant: Option<variant::Variant>,
     /// Text last copied, for pasting where no system clipboard exists.
     pub(crate) clipboard: Option<String>,
     paste_count: u32,
@@ -334,6 +381,8 @@ impl Studio {
                 .collect(),
             deployed_rev: None,
             pending_deploy: None,
+            deployed_variant: Vec::new(),
+            pending_variant: Vec::new(),
             deployed_graph: None,
             watches: Vec::new(),
             logs: VecDeque::new(),
@@ -360,6 +409,7 @@ impl Studio {
             canvas_transform: Default::default(),
             canvas_rect: egui::Rect::NOTHING,
             compare: None,
+            variant: None,
             clipboard: None,
             paste_count: 0,
             confirm_close: None,
@@ -415,9 +465,9 @@ impl Studio {
     /// The graph has structural edits that the running copy does not have.
     pub fn undeployed_changes(&self) -> bool {
         self.live()
-            && self
-                .deployed_rev
-                .is_some_and(|r| r != self.doc.structure_rev)
+            && self.deployed_rev.is_some_and(|r| {
+                r != self.doc.structure_rev || self.deployed_variant != self.variant_names()
+            })
     }
 
     pub fn is_watched(&self, node: &str, port: &str) -> bool {
@@ -500,6 +550,18 @@ impl Studio {
     // ----- commands --------------------------------------------------------
 
     fn apply(&mut self, ctx: &egui::Context, cmd: Cmd) {
+        if self.variant.is_some() && !cmd.keeps_variant() {
+            // Saving writes the document, not the overlay shown; the
+            // overlay stays on the canvas afterwards.
+            let resume =
+                matches!(cmd, Cmd::Save | Cmd::SaveAs(_)).then(|| self.variant_names().to_vec());
+            self.leave_variant();
+            self.apply(ctx, cmd);
+            if let Some(names) = resume {
+                self.set_variant(names);
+            }
+            return;
+        }
         match cmd {
             Cmd::NewGraph => self.new_tab(Doc::new("untitled")),
             Cmd::NewFromTemplate(id) => self.new_from_template(id),
@@ -576,6 +638,7 @@ impl Studio {
             Cmd::CompareDialog => self.open_dialog(dialogs::Purpose::Compare),
             Cmd::CompareWith(p) => self.compare_with(&p),
             Cmd::CloseCompare => self.compare = None,
+            Cmd::SetVariant(names) => self.set_variant(names),
             Cmd::Deploy => self.deploy(),
             Cmd::Stop => self.link.send(crate::link::Command::Stop),
             Cmd::Estop(engage) => self.estop(engage),
@@ -715,12 +778,15 @@ impl Studio {
         }
         let watched: HashSet<(String, String)> = self.watches.iter().map(Watch::key).collect();
         let live = self.live();
-        let marks = self
-            .compare
-            .as_ref()
-            .filter(|c| c.uid == self.doc.uid)
-            .map(Compare::marks)
-            .unwrap_or_default();
+        let marks = match &self.variant {
+            Some(v) => v.diff.marks(),
+            None => self
+                .compare
+                .as_ref()
+                .filter(|c| c.uid == self.doc.uid)
+                .map(Compare::marks)
+                .unwrap_or_default(),
+        };
         let mut viewer = Viewer {
             registry: &self.registry,
             composites: &self.doc.composites,
@@ -730,6 +796,7 @@ impl Studio {
             focused: self.focused,
             marked: &self.marked,
             marks: &marks,
+            read_only: self.variant.is_some(),
             transform: None,
             hovered: None,
             fit: std::mem::take(&mut self.fit_pending).then_some(area),

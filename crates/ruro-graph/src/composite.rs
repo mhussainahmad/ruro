@@ -387,6 +387,13 @@ fn flatten(
             continue;
         }
         let sub = subgraph(id, inst, base)?;
+        if !sub.graph.overlays.is_empty() {
+            return Err(err(
+                id,
+                "the subgraph has overlays, which only apply to the top-level graph; \
+                 move them there",
+            ));
+        }
         if let Some(file) = &sub.file {
             if files.contains(file) {
                 let chain: Vec<String> = files
@@ -894,6 +901,17 @@ wires: [cam.image -> outer.image]
 
         let missing = "name: m\nnodes:\n  c: { type: composite }\n";
         assert!(Graph::from_yaml(missing).unwrap().flatten().is_err());
+    }
+
+    #[test]
+    fn subgraph_overlays_are_refused() {
+        // They would be dropped: overlays apply to the top-level graph only.
+        let g = Graph::from_yaml(
+            "name: top\nnodes:\n  c:\n    type: composite\n    graph:\n      name: inner\n      nodes: { a: { type: t/src, rate: 10 } }\n      overlays: { x: { clock: sim } }\n",
+        )
+        .unwrap();
+        let e = g.flatten().unwrap_err().to_string();
+        assert!(e.contains("overlays"), "{e}");
     }
 
     #[test]

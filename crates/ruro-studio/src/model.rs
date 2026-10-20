@@ -473,7 +473,30 @@ impl Doc {
         if let Some(d) = self.composites.remove(&old) {
             self.composites.insert(new.to_owned(), d);
         }
+        // Overlays name nodes too: a patch left under the old name would
+        // add a second node, or fail.
+        for o in self.overlays.values_mut() {
+            o.nodes = std::mem::take(&mut o.nodes)
+                .into_iter()
+                .map(|(k, v)| (if k == old { new.to_owned() } else { k }, v))
+                .collect();
+            for w in o.wires.remove.iter_mut().chain(&mut o.wires.add) {
+                w.from = fix(&w.from);
+                w.to = fix(&w.to);
+            }
+        }
         self.touch_structure();
+    }
+
+    /// Drops what overlays say about a deleted node: a patch would fail,
+    /// or (with a type) add the node back.
+    pub fn forget_node(&mut self, name: &str) {
+        for o in self.overlays.values_mut() {
+            o.nodes.shift_remove(name);
+            let touches = |w: &ruro_graph::Wire| w.from.node == name || w.to.node == name;
+            o.wires.remove.retain(|w| !touches(w));
+            o.wires.add.retain(|w| !touches(w));
+        }
     }
 
     pub fn touch_structure(&mut self) {
@@ -685,6 +708,30 @@ overlays:
             .wires
             .sort_by(|a, b| (&a.from, &a.to).cmp(&(&b.from, &b.to)));
         assert_eq!(back, expected);
+    }
+
+    #[test]
+    fn overlays_follow_renamed_and_deleted_nodes() {
+        let g = Graph::from_yaml(ROUNDTRIP).unwrap();
+        let reg = registry();
+        let (mut doc, _) = Doc::from_graph(&g, &reg, None);
+        let id = |doc: &Doc, name: &str| {
+            doc.snarl
+                .node_ids()
+                .find(|(_, n)| n.id == name)
+                .map(|(id, _)| id)
+                .unwrap()
+        };
+        let a = id(&doc, "a");
+        doc.rename_node(a, "a1");
+        let real = doc.to_graph(&reg).with_overlays(&["real"]).unwrap();
+        assert_eq!(real.nodes["a1"].params["k"], 2);
+        assert!(!real.nodes.contains_key("a"), "not added back");
+        // Deleting a node drops what overlays say about it.
+        let b = id(&doc, "b");
+        doc.snarl.remove_node(b);
+        doc.forget_node("b");
+        doc.to_graph(&reg).with_overlays(&["real"]).unwrap();
     }
 
     #[test]

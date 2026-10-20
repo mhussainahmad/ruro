@@ -347,14 +347,21 @@ fn run(cli: Cli) -> Result<()> {
             if graph.is_none() && host_binary.is_none() {
                 bail!("nothing to deploy: give a graph, --host-binary, or both");
             }
+            // Mistakes in the graph or its overlays show before a host
+            // binary is uploaded, not after.
+            match &graph {
+                Some(path) => {
+                    load_graph(path, &overlay.overlays)?;
+                }
+                None if !overlay.overlays.is_empty() => bail!("--overlay needs a graph"),
+                None => {}
+            }
             let c = connect(to.as_deref())?;
             if let Some(bin) = host_binary {
                 println!("{}", fleet::upload_host(&c, &bin, host_name.as_deref())?);
             }
             if let Some(graph) = graph {
                 println!("{}", deploy(&c, &graph, &overlay.overlays)?);
-            } else if !overlay.overlays.is_empty() {
-                bail!("--overlay needs a graph");
             }
             Ok(())
         }

@@ -319,8 +319,10 @@ impl Studio {
     pub(crate) fn delete_nodes(&mut self, nodes: &[NodeId]) {
         let mut any = false;
         for &id in nodes {
-            if self.doc.snarl.get_node(id).is_some() {
+            if let Some(node) = self.doc.snarl.get_node(id) {
+                let name = node.id.clone();
                 self.doc.snarl.remove_node(id);
+                self.doc.forget_node(&name);
                 any = true;
             }
         }

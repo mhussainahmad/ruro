@@ -204,6 +204,21 @@ pub fn normalize(src: &GpuImage, dst: &mut Tensor, p: &Normalize, stream: &Strea
         .ok_or_else(|| anyhow::anyhow!("GPU image has no pixels"))?;
     let device = buf.device();
     ensure!(src.width > 0 && src.height > 0, "empty image");
+    ensure!(
+        src.encoding != Encoding::Mono16,
+        "normalize takes 8-bit images, not {:?}",
+        src.encoding
+    );
+    // The fields are public: the kernel must not read past the buffer.
+    ensure!(
+        src.step as u64 >= src.width as u64 * src.encoding.channels() as u64
+            && src.step as u64 * src.height as u64 <= buf.len() as u64,
+        "image {}x{} with step {} does not fit its buffer of {} bytes",
+        src.width,
+        src.height,
+        src.step,
+        buf.len()
+    );
     ensure!(p.std.iter().all(|s| *s != 0.0), "std must not be zero");
     let (dw, dh) = match (p.width, p.height) {
         (0, 0) => (src.width, src.height),

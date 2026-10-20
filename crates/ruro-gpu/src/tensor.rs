@@ -382,8 +382,11 @@ impl Message for Tensor {
                     return Err(short(i + 9));
                 }
                 let len = u64::from_le_bytes(buf[i + 1..i + 9].try_into().unwrap()) as usize;
-                if buf.len() != i + 9 + len {
-                    return Err(short(i + 9 + len));
+                let end = (i + 9)
+                    .checked_add(len)
+                    .ok_or_else(|| DecodeError::Invalid(format!("tensor of {len} bytes")))?;
+                if buf.len() != end {
+                    return Err(short(end));
                 }
                 if len != need {
                     return Err(invalid(anyhow::anyhow!(
@@ -484,6 +487,11 @@ mod tests {
         wrong[1] = 99;
         assert!(Tensor::decode(&wrong).is_err());
         assert!(Tensor::from_host(DType::F32, vec![3], vec![0; 8]).is_err());
+        // A host length that would overflow: the 8 bytes before the data.
+        let mut huge = bytes.clone();
+        let at = bytes.len() - 16 - 8;
+        huge[at..at + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+        assert!(Tensor::decode(&huge).is_err());
     }
 
     #[test]

@@ -255,6 +255,38 @@ fn normalize_cpu(img: &Image, p: &Normalize) -> Vec<f32> {
 }
 
 #[test]
+fn sixteen_bit_images_roundtrip() {
+    if !gpu() {
+        return;
+    }
+    let stream = Stream::new(0).unwrap();
+    let img = pattern(640, 480, Encoding::Mono16, 5);
+    let g = GpuImage::from_image(0, &img, &stream).unwrap();
+    assert_eq!(g.step, 640 * 2);
+    assert_eq!(g.to_image().unwrap(), img);
+    assert!(matches!(g.preview(), Preview::Image { .. }));
+    // Wire form too.
+    let back = GpuImage::decode(&g.to_bytes()).unwrap();
+    assert_eq!(back.to_image().unwrap(), img);
+}
+
+#[test]
+fn normalize_checks_the_image_against_its_buffer() {
+    if !gpu() {
+        return;
+    }
+    let stream = Stream::new(0).unwrap();
+    let mut t = Tensor::default();
+    let depth = GpuImage::from_image(0, &pattern(16, 16, Encoding::Mono16, 1), &stream).unwrap();
+    assert!(normalize(&depth, &mut t, &Normalize::default(), &stream).is_err());
+    let mut g = GpuImage::from_image(0, &pattern(16, 16, Encoding::Rgb8, 1), &stream).unwrap();
+    (g.width, g.height) = (8192, 8192);
+    assert!(normalize(&g, &mut t, &Normalize::default(), &stream).is_err());
+    // The context is still usable.
+    DeviceBuffer::alloc(0, 1024).unwrap();
+}
+
+#[test]
 fn normalize_matches_the_cpu() {
     if !gpu() {
         return;

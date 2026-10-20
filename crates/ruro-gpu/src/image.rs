@@ -74,7 +74,7 @@ impl GpuImage {
         height: u32,
         encoding: Encoding,
     ) -> Result<()> {
-        let step = width as usize * encoding.channels();
+        let step = width as usize * encoding.bytes_per_pixel();
         let len = step
             .checked_mul(height as usize)
             .filter(|&n| n <= u32::MAX as usize * 4)
@@ -166,7 +166,8 @@ impl GpuImage {
             .max(self.height)
             .div_ceil(PREVIEW_MAX_EDGE)
             .max(1) as usize;
-        let ch = self.encoding.channels();
+        // Bytes of one pixel (two for 16-bit depth).
+        let ch = self.encoding.bytes_per_pixel();
         let rows = (self.height as usize).div_ceil(n);
         let row_bytes = self.width as usize * ch;
         let mut sampled = vec![0u8; rows * row_bytes];
@@ -289,7 +290,8 @@ impl Message for GpuImage {
             }
             let b = decode_buffer(flag, &buf[HEADER..])?;
             let need = step as u64 * height as u64;
-            if (b.len() as u64) < need || (step as u64) < width as u64 * encoding.channels() as u64
+            if (b.len() as u64) < need
+                || (step as u64) < width as u64 * encoding.bytes_per_pixel() as u64
             {
                 return Err(DecodeError::Invalid(
                     "GPU image is larger than its buffer".into(),

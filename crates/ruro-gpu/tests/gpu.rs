@@ -623,8 +623,19 @@ fn gpu_producer_child() {
     for f in &frames {
         tx.send(0, 0, f.encoded_len(), &mut |b| f.encode_into(b))
             .unwrap();
+        // The parent's queue holds 16.
+        std::thread::sleep(Duration::from_millis(5));
     }
     wait_one(&rx, Duration::from_secs(20));
+    if std::env::var("RURO_GPU_TEST_FREE").is_ok() {
+        // Past the pool's 64 idle allocations, the oldest are freed; then
+        // one more frame tells the parent to look.
+        drop(frames);
+        let f = GpuImage::from_image(0, &pattern(64, 64, Encoding::Rgb8, 0), &stream).unwrap();
+        tx.send(0, 0, f.encoded_len(), &mut |b| f.encode_into(b))
+            .unwrap();
+        wait_one(&rx, Duration::from_secs(20));
+    }
 }
 
 /// Receives the frames of one producer child, which then exits.
@@ -652,6 +663,49 @@ fn receive_from_producer(topic: &str, n: u8) {
         assert!(g.to_image().unwrap() == pattern(64, 64, Encoding::Rgb8, i as u8));
     }
     drop(got);
+    tx.send(0, 0, 0, &mut |_| {}).unwrap();
+    assert!(child.0.wait().unwrap().success());
+}
+
+/// Run alone (`--ignored`): it counts this process's mappings, which the
+/// other cross-process tests change.
+#[test]
+#[ignore = "counts mappings: run with --ignored --exact"]
+fn mappings_of_freed_allocations_are_released() {
+    if !gpu() {
+        return;
+    }
+    let topic = format!("ruro-gpu-test/{}/freed", std::process::id());
+    let shm = ruro_transport::Shm::new("ruro-gpu-test-consumer").unwrap();
+    let rx = shm.subscriber(&format!("{topic}/frames"), 128).unwrap();
+    let tx = shm.publisher(&format!("{topic}/acks")).unwrap();
+    let mut child = Child(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "gpu_producer_child"])
+            .env(PRODUCER_ENV, &topic)
+            .env("RURO_GPU_TEST_FRAMES", "70")
+            .env("RURO_GPU_TEST_FREE", "1")
+            .spawn()
+            .unwrap(),
+    );
+    let receive = |n: usize| {
+        let mut got = Vec::new();
+        let start = Instant::now();
+        while got.len() < n {
+            assert!(start.elapsed() < Duration::from_secs(20), "frames missing");
+            let _ = rx.wait(Duration::from_millis(50));
+            rx.drain(|_, _, body| got.push(GpuImage::decode(body).unwrap()))
+                .unwrap();
+        }
+        got
+    };
+    drop(receive(70));
+    assert_eq!(ruro_gpu::ipc::mapped_allocations(), 70);
+    tx.send(0, 0, 0, &mut |_| {}).unwrap();
+    let last = receive(1);
+    // The six the producer freed are no longer mapped here.
+    assert_eq!(ruro_gpu::ipc::mapped_allocations(), 64);
+    drop(last);
     tx.send(0, 0, 0, &mut |_| {}).unwrap();
     assert!(child.0.wait().unwrap().success());
 }

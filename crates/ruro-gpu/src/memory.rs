@@ -210,6 +210,9 @@ impl Allocation {
 impl Drop for Allocation {
     fn drop(&mut self) {
         ipc::unregister_local(self.id);
+        if let Some(Ok(export)) = self.export.get() {
+            ipc::retire(export);
+        }
         if let Ok(c) = cuda() {
             // SAFETY: allocated by `mem_alloc`; callers drop an exported
             // allocation only after reclaiming it from every reader.

@@ -30,6 +30,11 @@
 //! crashes while holding a pin leaks that allocation until the producer exits.
 //! A receiver lets go of an exited producer's mappings when it next meets a
 //! new producer (a restarted group, typically).
+//!
+//! A producer that frees an exported allocation (its pool trims idle ones)
+//! marks the slot retired, a value nothing pins or reclaims. Receivers drop
+//! their mappings of retired slots as they import frames: the driver keeps
+//! an allocation's memory until every process mapping it closes it.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -243,6 +248,9 @@ fn own_table() -> Result<&'static LeaseTable> {
 
 const READERS: u64 = 0xffff_ffff;
 
+/// The word of a slot whose allocation was freed.
+const RETIRED: u64 = u64::MAX;
+
 fn generation(word: u64) -> u32 {
     (word >> 32) as u32
 }
@@ -267,7 +275,7 @@ fn reclaim_word(word: &AtomicU64) -> bool {
 fn pin_word(word: &AtomicU64, expected: u32) -> bool {
     let mut v = word.load(Ordering::Acquire);
     loop {
-        if generation(v) != expected || v & READERS == READERS - 1 {
+        if v == RETIRED || generation(v) != expected || v & READERS == READERS - 1 {
             return false;
         }
         match word.compare_exchange_weak(v, v + 1, Ordering::AcqRel, Ordering::Acquire) {
@@ -285,6 +293,15 @@ fn unpin_word(word: &AtomicU64) {
 pub(crate) struct Export {
     handle: IpcMemHandle,
     slot: u32,
+}
+
+/// Marks the slot of an exported allocation about to be freed, so that
+/// receivers let go of their mappings (see the module docs). The allocation
+/// was reclaimed: nobody reads it.
+pub(crate) fn retire(export: &Export) {
+    if let Ok(word) = own_table().and_then(|t| t.word(export.slot)) {
+        word.store(RETIRED, Ordering::Release);
+    }
 }
 
 /// Takes an exported allocation back from readers (see the module docs).
@@ -429,7 +446,7 @@ impl Descriptor {
             table: table.clone(),
             slot: self.slot,
         };
-        let mapping = match mapping(self) {
+        let mapping = match mapping(self, &table) {
             Ok(m) => m,
             Err(e) => {
                 drop(lease);
@@ -523,6 +540,17 @@ pub fn mapped_allocations() -> usize {
 struct Mapping {
     device: u32,
     ptr: CuDevicePtr,
+    /// The producer's lease table and the allocation's slot in it.
+    table: Arc<LeaseTable>,
+    slot: u32,
+}
+
+impl Mapping {
+    fn retired(&self) -> bool {
+        self.table
+            .word(self.slot)
+            .is_ok_and(|w| w.load(Ordering::Acquire) == RETIRED)
+    }
 }
 
 impl Drop for Mapping {
@@ -535,9 +563,12 @@ impl Drop for Mapping {
     }
 }
 
-fn mapping(desc: &Descriptor) -> Result<Arc<Mapping>> {
+fn mapping(desc: &Descriptor, table: &Arc<LeaseTable>) -> Result<Arc<Mapping>> {
     let key = (desc.nonce, desc.allocation);
     let mut r = remote();
+    // Allocations their producers freed, that no received buffer still uses.
+    r.mappings
+        .retain(|_, m| Arc::strong_count(m) > 1 || !m.retired());
     if let Some(m) = r.mappings.get(&key) {
         return Ok(m.clone());
     }
@@ -545,6 +576,8 @@ fn mapping(desc: &Descriptor) -> Result<Arc<Mapping>> {
     let m = Arc::new(Mapping {
         device: desc.device,
         ptr,
+        table: table.clone(),
+        slot: desc.slot,
     });
     r.mappings.insert(key, m.clone());
     Ok(m)

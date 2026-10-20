@@ -117,19 +117,29 @@ fn depth_mm(img: &Image) -> Vec<u16> {
         .collect()
 }
 
-/// Fraction of pixels with depth in the median depth image. Depth
-/// auto-exposure can hunt for a moment, leaving single frames nearly empty
-/// (seen on D455Fs), so no one frame stands for the stream.
-fn median_valid(depth: &[Image]) -> f64 {
-    let mut f: Vec<f64> = depth
+/// The index of the median depth image by fraction of pixels with depth,
+/// and that fraction. Auto-exposure can hunt for a moment, darkening the
+/// infrared imagers and leaving frames nearly empty (seen on all three
+/// cameras), so neither the last frame nor any other one stands for the
+/// stream.
+fn typical(depth: &[Image]) -> (usize, f64) {
+    let mut f: Vec<(usize, f64)> = depth
         .iter()
-        .map(|d| {
+        .enumerate()
+        .map(|(i, d)| {
             let mm = depth_mm(d);
-            mm.iter().filter(|&&v| v > 0).count() as f64 / mm.len() as f64
+            (
+                i,
+                mm.iter().filter(|&&v| v > 0).count() as f64 / mm.len() as f64,
+            )
         })
         .collect();
-    f.sort_by(f64::total_cmp);
+    f.sort_by(|a, b| a.1.total_cmp(&b.1));
     f[f.len() / 2]
+}
+
+fn median_valid(depth: &[Image]) -> f64 {
+    typical(depth).1
 }
 
 fn now_ns() -> u64 {
@@ -180,12 +190,12 @@ fn check_full(name: &str, r: &Received) {
 
     // Depth is aligned to colour, so it has the colour image's size and
     // camera model.
-    let d = r.depth.last().unwrap();
+    let (typ, fraction) = typical(&r.depth);
+    let d = &r.depth[typ];
     assert_eq!(
         (d.width, d.height, d.encoding),
         (640, 480, Encoding::Mono16)
     );
-    let fraction = median_valid(&r.depth);
     let mut sorted: Vec<u16> = depth_mm(d).into_iter().filter(|&v| v > 0).collect();
     sorted.sort_unstable();
     let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0);
@@ -260,7 +270,12 @@ fn check_full(name: &str, r: &Received) {
 
     // The point cloud: in metres, in front of the camera, within range, and
     // consistent with the depth image it came from.
-    let pc = r.points.last().unwrap();
+    assert_eq!(
+        r.points.len(),
+        r.depth.len(),
+        "one point cloud per depth image"
+    );
+    let pc = &r.points[typ];
     assert!(pc.points.len() > 1000, "{name}: {} points", pc.points.len());
     assert!(
         pc.points.iter().all(|p| p[2] > 0.0 && p[2] <= 4.0 + 1e-3),

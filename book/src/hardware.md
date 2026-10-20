@@ -177,8 +177,9 @@ recorded `encoded` output without errors. With `RURO_TEST_RTSP_SECONDS=75` sessi
 both transports outlived the server's 60 s session timeout on keep-alives.
 
 The RealSense tests have been run with librealsense 2.56.3 on a D455 and two D455Fs. On
-the D455Fs depth auto-exposure sometimes hunts for a moment, leaving a few frames with
-almost no valid depth, so the tests judge depth by the median frame.
+all three, auto-exposure sometimes hunts for a moment: the infrared images darken and a few
+frames have almost no valid depth. The tests therefore judge depth and point clouds by the
+median frame.
 
 ## Driver notes
 

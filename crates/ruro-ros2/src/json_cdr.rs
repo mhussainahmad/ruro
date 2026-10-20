@@ -154,7 +154,9 @@ fn encode_scalar(
                 Value::Bool(b) => *b,
                 other => int(other)? != 0,
             }),
-            Primitive::Byte | Primitive::Char | Primitive::Uint8 => w.u8(ranged(v)?),
+            Primitive::Byte | Primitive::Char | Primitive::IdlChar | Primitive::Uint8 => {
+                w.u8(ranged(v)?)
+            }
             Primitive::Int8 => w.i8(ranged(v)?),
             Primitive::Int16 => w.i16(ranged(v)?),
             Primitive::Uint16 => w.u16(ranged(v)?),
@@ -171,12 +173,23 @@ fn encode_scalar(
                 Value::Null => String::new(),
                 other => other.to_string(),
             };
+            // Bounds count bytes of a string, UTF-16 units of a wstring.
+            let wide = matches!(base, BaseType::WString { .. });
+            let len = if wide {
+                s.encode_utf16().count()
+            } else {
+                s.len()
+            };
             if let Some(max) = bound
-                && s.chars().count() > *max
+                && len > *max
             {
                 bail!("string longer than {max}");
             }
-            w.string(&s);
+            if wide {
+                w.wstring(&s);
+            } else {
+                w.string(&s);
+            }
         }
         BaseType::Named(t) => encode_message(interfaces, t, v, w)?,
     }
@@ -215,7 +228,9 @@ fn decode_scalar(interfaces: &Interfaces, base: &BaseType, r: &mut CdrReader) ->
     Ok(match base {
         BaseType::Primitive(p) => match p {
             Primitive::Bool => Value::Bool(r.bool()?),
-            Primitive::Byte | Primitive::Char | Primitive::Uint8 => r.u8()?.into(),
+            Primitive::Byte | Primitive::Char | Primitive::IdlChar | Primitive::Uint8 => {
+                r.u8()?.into()
+            }
             Primitive::Int8 => r.i8()?.into(),
             Primitive::Int16 => r.i16()?.into(),
             Primitive::Uint16 => r.u16()?.into(),
@@ -226,7 +241,8 @@ fn decode_scalar(interfaces: &Interfaces, base: &BaseType, r: &mut CdrReader) ->
             Primitive::Float32 => f64::from(r.f32()?).into(),
             Primitive::Float64 => r.f64()?.into(),
         },
-        BaseType::String { .. } | BaseType::WString { .. } => Value::String(r.string()?),
+        BaseType::String { .. } => Value::String(r.string()?),
+        BaseType::WString { .. } => Value::String(r.wstring()?),
         BaseType::Named(t) => decode_message(interfaces, t, r)?,
     })
 }
@@ -264,6 +280,17 @@ mod tests {
         // Empty requests carry the placeholder byte.
         let empty = TypeName::parse("std_srvs/srv/Trigger_Request").unwrap();
         assert_eq!(encode(&i, &empty, &Value::Null).unwrap(), [0, 1, 0, 0, 0]);
+    }
+
+    #[test]
+    fn wstrings_are_utf16_like_ros() {
+        let i = crate::bundled_interfaces();
+        let name = TypeName::parse("example_interfaces/msg/WString").unwrap();
+        let b = encode(&i, &name, &json!({"data": "hé"})).unwrap();
+        let mut w = CdrWriter::new();
+        w.wstring("hé");
+        assert_eq!(&b[4..], &w.finish()[4..]);
+        assert_eq!(decode(&i, &name, &b).unwrap(), json!({"data": "hé"}));
     }
 
     #[test]

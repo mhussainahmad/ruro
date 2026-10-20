@@ -29,6 +29,9 @@ pub enum Primitive {
     Byte,
     /// `char`: an alias of `uint8` in ROS 2.
     Char,
+    /// `char` in an `.idl` file: one byte, like `uint8`, but a type of its
+    /// own in type hashes. (`.msg` files give rosidl `uint8` for `char`.)
+    IdlChar,
     Int8,
     Uint8,
     Int16,
@@ -65,7 +68,7 @@ impl Primitive {
     /// Size in bytes on the wire (also the CDR alignment).
     pub fn size(self) -> usize {
         match self {
-            Self::Bool | Self::Byte | Self::Char | Self::Int8 | Self::Uint8 => 1,
+            Self::Bool | Self::Byte | Self::Char | Self::IdlChar | Self::Int8 | Self::Uint8 => 1,
             Self::Int16 | Self::Uint16 => 2,
             Self::Int32 | Self::Uint32 | Self::Float32 => 4,
             Self::Int64 | Self::Uint64 | Self::Float64 => 8,
@@ -77,7 +80,7 @@ impl Primitive {
         match self {
             Self::Bool => "bool",
             Self::Byte => "byte",
-            Self::Char => "char",
+            Self::Char | Self::IdlChar => "char",
             Self::Int8 => "int8",
             Self::Uint8 => "uint8",
             Self::Int16 => "int16",

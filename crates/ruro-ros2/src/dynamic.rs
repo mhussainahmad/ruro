@@ -63,6 +63,11 @@ impl Elem {
     }
 }
 
+/// Most elements reserved up front for a sequence of strings or messages,
+/// which take far more memory than their smallest encoding: a forged length
+/// must not reserve many times the message's size.
+const PREALLOC: usize = 1024;
+
 /// One field of a compiled message type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldDef {
@@ -136,8 +141,22 @@ pub fn compile(
     name: &TypeName,
     cache: &mut BTreeMap<TypeName, Arc<MessageType>>,
 ) -> Result<Arc<MessageType>> {
+    compile_in(interfaces, name, cache, &mut Vec::new())
+}
+
+/// [`compile`], with the types being compiled around this one: meeting one
+/// again means a type contains itself, directly or through others.
+fn compile_in(
+    interfaces: &Interfaces,
+    name: &TypeName,
+    cache: &mut BTreeMap<TypeName, Arc<MessageType>>,
+    outer: &mut Vec<TypeName>,
+) -> Result<Arc<MessageType>> {
     if let Some(t) = cache.get(name) {
         return Ok(t.clone());
+    }
+    if outer.contains(name) {
+        bail!("{name} contains itself");
     }
     let spec = interfaces
         .get(name)
@@ -145,17 +164,13 @@ pub fn compile(
     let hash = crate::hash::type_hash(interfaces, name)
         .map_err(|missing| anyhow!("{name} refers to unknown message type {missing}"))?;
     let mut fields = Vec::with_capacity(spec.fields.len());
+    outer.push(name.clone());
     for f in &spec.fields {
         let elem = match &f.ty.base {
             BaseType::Primitive(p) => Elem::Primitive(*p),
             BaseType::String { bound } => Elem::String(*bound),
             BaseType::WString { bound } => Elem::WString(*bound),
-            BaseType::Named(t) => {
-                if t == name {
-                    bail!("{name} contains itself");
-                }
-                Elem::Message(compile(interfaces, t, cache)?)
-            }
+            BaseType::Named(t) => Elem::Message(compile_in(interfaces, t, cache, outer)?),
         };
         let default = match &f.default {
             Some(text) if !matches!(elem, Elem::Message(_)) => Some(
@@ -171,6 +186,7 @@ pub fn compile(
             default,
         });
     }
+    outer.pop();
     let mut constants = Vec::with_capacity(spec.constants.len());
     for c in &spec.constants {
         let elem = if let Some(p) = Primitive::parse(&c.ty) {
@@ -309,7 +325,7 @@ impl ArrayValue {
             Elem::Primitive(p) => match p {
                 Primitive::Bool => ArrayValue::Bool(Vec::new()),
                 Primitive::Byte => ArrayValue::Byte(Vec::new()),
-                Primitive::Char => ArrayValue::Char(Vec::new()),
+                Primitive::Char | Primitive::IdlChar => ArrayValue::Char(Vec::new()),
                 Primitive::Int8 => ArrayValue::I8(Vec::new()),
                 Primitive::Uint8 => ArrayValue::U8(Vec::new()),
                 Primitive::Int16 => ArrayValue::I16(Vec::new()),
@@ -449,7 +465,7 @@ fn zero(elem: &Elem) -> Value {
         Elem::Primitive(p) => match p {
             Primitive::Bool => Value::Bool(false),
             Primitive::Byte => Value::Byte(0),
-            Primitive::Char => Value::Char(0),
+            Primitive::Char | Primitive::IdlChar => Value::Char(0),
             Primitive::Int8 => Value::I8(0),
             Primitive::Uint8 => Value::U8(0),
             Primitive::Int16 => Value::I16(0),
@@ -567,7 +583,7 @@ fn scalar_from_json(elem: &Elem, v: &serde_json::Value) -> Result<Value> {
                 _ => int(0, 1)? == 1,
             }),
             Primitive::Byte => Value::Byte(int(0, 255)? as u8),
-            Primitive::Char => Value::Char(match v.as_str() {
+            Primitive::Char | Primitive::IdlChar => Value::Char(match v.as_str() {
                 Some(s) if s.len() == 1 => s.as_bytes()[0],
                 _ => int(0, 255)? as u8,
             }),
@@ -730,7 +746,7 @@ fn parse_scalar_literal(elem: &Elem, s: &str) -> Result<Value> {
                 _ => bail!("bad bool `{s}`"),
             }),
             Primitive::Byte => Value::Byte(ranged(0, 255)? as u8),
-            Primitive::Char => Value::Char(ranged(0, 255)? as u8),
+            Primitive::Char | Primitive::IdlChar => Value::Char(ranged(0, 255)? as u8),
             Primitive::Int8 => Value::I8(ranged(i8::MIN.into(), i8::MAX.into())? as i8),
             Primitive::Uint8 => Value::U8(ranged(0, u8::MAX.into())? as u8),
             Primitive::Int16 => Value::I16(ranged(i16::MIN.into(), i16::MAX.into())? as i16),
@@ -915,7 +931,7 @@ impl<'a> Reader<'a> {
         Ok(match p {
             Primitive::Bool => Value::Bool(self.take(1)?[0] != 0),
             Primitive::Byte => Value::Byte(self.take(1)?[0]),
-            Primitive::Char => Value::Char(self.take(1)?[0]),
+            Primitive::Char | Primitive::IdlChar => Value::Char(self.take(1)?[0]),
             Primitive::Int8 => Value::I8(self.take(1)?[0] as i8),
             Primitive::Uint8 => Value::U8(self.take(1)?[0]),
             Primitive::Int16 => Value::I16(i16::from_le_bytes(self.fixed()?)),
@@ -946,7 +962,7 @@ fn read_array(r: &mut Reader<'_>, elem: &Elem, n: usize) -> Result<ArrayValue, C
         Elem::Primitive(p) => match p {
             Primitive::Bool => ArrayValue::Bool(r.take(n)?.iter().map(|b| *b != 0).collect()),
             Primitive::Byte => ArrayValue::Byte(r.take(n)?.to_vec()),
-            Primitive::Char => ArrayValue::Char(r.take(n)?.to_vec()),
+            Primitive::Char | Primitive::IdlChar => ArrayValue::Char(r.take(n)?.to_vec()),
             Primitive::Uint8 => ArrayValue::U8(r.take(n)?.to_vec()),
             Primitive::Int8 => ArrayValue::I8(r.take(n)?.iter().map(|b| *b as i8).collect()),
             Primitive::Int16 => ArrayValue::I16(read_vec!(r, n, i16)),
@@ -959,21 +975,21 @@ fn read_array(r: &mut Reader<'_>, elem: &Elem, n: usize) -> Result<ArrayValue, C
             Primitive::Float64 => ArrayValue::F64(read_vec!(r, n, f64)),
         },
         Elem::String(_) => {
-            let mut v = Vec::with_capacity(n.min(r.remaining()));
+            let mut v = Vec::with_capacity(n.min(PREALLOC));
             for _ in 0..n {
                 v.push(r.string()?);
             }
             ArrayValue::String(v)
         }
         Elem::WString(_) => {
-            let mut v = Vec::with_capacity(n.min(r.remaining()));
+            let mut v = Vec::with_capacity(n.min(PREALLOC));
             for _ in 0..n {
                 v.push(r.wstring()?);
             }
             ArrayValue::WString(v)
         }
         Elem::Message(m) => {
-            let mut v = Vec::with_capacity(n.min(r.remaining()));
+            let mut v = Vec::with_capacity(n.min(PREALLOC));
             for _ in 0..n {
                 v.push(read_message(r, m)?);
             }
@@ -1609,6 +1625,14 @@ pub fn concatenated_definition(interfaces: &Interfaces, root: &TypeName) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn types_that_contain_each_other_are_an_error() {
+        let root = TypeName::parse("p/msg/A").unwrap();
+        let text = format!("p/B b\n{SEPARATOR}\nMSG: p/B\np/A a\n");
+        let err = compile_schema(&root, "ros2msg", &text).unwrap_err();
+        assert!(format!("{err:#}").contains("contains itself"), "{err:#}");
+    }
 
     fn types(defs: &[(&str, &str)]) -> Interfaces {
         let mut i = crate::bundled_interfaces();

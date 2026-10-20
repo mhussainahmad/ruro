@@ -181,8 +181,9 @@ impl Parser {
         }
     }
 
-    /// Annotations before a declaration; returns the `@default` value.
-    fn annotations(&mut self) -> Result<Option<String>> {
+    /// Annotations before a declaration; returns the `@default` value, as
+    /// tokens: what it means depends on the member's type.
+    fn annotations(&mut self) -> Result<Option<Vec<Tok>>> {
         let mut default = None;
         while self.eat_punct('@') {
             let name = self.ident()?;
@@ -206,7 +207,7 @@ impl Parser {
                 && let [Tok::Ident(k), Tok::Punct('='), rest @ ..] = args.as_slice()
                 && k == "value"
             {
-                default = Some(literal(rest));
+                default = Some(rest.to_vec());
             }
         }
         Ok(default)
@@ -260,7 +261,7 @@ impl Parser {
                 self.constants.entry(t).or_default().push(Constant {
                     ty,
                     name,
-                    value: literal(&value),
+                    value: literal(&value, false),
                 });
                 Ok(())
             }
@@ -284,7 +285,7 @@ impl Parser {
         match word.as_str() {
             "boolean" => prim(Primitive::Bool),
             "octet" => prim(Primitive::Byte),
-            "char" => prim(Primitive::Char),
+            "char" => prim(Primitive::IdlChar),
             "int8" => prim(Primitive::Int8),
             "uint8" => prim(Primitive::Uint8),
             "int16" | "short" => prim(Primitive::Int16),
@@ -402,6 +403,7 @@ impl Parser {
                 fty.array = Array::Fixed(n);
             }
             self.punct(';')?;
+            let default = default.map(|d| literal(&d, fty.array != Array::None));
             fields.push(Field {
                 name: fname,
                 ty: fty,
@@ -437,8 +439,8 @@ fn type_in(path: &[String], name: &str) -> Result<TypeName> {
 }
 
 /// An IDL literal in `.msg` syntax: `TRUE` becomes `true`, a string stays
-/// quoted, a tuple `"(1, 2)"` becomes `[1, 2]`.
-fn literal(toks: &[Tok]) -> String {
+/// quoted, and for an array a tuple `"(1, 2)"` becomes `[1, 2]`.
+fn literal(toks: &[Tok], array: bool) -> String {
     let mut out = String::new();
     for t in toks {
         match t {
@@ -448,9 +450,11 @@ fn literal(toks: &[Tok]) -> String {
             Tok::Punct(c) => out.push(*c),
             Tok::Str(s) => {
                 let t = s.trim();
-                if t.starts_with('(') && t.ends_with(')') {
+                if array && t.starts_with('(') && t.ends_with(')') {
+                    // Python's repr, which rosidl writes: `(5,)` for one item.
+                    let items = t[1..t.len() - 1].trim_end();
                     out.push('[');
-                    out.push_str(&t[1..t.len() - 1]);
+                    out.push_str(items.strip_suffix(',').unwrap_or(items));
                     out.push(']');
                 } else {
                     out.push('"');
@@ -541,11 +545,30 @@ module sensor_msgs {
       boolean flag;
       @default (value="(1.0, 2.0)")
       double pair[2];
+      @default (value="(none)")
+      string note;
+      @default (value="(5,)")
+      sequence<int32> one;
       unsigned long long big;
     };
   };
 };
 "#;
+
+    #[test]
+    fn idl_char_is_a_type_of_its_own_in_hashes() {
+        let hash = |member: &str| {
+            let text = format!("module p {{ module msg {{ struct M {{ {member} c; }}; }}; }};");
+            let mut i = crate::idl::Interfaces::default();
+            for spec in parse_idl(&text).unwrap() {
+                i.add(spec);
+            }
+            crate::hash::type_hash(&i, &TypeName::msg("p", "M")).unwrap()
+        };
+        // rosidl: FIELD_TYPE_CHAR (13) for IDL `char`, UINT8 (3) for `uint8`.
+        assert_ne!(hash("char"), hash("uint8"));
+        assert_eq!(crate::hash::primitive_id(Primitive::IdlChar), 13);
+    }
 
     #[test]
     fn rosidl_generated_idl_parses() {
@@ -568,6 +591,9 @@ module sensor_msgs {
         assert_eq!(f("short_name").ty.base, BaseType::String { bound: Some(5) });
         assert_eq!(f("flag").default.as_deref(), Some("true"));
         assert_eq!(f("pair").default.as_deref(), Some("[1.0, 2.0]"));
+        // Only arrays take tuples; Python writes one-element ones as `(5,)`.
+        assert_eq!(f("note").default.as_deref(), Some("\"(none)\""));
+        assert_eq!(f("one").default.as_deref(), Some("[5]"));
         assert_eq!(f("big").ty.base, BaseType::Primitive(Primitive::Uint64));
     }
 

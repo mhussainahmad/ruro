@@ -27,6 +27,7 @@ mod id {
     pub const UINT64: u8 = 9;
     pub const FLOAT: u8 = 10;
     pub const DOUBLE: u8 = 11;
+    pub const CHAR: u8 = 13;
     pub const BOOLEAN: u8 = 15;
     pub const BYTE: u8 = 16;
     pub const STRING: u8 = 17;
@@ -39,12 +40,13 @@ mod id {
     pub const UNBOUNDED_SEQUENCE: u8 = 144;
 }
 
-fn primitive_id(p: Primitive) -> u8 {
+pub(crate) fn primitive_id(p: Primitive) -> u8 {
     match p {
         Primitive::Bool => id::BOOLEAN,
         Primitive::Byte => id::BYTE,
         // `char` is `uint8` in ROS 2 interface definitions.
         Primitive::Char | Primitive::Uint8 => id::UINT8,
+        Primitive::IdlChar => id::CHAR,
         Primitive::Int8 => id::INT8,
         Primitive::Int16 => id::INT16,
         Primitive::Uint16 => id::UINT16,

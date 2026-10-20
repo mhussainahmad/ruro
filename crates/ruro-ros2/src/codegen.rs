@@ -58,7 +58,7 @@ fn ident(name: &str) -> String {
 fn rust_primitive(p: Primitive) -> &'static str {
     match p {
         Primitive::Bool => "bool",
-        Primitive::Byte | Primitive::Char | Primitive::Uint8 => "u8",
+        Primitive::Byte | Primitive::Char | Primitive::IdlChar | Primitive::Uint8 => "u8",
         Primitive::Int8 => "i8",
         Primitive::Int16 => "i16",
         Primitive::Uint16 => "u16",

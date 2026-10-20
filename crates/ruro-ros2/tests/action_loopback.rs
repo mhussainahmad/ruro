@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use ruro_ros2::action::{ActionClient, ActionServer, GoalStatus};
 use ruro_ros2::discovery::{self, EntityKind};
+use ruro_ros2::msgs::action_msgs::srv::CancelGoal_Response;
 use ruro_ros2::msgs::example_interfaces::action::{
     Fibonacci, Fibonacci_Feedback, Fibonacci_Goal, Fibonacci_Result,
 };
@@ -215,4 +216,45 @@ fn server_entities_match_rcl_action() {
         );
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+/// Endings follow rcl_action's state machine, and cancelling all goals of
+/// an idle server is no error.
+#[test]
+fn goal_endings_follow_rcl_action() {
+    let (_router, ep) = router();
+    let node = endpoint(&ep, "fib_endings", "client");
+    let server = ActionServer::<Fibonacci>::new(&node, "/endings").unwrap();
+    let client = ActionClient::<Fibonacci>::new(&node, "endings").unwrap();
+    assert!(client.wait_for_server(Duration::from_secs(10)));
+    let none = client.cancel_all(Duration::from_secs(5)).unwrap();
+    assert_eq!(none.return_code, CancelGoal_Response::ERROR_NONE);
+    assert!(none.goals_canceling.is_empty());
+
+    let next = || {
+        let start = Instant::now();
+        loop {
+            if let Some(h) = server.next_goal() {
+                return h;
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "no goal");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    // Succeeding a goal never marked executing.
+    let goal = client
+        .send_goal(Fibonacci_Goal { order: 1 }, Duration::from_secs(5))
+        .unwrap();
+    next().succeed(Fibonacci_Result { sequence: vec![0] });
+    let (status, _) = goal.result(Duration::from_secs(5)).unwrap();
+    assert_eq!(status, GoalStatus::Succeeded);
+    // Canceled without a cancel request is an abort.
+    let goal = client
+        .send_goal(Fibonacci_Goal { order: 1 }, Duration::from_secs(5))
+        .unwrap();
+    let handle = next();
+    handle.execute();
+    handle.canceled(Fibonacci_Result::default());
+    let (status, _) = goal.result(Duration::from_secs(5)).unwrap();
+    assert_eq!(status, GoalStatus::Aborted);
 }

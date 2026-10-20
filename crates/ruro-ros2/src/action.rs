@@ -179,6 +179,9 @@ struct ServerShared<A: RosAction> {
     state: Mutex<ServerState<A>>,
     feedback: Publisher<A::FeedbackMessage>,
     status: Publisher<GoalStatusArray>,
+    /// Held while taking and publishing a status snapshot, so that one
+    /// taken earlier is never published after a later one.
+    publishing: Mutex<()>,
     accept: Box<AcceptFn<A>>,
     result_timeout: Duration,
 }
@@ -213,16 +216,20 @@ impl<A: RosAction> ServerShared<A> {
     }
 
     /// Runs `f` on the state, then publishes the status if `f` says it
-    /// changed. Publishing happens without the lock held: a subscriber in
-    /// this process may be called synchronously.
+    /// changed. Publishing happens without the state lock held: a
+    /// subscriber in this process may be called synchronously.
     fn update<R>(&self, f: impl FnOnce(&mut ServerState<A>) -> (R, bool)) -> R {
-        let (r, status) = {
+        let (r, changed) = {
             let mut state = self.state.lock().unwrap();
             let expired = self.expire(&mut state);
             let (r, changed) = f(&mut state);
-            (r, (changed || expired).then(|| Self::status_array(&state)))
+            (r, changed || expired)
         };
-        if let Some(s) = status {
+        if changed {
+            // The snapshot is taken after the publishing lock: whoever
+            // publishes last sends the newest state.
+            let _publishing = self.publishing.lock().unwrap();
+            let s = Self::status_array(&self.state.lock().unwrap());
             let _ = self.status.publish(&s);
         }
         r
@@ -304,7 +311,9 @@ impl<A: RosAction> ServerShared<A> {
                     Some(_) => CancelGoal_Response::ERROR_REJECTED,
                 }
             } else {
-                CancelGoal_Response::ERROR_REJECTED
+                // Cancel all, or all before a time: none to cancel is no
+                // error, as in rcl_action.
+                CancelGoal_Response::ERROR_NONE
             };
             let changed = !canceling.is_empty();
             (
@@ -341,15 +350,25 @@ impl<A: RosAction> ServerShared<A> {
             .map_or(GoalStatus::Unknown, |g| g.status)
     }
 
+    /// Ends a goal by a transition rcl_action allows: one only accepted is
+    /// marked executing first, and canceled only follows a cancel request
+    /// (otherwise the goal is aborted).
     fn finish(&self, id: &GoalId, status: GoalStatus, result: A::Result) {
-        let waiting = self.update(|state| match state.goals.get_mut(id) {
+        self.set_executing(id);
+        let (waiting, status) = self.update(|state| match state.goals.get_mut(id) {
             Some(g) if !g.status.is_terminal() => {
+                let status = match status {
+                    GoalStatus::Canceled if g.status != GoalStatus::Canceling => {
+                        GoalStatus::Aborted
+                    }
+                    s => s,
+                };
                 g.status = status;
                 g.result = Some(result.clone());
                 g.ended = Some(Instant::now());
-                (std::mem::take(&mut g.waiting), true)
+                ((std::mem::take(&mut g.waiting), status), true)
             }
-            _ => (Vec::new(), false),
+            _ => ((Vec::new(), status), false),
         });
         for req in waiting {
             let _ = req.respond(&A::get_result_response(status.as_i8(), result.clone()));
@@ -389,6 +408,7 @@ impl<A: RosAction> ActionServer<A> {
             }),
             feedback: endpoint.publisher(&feedback, Qos::default())?,
             status: endpoint.publisher(&status, status_qos())?,
+            publishing: Mutex::new(()),
             accept: Box::new(accept),
             result_timeout: RESULT_TIMEOUT,
         });

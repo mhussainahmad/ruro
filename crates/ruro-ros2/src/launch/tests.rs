@@ -251,3 +251,88 @@ fn namespaces_join_like_ros() {
     assert_eq!(param_value("hello world"), json!("hello world"));
     assert_eq!(param_value(""), json!(""));
 }
+
+/// Imports `xml` (the inside of `<launch>`) from a file of its own.
+fn import_xml(name: &str, xml: &str) -> Imported {
+    let dir = std::env::temp_dir().join(format!("ruro-launch-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(format!("{name}.launch.xml"));
+    std::fs::write(&file, format!("<launch>{xml}</launch>")).unwrap();
+    let mut o = opts();
+    o.ament_prefix_path = Some(String::new());
+    o.params_files.clear();
+    import(&file, &o).unwrap()
+}
+
+#[test]
+fn long_names_that_share_a_prefix_stay_apart() {
+    let long = "a".repeat(70);
+    let imported = import_xml(
+        "long",
+        &format!(
+            r#"<node pkg="p" exec="e" name="{long}_left"/><node pkg="p" exec="e" name="{long}_right"/>"#
+        ),
+    );
+    let g = &imported.graph;
+    assert_eq!(g.nodes.len(), 2, "{:?}", g.nodes.keys().collect::<Vec<_>>());
+    let names: Vec<String> = g.nodes.keys().map(|id| process(g, id).name).collect();
+    assert!(names.contains(&format!("{long}_left")), "{names:?}");
+    assert!(names.contains(&format!("{long}_right")), "{names:?}");
+}
+
+#[test]
+fn env_substitutions_see_set_env() {
+    let imported = import_xml(
+        "setenv",
+        r#"<set_env name="RURO_TEST_LAUNCH_VAR" value="x"/>
+           <node pkg="p" exec="e" name="n" args="$(env RURO_TEST_LAUNCH_VAR) $(optenv RURO_TEST_LAUNCH_VAR none)"/>"#,
+    );
+    assert_eq!(process(&imported.graph, "n").arguments, ["x", "x"]);
+}
+
+#[test]
+fn unresolved_substitutions_stay_one_word() {
+    let imported = import_xml(
+        "words",
+        r#"<arg name="greeting" default="hello world"/>
+           <node pkg="p" exec="e" name="n" args="--config $(find-pkg-share cfgpkg)/x.yaml '$(var greeting)'"/>"#,
+    );
+    assert_eq!(
+        process(&imported.graph, "n").arguments,
+        ["--config", "$(find-pkg-share cfgpkg)/x.yaml", "hello world"]
+    );
+}
+
+#[test]
+fn composable_nodes_obey_conditions_and_remap_like_nodes() {
+    let imported = import_xml(
+        "composable",
+        r#"<set_remap from="image" to="/global"/>
+           <node_container pkg="rclcpp_components" exec="component_container" name="c" namespace="/">
+             <composable_node pkg="p" plugin="p::Keep" name="keep">
+               <remap from="image" to="/local"/>
+             </composable_node>
+             <composable_node pkg="p" plugin="p::Skip" name="skipme" if="false"/>
+           </node_container>"#,
+    );
+    let g = &imported.graph;
+    assert!(
+        !g.nodes.keys().any(|k| k.contains("skipme")),
+        "{:?}",
+        g.nodes.keys().collect::<Vec<_>>()
+    );
+    let load = g
+        .nodes
+        .keys()
+        .find(|k| k.contains("keep"))
+        .expect("keep loaded");
+    let args = process(g, load).command.join(" ");
+    let (global, local) = (
+        args.find("image:=/global").expect(&args),
+        args.find("image:=/local").expect(&args),
+    );
+    assert!(
+        global < local,
+        "scope remaps come first, as for nodes: {args}"
+    );
+}

@@ -219,6 +219,57 @@ fn truthy(s: &str) -> Option<bool> {
 }
 
 /// Splits `$(cmd a b)` arguments, keeping quoted words together.
+/// At most 60 characters of `base`, leaving room for the number
+/// [`Graph::unique_id`] appends: cutting its result instead could make it
+/// equal an existing id.
+fn id_base(base: &str) -> String {
+    base.chars().take(60).collect()
+}
+
+/// An environment variable as the launch sees it: set by `<set_env>`, else
+/// inherited.
+fn launch_env(scope: &Scope, name: &str) -> Option<String> {
+    match scope.env.iter().rev().find(|(k, _)| k == name) {
+        Some((_, v)) => Some(v.clone()),
+        None => std::env::var(name).ok(),
+    }
+}
+
+/// Shell-like words of `s`, with each `$(...)` kept whole inside its word.
+fn split_keeping_substitutions(s: &str) -> Result<Vec<String>> {
+    // Whitespace and quotes inside substitutions are hidden from the
+    // splitter, then put back.
+    const HIDE: [(char, char); 3] = [(' ', '\u{1}'), ('\'', '\u{2}'), ('"', '\u{3}')];
+    let mut hidden = String::with_capacity(s.len());
+    let mut depth = 0usize;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'(') {
+            depth += 1;
+            hidden.push(c);
+            hidden.push(chars.next().unwrap());
+            continue;
+        }
+        match c {
+            '(' if depth > 0 => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ => {}
+        }
+        let c = if c.is_whitespace() { ' ' } else { c };
+        match HIDE.iter().find(|(from, _)| depth > 0 && *from == c) {
+            Some(&(_, to)) => hidden.push(to),
+            None => hidden.push(c),
+        }
+    }
+    Ok(split_words(&hidden)?
+        .into_iter()
+        .map(|w| {
+            HIDE.iter()
+                .fold(w, |w, &(from, to)| w.replace(to, &from.to_string()))
+        })
+        .collect())
+}
+
 fn subst_args(s: &str) -> Vec<String> {
     split_words(s).unwrap_or_else(|_| s.split_whitespace().map(str::to_owned).collect())
 }
@@ -226,6 +277,14 @@ fn subst_args(s: &str) -> Vec<String> {
 impl Importer {
     fn warn(&mut self, origin: &str, msg: impl std::fmt::Display) {
         self.warnings.push(format!("{origin}: {msg}"));
+    }
+
+    /// Splits a command line into words as written, then substitutes each.
+    fn words(&mut self, text: &str, scope: &Scope, origin: &str) -> Result<Vec<String>> {
+        Ok(split_keeping_substitutions(text)?
+            .iter()
+            .map(|w| self.subst(w, scope, origin))
+            .collect())
     }
 
     /// Resolves the substitutions in `text`. Unresolvable ones are kept as
@@ -280,9 +339,9 @@ impl Importer {
                     literal
                 }
             },
-            ("env", [name]) => match std::env::var(name) {
-                Ok(v) => v,
-                Err(_) => {
+            ("env", [name]) => match launch_env(scope, name) {
+                Some(v) => v,
+                None => {
                     self.warn(
                         origin,
                         format!("environment variable {name} is not set; kept `{literal}`"),
@@ -291,7 +350,7 @@ impl Importer {
                 }
             },
             ("env" | "optenv", [name, default @ ..]) => {
-                std::env::var(name).unwrap_or_else(|_| default.join(" "))
+                launch_env(scope, name).unwrap_or_else(|| default.join(" "))
             }
             ("optenv", []) => literal,
             ("find_pkg_share" | "find-pkg-share", [pkg]) => {
@@ -502,7 +561,7 @@ impl Importer {
                 let target = container.label();
                 self.add_process(e, container, scope)?;
                 for c in &e.children {
-                    if c.tag == "composable_node" {
+                    if c.tag == "composable_node" && self.enabled(c, scope) {
                         self.composable(c, &target, scope)?;
                     }
                 }
@@ -513,7 +572,7 @@ impl Importer {
                     .map(|t| self.subst(t, scope, &e.origin))
                     .unwrap_or_default();
                 for c in &e.children {
-                    if c.tag == "composable_node" {
+                    if c.tag == "composable_node" && self.enabled(c, scope) {
                         let target = crate::rmw::qualify(&target, &scope_ns(scope));
                         self.composable(c, &target, scope)?;
                     }
@@ -673,10 +732,14 @@ impl Importer {
             env: scope.env.clone(),
             ..Default::default()
         };
-        let args = get(self, "args");
-        p.arguments = split_words(&args).with_context(|| format!("{}: args", e.origin))?;
-        let ros_args = get(self, "ros_args");
-        p.ros_args = split_words(&ros_args).with_context(|| format!("{}: ros_args", e.origin))?;
+        // Split as written, then substitute: a substitution stays one word
+        // whatever its value, as in ros2 launch.
+        p.arguments = self
+            .words(e.attr("args").unwrap_or(""), scope, &e.origin)
+            .with_context(|| format!("{}: args", e.origin))?;
+        p.ros_args = self
+            .words(e.attr("ros_args").unwrap_or(""), scope, &e.origin)
+            .with_context(|| format!("{}: ros_args", e.origin))?;
         let prefix = get(self, "launch_prefix");
         p.prefix = split_words(&prefix).with_context(|| format!("{}: launch-prefix", e.origin))?;
         self.params("", e, scope, &mut p);
@@ -770,6 +833,10 @@ impl Importer {
                 "parameter files of a composable node are not passed to `ros2 component load`",
             );
         }
+        // The scope's remaps first, as for nodes: the first matching rule wins.
+        for (f, t) in &scope.remaps {
+            cmd.extend(["-r".into(), format!("{f}:={t}")]);
+        }
         for r in &c.children {
             match r.tag.as_str() {
                 "remap" => {
@@ -787,9 +854,6 @@ impl Importer {
                 }
                 _ => {}
             }
-        }
-        for (f, t) in &scope.remaps {
-            cmd.extend(["-r".into(), format!("{f}:={t}")]);
         }
         cmd.extend([container.to_owned(), pkg, plugin.clone()]);
         self.warn(
@@ -835,8 +899,7 @@ impl Importer {
         } else {
             base
         };
-        let mut id = self.graph.unique_id(&base);
-        id.truncate(64);
+        let id = self.graph.unique_id(&id_base(&base));
         let mut node = NodeInstance::new("ros2/node");
         node.group = Some(GROUP.into());
         node.params = p.to_params();
@@ -1098,8 +1161,7 @@ impl Importer {
             for (topic, ty) in list {
                 let dir = kind.trim_start_matches("ros2/");
                 let base = format!("{dir}_{}", topic.trim_start_matches('/').replace('/', "_"));
-                let mut id = self.graph.unique_id(&base);
-                id.truncate(64);
+                let id = self.graph.unique_id(&id_base(&base));
                 let mut node = NodeInstance::new(kind);
                 node.params.insert("topic".into(), topic.into());
                 node.params.insert("type".into(), ty.into());

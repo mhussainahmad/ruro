@@ -80,11 +80,27 @@ pub fn default_topic(ros_topic: &str) -> String {
             }
         })
         .collect();
-    node.truncate(64);
+    // Room for the number `distinct` may add.
+    node.truncate(60);
     if node.is_empty() {
         node.push_str("topic");
     }
     format!("{node}.out")
+}
+
+/// `name`, or with `_2`, `_3`... added to its node part if `taken`.
+fn distinct(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(name) {
+        return name.to_owned();
+    }
+    let (node, port) = match name.rsplit_once('.') {
+        Some((n, p)) => (n, format!(".{p}")),
+        None => (name, String::new()),
+    };
+    (2..)
+        .map(|i| format!("{node}_{i}{port}"))
+        .find(|n| !taken(n))
+        .expect("a free name")
 }
 
 /// The MCAP files of a bag: `src` itself, or every `.mcap` in a bag directory.
@@ -180,6 +196,9 @@ fn raw_metadata(channel: &mcap::Channel<'_>, hash: &str) -> BTreeMap<String, Str
 pub fn import(src: &Path, out: &Path, opts: &ImportOptions) -> Result<ImportReport> {
     let mut writer = McapWriter::create(out, opts.compress)?;
     let mut reports: BTreeMap<String, TopicReport> = BTreeMap::new();
+    // The ruro name of each ROS topic, distinct even where the default names
+    // of two topics are the same (`/a/b` and `/a_b`).
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
     for file in bag_files(src)? {
         let rec = Recording::open(&file)?;
         for m in rec.messages()? {
@@ -206,11 +225,19 @@ pub fn import(src: &Path, out: &Path, opts: &ImportOptions) -> Result<ImportRepo
                 });
                 continue;
             }
-            let name = opts
-                .map
-                .get(&topic)
-                .cloned()
-                .unwrap_or_else(|| default_topic(&topic));
+            let name = match names.get(&topic) {
+                Some(n) => n.clone(),
+                None => {
+                    let base = opts
+                        .map
+                        .get(&topic)
+                        .cloned()
+                        .unwrap_or_else(|| default_topic(&topic));
+                    let n = distinct(&base, |n| names.values().any(|v| v == n));
+                    names.insert(topic.clone(), n.clone());
+                    n
+                }
+            };
             let mut raw_name = name.clone();
             if !opts.raw {
                 match cdr::decode(&ros_type, &m.data) {
@@ -431,6 +458,61 @@ mod tests {
         std::fs::write(d.join("bag_0.db3"), b"").unwrap();
         let err = import(&d, &dir().join("never.mcap"), &ImportOptions::default()).unwrap_err();
         assert!(format!("{err:#}").contains("ros2 bag convert"));
+    }
+
+    #[test]
+    fn topics_with_the_same_default_name_stay_apart() {
+        let d = dir().join("clash");
+        std::fs::create_dir_all(&d).unwrap();
+        let bag = d.join("bag.mcap");
+        {
+            let file = std::io::BufWriter::new(std::fs::File::create(&bag).unwrap());
+            let mut w = mcap::WriteOptions::new()
+                .profile("ros2")
+                .create(file)
+                .unwrap();
+            let none = BTreeMap::new();
+            let schema = w
+                .add_schema("std_msgs/msg/String", "ros2msg", b"string data")
+                .unwrap();
+            for (i, topic) in ["/a/b", "/a_b"].into_iter().enumerate() {
+                let ch = w.add_channel(schema, topic, "cdr", &none).unwrap();
+                let header = mcap::records::MessageHeader {
+                    channel_id: ch,
+                    sequence: 0,
+                    log_time: 100 + i as u64,
+                    publish_time: 100 + i as u64,
+                };
+                w.write_to_known_channel(&header, &CdrWriter::new().string(topic).buf)
+                    .unwrap();
+            }
+            w.finish().unwrap();
+        }
+        let out = d.join("out.mcap");
+        let report = import(&bag, &out, &ImportOptions::default()).unwrap();
+        let names: Vec<_> = report
+            .topics
+            .iter()
+            .map(|t| t.raw_topic.clone().unwrap())
+            .collect();
+        assert_eq!(names, ["a_b.out", "a_b_2.out"]);
+        let rec = Recording::open(&out).unwrap();
+        let mut seen = BTreeMap::new();
+        for m in rec.messages().unwrap() {
+            let m = m.unwrap();
+            seen.insert(
+                m.topic().to_owned(),
+                m.channel.metadata["ros2_topic"].clone(),
+            );
+        }
+        assert_eq!(
+            seen,
+            [
+                ("a_b.out".to_owned(), "/a/b".to_owned()),
+                ("a_b_2.out".to_owned(), "/a_b".to_owned())
+            ]
+            .into()
+        );
     }
 
     #[test]

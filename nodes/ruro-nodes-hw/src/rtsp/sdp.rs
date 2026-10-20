@@ -59,9 +59,10 @@ pub struct Sdp {
 
 pub fn parse(text: &str) -> Result<Sdp, String> {
     let mut sdp = Sdp::default();
-    // Index into `video` of the current media section, or `None` at session
-    // level or inside a non-video section.
-    let mut section: Option<Option<usize>> = None;
+    // Indices into `video` of the current media section (one per payload
+    // type it lists), or `None` at session level or inside a non-video
+    // section.
+    let mut section: Option<Option<std::ops::Range<usize>>> = None;
     for line in text.lines() {
         let line = line.trim_end_matches('\r');
         let Some((kind, value)) = line.split_once('=') else {
@@ -71,61 +72,70 @@ pub fn parse(text: &str) -> Result<Sdp, String> {
             "m" => {
                 let mut parts = value.split_whitespace();
                 let media = parts.next().unwrap_or("");
-                let fmt = parts.nth(2).and_then(|p| p.parse::<u8>().ok());
-                section = Some(match (media, fmt) {
-                    ("video", Some(pt)) => {
-                        sdp.video.push(Media {
-                            payload_type: pt,
-                            // Static payload type 26 is JPEG without an rtpmap.
-                            codec: if pt == 26 { Codec::Jpeg } else { Codec::Other },
-                            encoding: if pt == 26 {
-                                "JPEG".into()
-                            } else {
-                                String::new()
-                            },
-                            clock_rate: 90000,
-                            control: None,
-                            fmtp: Vec::new(),
-                        });
-                        Some(sdp.video.len() - 1)
+                let formats: Vec<u8> = parts.skip(2).filter_map(|p| p.parse().ok()).collect();
+                section = Some(match media {
+                    "video" if !formats.is_empty() => {
+                        let start = sdp.video.len();
+                        for pt in formats {
+                            sdp.video.push(Media {
+                                payload_type: pt,
+                                // Static payload type 26 is JPEG without an rtpmap.
+                                codec: if pt == 26 { Codec::Jpeg } else { Codec::Other },
+                                encoding: if pt == 26 {
+                                    "JPEG".into()
+                                } else {
+                                    String::new()
+                                },
+                                clock_rate: 90000,
+                                control: None,
+                                fmtp: Vec::new(),
+                            });
+                        }
+                        Some(start..sdp.video.len())
                     }
                     _ => None,
                 });
             }
             "a" => {
                 let (attr, val) = value.split_once(':').unwrap_or((value, ""));
-                match section {
+                match &section {
                     None if attr == "control" => sdp.control = Some(val.trim().to_owned()),
-                    Some(Some(i)) => {
-                        let m = &mut sdp.video[i];
+                    Some(Some(range)) => {
+                        let media = &mut sdp.video[range.clone()];
+                        if attr == "control" {
+                            for m in media {
+                                m.control = Some(val.trim().to_owned());
+                            }
+                            continue;
+                        }
+                        let (pt, rest) = val.split_once(' ').unwrap_or((val, ""));
+                        let Some(m) = media
+                            .iter_mut()
+                            .find(|m| pt.trim().parse() == Ok(m.payload_type))
+                        else {
+                            continue;
+                        };
                         match attr {
-                            "control" => m.control = Some(val.trim().to_owned()),
                             "rtpmap" => {
-                                let (pt, enc) = val.split_once(' ').unwrap_or((val, ""));
-                                if pt.trim().parse() == Ok(m.payload_type) {
-                                    let mut e = enc.trim().split('/');
-                                    m.encoding = e.next().unwrap_or("").to_owned();
-                                    m.clock_rate =
-                                        e.next().and_then(|r| r.parse().ok()).unwrap_or(90000);
-                                    m.codec = match m.encoding.to_ascii_uppercase().as_str() {
-                                        "H264" => Codec::H264,
-                                        "JPEG" => Codec::Jpeg,
-                                        "H265" | "HEVC" => Codec::H265,
-                                        _ => Codec::Other,
-                                    };
-                                }
+                                let mut e = rest.trim().split('/');
+                                m.encoding = e.next().unwrap_or("").to_owned();
+                                m.clock_rate =
+                                    e.next().and_then(|r| r.parse().ok()).unwrap_or(90000);
+                                m.codec = match m.encoding.to_ascii_uppercase().as_str() {
+                                    "H264" => Codec::H264,
+                                    "JPEG" => Codec::Jpeg,
+                                    "H265" | "HEVC" => Codec::H265,
+                                    _ => Codec::Other,
+                                };
                             }
                             "fmtp" => {
-                                let (pt, params) = val.split_once(' ').unwrap_or((val, ""));
-                                if pt.trim().parse() == Ok(m.payload_type) {
-                                    m.fmtp = params
-                                        .split(';')
-                                        .filter_map(|p| {
-                                            let (k, v) = p.split_once('=')?;
-                                            Some((k.trim().to_owned(), v.trim().to_owned()))
-                                        })
-                                        .collect();
-                                }
+                                m.fmtp = rest
+                                    .split(';')
+                                    .filter_map(|p| {
+                                        let (k, v) = p.split_once('=')?;
+                                        Some((k.trim().to_owned(), v.trim().to_owned()))
+                                    })
+                                    .collect();
                             }
                             _ => {}
                         }
@@ -144,6 +154,14 @@ pub fn resolve_control(base: &str, control: Option<&str>) -> String {
     match control.map(str::trim) {
         None | Some("") | Some("*") => base.to_owned(),
         Some(c) if c.contains("://") => c.to_owned(),
+        // An absolute path keeps only the base's scheme and authority.
+        Some(c) if c.starts_with('/') => {
+            let authority_end = base
+                .find("://")
+                .and_then(|i| base[i + 3..].find('/').map(|j| i + 3 + j))
+                .unwrap_or(base.len());
+            format!("{}{c}", &base[..authority_end])
+        }
         Some(c) => {
             if base.ends_with('/') {
                 format!("{base}{c}")
@@ -216,5 +234,32 @@ mod tests {
         assert_eq!(resolve_control(base, Some("*")), base);
         assert_eq!(resolve_control(base, None), base);
         assert_eq!(resolve_control(base, Some("rtsp://x/y")), "rtsp://x/y");
+        // An absolute path replaces the base's.
+        assert_eq!(
+            resolve_control(base, Some("/trackID=1")),
+            "rtsp://cam:554/trackID=1"
+        );
+    }
+
+    #[test]
+    fn every_payload_type_of_a_section() {
+        let sdp = parse(
+            "m=video 0 RTP/AVP 98 96\na=control:trackID=0\n\
+             a=rtpmap:98 H265/90000\na=rtpmap:96 H264/90000\n\
+             a=fmtp:96 packetization-mode=1\n",
+        )
+        .unwrap();
+        let codecs: Vec<_> = sdp
+            .video
+            .iter()
+            .map(|m| (m.payload_type, m.codec))
+            .collect();
+        assert_eq!(codecs, [(98, Codec::H265), (96, Codec::H264)]);
+        assert!(
+            sdp.video
+                .iter()
+                .all(|m| m.control.as_deref() == Some("trackID=0"))
+        );
+        assert_eq!(sdp.video[1].fmtp("packetization-mode"), Some("1"));
     }
 }

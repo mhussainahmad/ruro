@@ -137,12 +137,17 @@ pub struct ScanAvoid {
 
 /// Nearest valid return in each region: ahead (within `sector` radians of
 /// straight ahead), to the left and to the right. Infinite where none.
+/// `-inf`, which REP 117 gives for an object too close to measure, is at 0.
 fn clearance(scan: &LaserScan, sector: f64) -> (f64, f64, f64) {
     let (mut ahead, mut left, mut right) = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
     for (i, &r) in scan.ranges.iter().enumerate() {
-        if !(r.is_finite() && r >= scan.range_min && r <= scan.range_max) {
+        let r = if r == f32::NEG_INFINITY {
+            0.0
+        } else if r.is_finite() && r >= scan.range_min && r <= scan.range_max {
+            r
+        } else {
             continue;
-        }
+        };
         let (r, a) = (
             r as f64,
             (scan.angle_min + i as f32 * scan.angle_increment) as f64,

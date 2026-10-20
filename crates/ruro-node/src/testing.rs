@@ -22,9 +22,9 @@ use serde_json::Value;
 
 use crate::{Builder, BuiltNode, Ctx, GraphClock, Node, NodeSpec, RawSink, Result};
 
-/// Encoded messages captured from one output.
+/// Encoded messages captured from one output, with their stamps.
 #[derive(Default)]
-struct Captured(Mutex<Vec<Vec<u8>>>);
+struct Captured(Mutex<Vec<(u64, Vec<u8>)>>);
 
 struct Capture(Arc<Captured>);
 
@@ -32,13 +32,13 @@ impl RawSink for Capture {
     fn send(
         &self,
         _seq: u64,
-        _stamp_ns: u64,
+        stamp_ns: u64,
         len: usize,
         write: &mut dyn FnMut(&mut [u8]),
     ) -> Result {
         let mut buf = vec![0; len];
         write(&mut buf);
-        self.0.0.lock().push(buf);
+        self.0.0.lock().push((stamp_ns, buf));
         Ok(())
     }
 }
@@ -182,6 +182,16 @@ impl Harness {
 
     /// Removes and decodes everything an output has sent so far.
     pub fn take<T: Message>(&mut self, output: &str) -> Result<Vec<T>> {
+        Ok(self
+            .take_stamped(output)?
+            .into_iter()
+            .map(|(_, m)| m)
+            .collect())
+    }
+
+    /// Like [`take`](Self::take), with each message's stamp (the sample's,
+    /// which a ROS bridge puts in headerless messages).
+    pub fn take_stamped<T: Message>(&mut self, output: &str) -> Result<Vec<(u64, T)>> {
         let c = self
             .captured
             .get(output)
@@ -198,7 +208,7 @@ impl Harness {
         }
         let raw = std::mem::take(&mut *c.0.lock());
         raw.iter()
-            .map(|b| T::decode(b).map_err(Into::into))
+            .map(|(stamp, b)| Ok((*stamp, T::decode(b)?)))
             .collect()
     }
 
@@ -208,7 +218,10 @@ impl Harness {
             .captured
             .get(output)
             .ok_or_else(|| anyhow!("no output `{output}`"))?;
-        Ok(std::mem::take(&mut *c.0.lock()))
+        Ok(std::mem::take(&mut *c.0.lock())
+            .into_iter()
+            .map(|(_, b)| b)
+            .collect())
     }
 
     /// The built node and its ports.

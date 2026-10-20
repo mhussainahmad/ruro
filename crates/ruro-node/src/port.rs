@@ -324,12 +324,23 @@ impl<T: Message> Output<T> {
     /// In-process inputs share one allocation; out-of-process inputs receive
     /// the encoding written once into shared memory.
     pub fn send(&self, msg: T) -> Result {
+        self.send_stamped(msg, None)
+    }
+
+    /// Like [`send`](Self::send), stamped `stamp_ns` instead of now: for a
+    /// message that goes with another, stamped one (an image and its
+    /// `CameraInfo`, which ROS pairs by stamp).
+    pub fn send_at(&self, msg: T, stamp_ns: u64) -> Result {
+        self.send_stamped(msg, Some(stamp_ns))
+    }
+
+    fn send_stamped(&self, msg: T, stamp_ns: Option<u64>) -> Result {
         let sample = Arc::new(Sample {
             seq: 0,
             stamp_ns: 0,
             msg,
         });
-        self.publish(sample, false)
+        self.publish(sample, false, stamp_ns)
     }
 
     /// Lends a message from this output's pool to fill in place, then
@@ -356,11 +367,11 @@ impl<T: Message> Output<T> {
 
     /// Stamps a sample nobody else holds yet and hands it to every
     /// destination. Pooled samples are kept for reuse by [`Output::loan`].
-    fn publish(&self, mut sample: Arc<Sample<T>>, pooled: bool) -> Result {
+    fn publish(&self, mut sample: Arc<Sample<T>>, pooled: bool, stamp_ns: Option<u64>) -> Result {
         let seq = self.port.seq.fetch_add(1, Ordering::Relaxed) + 1;
         let s = Arc::get_mut(&mut sample).expect("an unsent sample is not shared");
         s.seq = seq;
-        s.stamp_ns = now_ns();
+        s.stamp_ns = stamp_ns.unwrap_or_else(now_ns);
         if pooled {
             self.port.pool.keep(&sample);
         }
@@ -383,7 +394,7 @@ pub struct Loan<'a, T: Message> {
 impl<T: Message> Loan<'_, T> {
     /// Publishes the message to every connected input.
     pub fn send(self) -> Result {
-        self.out.publish(self.sample, true)
+        self.out.publish(self.sample, true, None)
     }
 }
 

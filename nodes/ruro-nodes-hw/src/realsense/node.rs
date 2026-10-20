@@ -110,17 +110,21 @@ impl Node for RealSense {
         // match the node's.
         for set in cam.poll().map_err(|e| anyhow!("RealSense: {e}"))? {
             let m = conv.convert(&set, ctx.now_ns())?;
+            // Images carry their CameraInfo's stamp, by which ROS pairs them.
             if let Some((img, info)) = m.color {
+                let stamp = info.header.stamp_ns;
                 self.color_info.send(info)?;
-                self.color.send(img)?;
+                self.color.send_at(img, stamp)?;
             }
             if let Some((img, info)) = m.depth {
+                let stamp = info.header.stamp_ns;
                 self.depth_info.send(info)?;
-                self.depth.send(img)?;
+                self.depth.send_at(img, stamp)?;
             }
             if let Some((img, info)) = m.infrared {
+                let stamp = info.header.stamp_ns;
                 self.infrared_info.send(info)?;
-                self.infrared.send(img)?;
+                self.infrared.send_at(img, stamp)?;
             }
             if let Some(pc) = m.points {
                 self.points.send(pc)?;

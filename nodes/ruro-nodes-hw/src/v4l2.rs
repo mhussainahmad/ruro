@@ -480,9 +480,11 @@ impl Node for V4l2Camera {
     fn step(&mut self, ctx: &mut Ctx) -> Result {
         let cap = self.capture.as_mut().context("camera not open")?;
         if let Some(img) = cap.next_frame(100)? {
+            // One stamp for both: ROS pairs an image with its camera_info by it.
+            let stamp = ctx.now_ns();
             self.calib
-                .publish(&self.camera_info, img.width, img.height, ctx.now_ns())?;
-            self.image.send(img)?;
+                .publish(&self.camera_info, img.width, img.height, stamp)?;
+            self.image.send_at(img, stamp)?;
         }
         Ok(())
     }

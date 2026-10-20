@@ -50,6 +50,9 @@ struct Config {
     session_timeout: u64,
     /// Close the connection after this many frames.
     frames_per_connection: Option<usize>,
+    /// With Digest, expire the nonce after this many authorized requests:
+    /// later ones need the new nonce, given with `stale=true`.
+    nonce_requests: Option<usize>,
 }
 
 impl Config {
@@ -60,6 +63,7 @@ impl Config {
             mtu: 60,
             session_timeout: 60,
             frames_per_connection: None,
+            nonce_requests: None,
         }
     }
 }
@@ -267,8 +271,11 @@ fn serve(stream: TcpStream, cfg: Config, log: Arc<Mutex<Vec<String>>>) {
     let writer = Arc::new(Mutex::new(stream.try_clone().unwrap()));
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut sink = None;
+    let mut authorized_requests = 0;
     while let Some(req) = read_request(&mut reader) {
         log.lock().push(format!("{} {}", req.method, req.url));
+        let renewed = cfg.nonce_requests.is_some_and(|n| authorized_requests >= n);
+        let nonce = if renewed { "b7e2c4" } else { "8f3a91" };
         let cseq = req.header("CSeq").to_owned();
         let respond = |status: &str, headers: &str, body: &str| {
             let r = format!(
@@ -277,15 +284,26 @@ fn serve(stream: TcpStream, cfg: Config, log: Arc<Mutex<Vec<String>>>) {
             );
             let _ = writer.lock().write_all(r.as_bytes());
         };
-        if req.method != "OPTIONS" && !authorized(cfg.auth, &req) {
+        let fresh = cfg.auth != Auth::Digest
+            || req
+                .header("Authorization")
+                .contains(&format!("nonce=\"{nonce}\""));
+        if req.method != "OPTIONS" && !(authorized(cfg.auth, &req) && fresh) {
             let challenge = match cfg.auth {
-                Auth::Basic => "WWW-Authenticate: Basic realm=\"ruro\"\r\n",
-                _ => {
-                    "WWW-Authenticate: Digest realm=\"ruro\", nonce=\"8f3a91\", qop=\"auth\", opaque=\"x1\"\r\n"
-                }
+                Auth::Basic => "WWW-Authenticate: Basic realm=\"ruro\"\r\n".to_owned(),
+                _ => format!(
+                    "WWW-Authenticate: Digest realm=\"ruro\", nonce=\"{nonce}\", qop=\"auth\", opaque=\"x1\"{}\r\n",
+                    if renewed { ", stale=true" } else { "" }
+                ),
             };
-            respond("401 Unauthorized", challenge, "");
+            respond("401 Unauthorized", &challenge, "");
             continue;
+        }
+        if req.method != "OPTIONS" {
+            authorized_requests += 1;
+            if renewed {
+                log.lock().push(format!("RENEWED {}", req.method));
+            }
         }
         let session = format!("Session: 5EC7ED;timeout={}\r\n", cfg.session_timeout);
         match req.method.as_str() {
@@ -456,6 +474,24 @@ fn calibration_is_published_with_each_image() {
     );
     assert_eq!((c.k[0], c.d[0]), (30.0, 0.1));
     assert!(c.header.stamp_ns > 0);
+    // ROS pairs an image with its camera_info by stamp: they are the same.
+    let start = Instant::now();
+    let mut pairs = Vec::new();
+    while pairs.len() < 3 {
+        assert!(start.elapsed() < Duration::from_secs(10), "no more images");
+        h.step().unwrap();
+        let images = h.take_stamped::<ruro::msg::Image>("image").unwrap();
+        let infos = h.take::<ruro::msg::CameraInfo>("camera_info").unwrap();
+        assert_eq!(images.len(), infos.len());
+        pairs.extend(
+            images
+                .iter()
+                .zip(&infos)
+                .map(|((s, _), i)| (*s, i.header.stamp_ns)),
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(pairs.iter().all(|(a, b)| a == b), "{pairs:?}");
 }
 
 #[test]
@@ -495,6 +531,27 @@ fn keepalives_are_sent_within_the_session_timeout() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(server.requests("TEARDOWN"), 1);
+}
+
+/// A camera that expires its Digest nonce mid-session: the keep-alive
+/// answered 401 (stale) is sent again with the new nonce.
+#[test]
+fn keepalives_follow_an_expired_nonce() {
+    let mut cfg = Config::new(Stream::Jpeg(vec![test_jpeg(0)]));
+    cfg.auth = Auth::Digest;
+    cfg.session_timeout = 2; // keep-alive every second
+    cfg.nonce_requests = Some(4); // DESCRIBE, SETUP, PLAY and one keep-alive
+    let server = Server::start(cfg);
+    let mut h = camera(server.url(true), "tcp", false);
+    let start = Instant::now();
+    run_until(&mut h, Duration::from_secs(10), |_, _| {
+        start.elapsed() > Duration::from_millis(3500)
+    });
+    assert!(
+        server.requests("RENEWED GET_PARAMETER") >= 1,
+        "{:?}",
+        server.log.lock()
+    );
 }
 
 /// Opt-in check against a real server, e.g. mediamtx fed by ffmpeg:

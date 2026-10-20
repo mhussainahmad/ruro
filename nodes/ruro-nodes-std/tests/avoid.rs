@@ -86,6 +86,9 @@ fn invalid_returns_are_ignored_and_stops_send_zero() {
     s.ranges[178] = f32::NAN;
     s.ranges[182] = f32::INFINITY;
     assert_eq!(command(&mut h, s).linear.x, 0.5);
+    // -inf is REP 117's "too close to measure": an obstacle.
+    let s = scan(8.0, 0.0, 5.0, f32::NEG_INFINITY);
+    assert_eq!(command(&mut h, s).linear.x, 0.0);
     h.set_estop(true);
     assert_eq!(command(&mut h, scan(8.0, 0.0, 0.0, 8.0)), Twist::default());
 }

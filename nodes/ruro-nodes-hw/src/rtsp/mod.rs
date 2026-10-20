@@ -295,9 +295,11 @@ impl Node for RtspCamera {
             }
         }
         if let Some(img) = newest {
+            // One stamp for both: ROS pairs an image with its camera_info by it.
+            let stamp = ctx.now_ns();
             self.calib
-                .publish(&self.camera_info, img.width, img.height, ctx.now_ns())?;
-            self.image.send(img)?;
+                .publish(&self.camera_info, img.width, img.height, stamp)?;
+            self.image.send_at(img, stamp)?;
         }
         Ok(())
     }

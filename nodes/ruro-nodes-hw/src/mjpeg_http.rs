@@ -273,14 +273,19 @@ impl Node for MjpegHttpCamera {
             return Ok(());
         };
         let (width, height, data) = decode_jpeg(&jpeg).map_err(|e| anyhow!(e))?;
+        // One stamp for both: ROS pairs an image with its camera_info by it.
+        let stamp = ctx.now_ns();
         self.calib
-            .publish(&self.camera_info, width, height, ctx.now_ns())?;
-        self.image.send(Image {
-            width,
-            height,
-            encoding: Encoding::Rgb8,
-            data,
-        })
+            .publish(&self.camera_info, width, height, stamp)?;
+        self.image.send_at(
+            Image {
+                width,
+                height,
+                encoding: Encoding::Rgb8,
+                data,
+            },
+            stamp,
+        )
     }
 
     fn stop(&mut self, _ctx: &mut Ctx) {

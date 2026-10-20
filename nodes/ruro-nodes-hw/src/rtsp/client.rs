@@ -56,7 +56,8 @@ pub fn parse_url(url: &str) -> Result<RtspUrl> {
         None => (None, authority),
     };
     let (host, port) = match hostport.rsplit_once(':') {
-        Some((h, p)) if !h.ends_with(']') || p.is_empty() => (
+        // `[::1]:8554` has a port; in `[::1]` the last colon is the address's.
+        Some((h, p)) if !h.contains('[') || h.ends_with(']') => (
             h,
             p.parse().map_err(|_| anyhow!("bad port in `{hostport}`"))?,
         ),
@@ -240,15 +241,17 @@ pub fn transport_pair(h: &str, key: &str) -> Option<(u16, u16)> {
     })
 }
 
-/// Binds an even/odd pair of UDP ports for RTP and RTCP.
-fn bind_udp_pair() -> io::Result<(UdpSocket, UdpSocket)> {
+/// Binds an even/odd pair of UDP ports for RTP and RTCP, of the camera's
+/// address family.
+fn bind_udp_pair(ipv6: bool) -> io::Result<(UdpSocket, UdpSocket)> {
+    let any = if ipv6 { "::" } else { "0.0.0.0" };
     for _ in 0..50 {
-        let rtp = UdpSocket::bind("0.0.0.0:0")?;
+        let rtp = UdpSocket::bind((any, 0))?;
         let port = rtp.local_addr()?.port();
         if port % 2 != 0 || port == u16::MAX {
             continue;
         }
-        if let Ok(rtcp) = UdpSocket::bind(("0.0.0.0", port + 1)) {
+        if let Ok(rtcp) = UdpSocket::bind((any, port + 1)) {
             return Ok((rtp, rtcp));
         }
     }
@@ -359,7 +362,7 @@ impl Session {
         let (header, udp) = match transport {
             Transport::Tcp => ("RTP/AVP/TCP;unicast;interleaved=0-1".to_owned(), None),
             Transport::Udp => {
-                let (rtp, rtcp) = bind_udp_pair()?;
+                let (rtp, rtcp) = bind_udp_pair(s.writer.peer_addr()?.is_ipv6())?;
                 let p = rtp.local_addr()?.port();
                 (
                     format!("RTP/AVP;unicast;client_port={}-{}", p, p + 1),
@@ -499,6 +502,18 @@ impl Session {
                     let ch = *ch;
                     match read_incoming(&mut self.reader)? {
                         Incoming::Data { channel, data } if channel == ch => return Ok(Some(data)),
+                        Incoming::Response(r)
+                            if r.status == 401
+                                && self.auth.as_mut().is_some_and(|a| {
+                                    a.challenged(&r.headers_named("WWW-Authenticate"))
+                                }) =>
+                        {
+                            // A new challenge (an expired nonce, typically):
+                            // send the keep-alive again with it now.
+                            self.last_keepalive = Instant::now()
+                                .checked_sub(self.keepalive_every)
+                                .unwrap_or(self.last_keepalive);
+                        }
                         Incoming::Response(r) if r.status != 200 => {
                             warn!("RTSP keep-alive answered {} {}", r.status, r.reason)
                         }
@@ -572,6 +587,21 @@ mod tests {
         assert!(parse_url("http://cam/").is_err());
         assert!(parse_url("rtsp:///x").is_err());
         assert!(parse_url("rtsp://cam:x/").is_err());
+        for (url, port) in [
+            ("rtsp://[::1]:8554/x", 8554),
+            ("rtsp://[::1]/x", 554),
+            ("rtsp://user@[fe80::1]/x", 554),
+        ] {
+            let u = parse_url(url).unwrap();
+            assert_eq!(
+                (u.host.as_str(), u.port),
+                (
+                    &url[url.find('[').unwrap() + 1..url.find(']').unwrap()],
+                    port
+                ),
+                "{url}"
+            );
+        }
     }
 
     #[test]

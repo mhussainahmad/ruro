@@ -13,6 +13,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ruro::msg::{Ros2Any, Ros2AnyPreviewer, Scalar, Text};
@@ -177,6 +178,8 @@ pub struct AnySubState {
     want: Want,
     /// The hash subscribed with.
     hash: String,
+    /// A message arrived since the last look at the publishers.
+    received: Arc<AtomicBool>,
     endpoint: Arc<Endpoint>,
     _subscriber: Subscriber,
 }
@@ -243,8 +246,9 @@ impl AnySub {
             && s.want == want
         {
             // Publishers that appeared since may announce another hash, and
-            // so use another key: follow them.
-            if !want.hash.is_empty() {
+            // so use another key: follow them. Messages arriving means the
+            // key is right.
+            if !want.hash.is_empty() || s.received.swap(false, Ordering::Relaxed) {
                 return Ok(());
             }
             match announced_hash(&s.endpoint, &want.settings.topic, &want.ty) {
@@ -258,12 +262,15 @@ impl AnySub {
         let out = self.out.clone();
         let type_name = want.ty.to_string();
         let type_hash = hash.clone();
+        let received = Arc::new(AtomicBool::new(false));
+        let seen = received.clone();
         let subscriber = endpoint.raw_subscriber(
             &want.settings.topic,
             &want.ty.dds_name(),
             &hash,
             want.settings.qos,
             move |bytes, _| {
+                seen.store(true, Ordering::Relaxed);
                 let _ = out.send(Ros2Any {
                     type_name: type_name.clone(),
                     type_hash: type_hash.clone(),
@@ -278,6 +285,7 @@ impl AnySub {
         self.state = Some(AnySubState {
             want,
             hash,
+            received,
             endpoint,
             _subscriber: subscriber,
         });

@@ -102,7 +102,9 @@ Python launch files can only be evaluated by ROS 2. With a sourced workspace,
 `ruro ros2 import --eval robot.launch.py` runs `ros2 launch` with a launch prefix that
 records each process's command line instead of starting it, and converts those. Respawn
 settings are not visible that way, so every node gets `respawn: never`; adjust them in
-the graph.
+the graph. The launch is stopped once no new process has started for 3 s, so processes a
+`TimerAction` starts later, or an event handler starts when another process exits, are
+missing; the import warns about it.
 
 ### 2. Run it
 
@@ -196,7 +198,8 @@ add `--raw` to keep every topic byte for byte, even convertible ones.
 
 ## What is not converted
 
-- Python launch files without a ROS 2 environment (and their respawn settings with one).
+- Python launch files without a ROS 2 environment (and their respawn settings with one),
+  and processes their timers and event handlers start late.
 - `$(eval)`, `$(command)` and other substitutions beyond those listed in
   [the ROS 2 bridge page](ros2.md#command-line); `<timer>` delays; `cwd` of nodes.
 - Parameter files of composable nodes (`ros2 component load` takes `-p` only).

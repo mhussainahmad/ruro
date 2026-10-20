@@ -343,7 +343,7 @@ running `ros2 component load`, which retries until the container answers). `--pa
 files are given to every node. Anything else is listed as a warning, in a comment at the
 top of the output and on the terminal. Python launch files need `--eval` and a sourced
 ROS 2 workspace: `ros2 launch` evaluates them with a launch prefix that records each
-process instead of starting it.
+process instead of starting it, until none has started for 3 s.
 
 ```sh
 ruro ros2 gen path/to/my_msgs [-o src/ros.rs] [--root crate::ros]

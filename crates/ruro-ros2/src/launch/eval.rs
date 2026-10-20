@@ -233,6 +233,25 @@ pub fn eval_python(path: &Path, opts: &ImportOptions) -> Result<Imported> {
          this machine's environment and these arguments",
         path.display()
     )];
+    if exited.is_none() {
+        // Delays and event handlers can start processes at any time; the
+        // launch was stopped once none had started for 3 s.
+        let source = std::fs::read_to_string(path).unwrap_or_default();
+        let late: Vec<&str> = ["TimerAction", "RegisterEventHandler"]
+            .into_iter()
+            .filter(|a| source.contains(a))
+            .collect();
+        warnings.push(format!(
+            "{}: stopped after 3 s without a new process; processes started later{} are \
+             not in the graph",
+            path.display(),
+            if late.is_empty() {
+                String::new()
+            } else {
+                format!(" (it uses {})", late.join(" and "))
+            }
+        ));
+    }
     let mut seen = std::collections::BTreeSet::new();
     for line in text.lines() {
         let rec: Value = serde_json::from_str(line).context("reading the recorded processes")?;

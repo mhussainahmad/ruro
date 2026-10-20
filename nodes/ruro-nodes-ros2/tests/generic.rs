@@ -210,6 +210,51 @@ fn a_type_without_a_definition_uses_the_announced_hash() {
 }
 
 #[test]
+fn publishers_appearing_later_with_another_hash_are_followed() {
+    ruro_nodes_ros2::link();
+    let (_router, endpoint) = router();
+    // Subscribed before any publisher exists: the local hash.
+    let mut sub = Harness::new(
+        "ros2/sub",
+        json!({ "topic": "/late", "type": "std_msgs/msg/String", "router": endpoint, "domain_id": 13 }),
+    )
+    .unwrap();
+    sub.step().unwrap();
+    // Then a ROS node with another version of the definition.
+    let talker = Endpoint::open(EndpointConfig {
+        connect: vec![endpoint.clone()],
+        domain: 13,
+        node_name: "talker".into(),
+        ..EndpointConfig::default()
+    })
+    .unwrap();
+    let hash = format!("RIHS01_{}", "cd".repeat(32));
+    let publisher = talker
+        .raw_publisher(
+            "/late",
+            "std_msgs::msg::dds_::String_",
+            &hash,
+            Qos::default(),
+        )
+        .unwrap();
+    let payload = vec![0, 1, 0, 0, 3, 0, 0, 0, b'h', b'i', 0];
+    let start = Instant::now();
+    let got = loop {
+        // Each step (1 Hz in a graph) looks at the publishers again.
+        sub.step().unwrap();
+        publisher.put(payload.clone()).unwrap();
+        let got = sub.take::<Ros2Any>("out").unwrap();
+        if !got.is_empty() {
+            break got;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "nothing arrived");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(got[0].type_hash, hash);
+    assert_eq!(got[0].cdr, payload);
+}
+
+#[test]
 fn generic_kinds_are_registered() {
     ruro_nodes_ros2::link();
     let reg = ruro::node::registry();

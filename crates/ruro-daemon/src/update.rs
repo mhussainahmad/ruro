@@ -145,6 +145,12 @@ fn staged(target: &Path) -> PathBuf {
     target.with_file_name(format!(".{name}.update"))
 }
 
+/// The staged file once an update has taken it, under this process's id.
+fn claimed(target: &Path) -> PathBuf {
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    target.with_file_name(format!(".{name}.update.{}", std::process::id()))
+}
+
 /// Handles `Ctl::UpdateUpload`.
 pub(crate) fn receive(st: &State, chunk: &UploadChunk) -> Result<String> {
     let u = updates(st)?;
@@ -228,9 +234,15 @@ pub(crate) fn update(st: &Arc<State>, req: &UpdateRequest) -> Result<String> {
     if req.check {
         return Ok(format!("`{}` accepts {}", st.name, list.join(" and ")));
     }
+    // Checked, tried and installed under a name of this process's own, so
+    // an upload arriving meanwhile (another daemon sharing the executable)
+    // cannot replace the file after its hash was checked.
+    for (_, target) in &checked {
+        let _ = std::fs::rename(staged(target), claimed(target));
+    }
     let remove_staged = || {
         for (_, target) in &checked {
-            let _ = std::fs::remove_file(staged(target));
+            let _ = std::fs::remove_file(claimed(target));
         }
     };
     let tried = try_staged(st, u, req, &checked);
@@ -246,7 +258,7 @@ pub(crate) fn update(st: &Arc<State>, req: &UpdateRequest) -> Result<String> {
     // Install: the current binaries stay as `.prev`.
     let mut replaced: Vec<(PathBuf, PathBuf)> = Vec::new();
     for (_, target) in &checked {
-        match install(&staged(target), target) {
+        match install(&claimed(target), target) {
             Ok(prev) => replaced.push((target.clone(), prev)),
             Err(e) => {
                 restore(&replaced);
@@ -273,7 +285,12 @@ pub(crate) fn update(st: &Arc<State>, req: &UpdateRequest) -> Result<String> {
     // The restart stops everything; stop it here, where peers are still
     // reachable and recordings can be finished.
     let estop = st.estop.load(Ordering::Relaxed);
-    let stopped = crate::stop_graph(st)?;
+    // The binaries are in place: a failure here must not cancel the
+    // restart, or the old daemon would run on with the new files installed.
+    let stopped = crate::stop_graph(st).unwrap_or_else(|e| {
+        tracing::warn!("stopping the graph before the restart: {e:#}");
+        Some(format!("stopping the graph: {e:#}"))
+    });
     *st.restart.lock() = Some(Restart {
         name: st.name.clone(),
         exe: u.exe.clone(),
@@ -306,7 +323,7 @@ fn try_staged(
 ) -> Result<()> {
     for (b, target) in checked {
         let role = b.role.as_str();
-        let file = staged(target);
+        let file = claimed(target);
         ensure!(
             file.exists(),
             "the {role} binary has not been uploaded (`ruro update` uploads it)"
@@ -322,14 +339,14 @@ fn try_staged(
     let staged_host = checked
         .iter()
         .find(|(b, _)| b.role == UpdateRole::Host)
-        .map(|(_, t)| staged(t));
+        .map(|(_, t)| claimed(t));
     if let Some(host) = &staged_host {
         crate::load_registry(host).context("the new host binary failed `describe`")?;
     }
     if let Some((b, target)) = checked.iter().find(|(b, _)| b.role == UpdateRole::Daemon) {
         let host = staged_host.unwrap_or_else(|| st.host.clone());
         let timeout = Duration::from_secs_f64(req.timeout_s.clamp(1.0, 600.0));
-        let report = trial(st, u, &staged(target), &host, timeout)
+        let report = trial(st, u, &claimed(target), &host, timeout)
             .context("the new daemon binary failed its trial start")?;
         ensure!(
             report.version == b.version && report.target == b.target,

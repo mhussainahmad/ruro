@@ -192,3 +192,46 @@ fn executables_are_found_in_a_sourced_workspace() {
             .is_err()
     );
 }
+
+#[test]
+fn leftovers_holding_the_output_do_not_stall_restarts_or_shutdown() {
+    ruro_nodes_ros2::link();
+    let d = dir("leftover");
+    let count = d.join("count");
+    let gpid = d.join("gpid");
+    // Each run leaves behind a process that ignores SIGTERM and still holds
+    // the output pipes, then exits.
+    let script = format!(
+        "echo run >> {c}; (trap '' TERM; exec sleep 300) & echo $! > {g}; exit 0",
+        c = count.display(),
+        g = gpid.display()
+    );
+    let mut h = Harness::new(
+        "ros2/node",
+        json!({
+            "command": format!("sh -c {}", ruro_ros2::external::quote_word(&script)),
+            "respawn": "always",
+            "respawn_delay": 0.1
+        }),
+    )
+    .unwrap();
+    h.step().unwrap();
+    let start = Instant::now();
+    while std::fs::read_to_string(&count).map_or(0, |s| s.lines().count()) < 2 {
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "not restarted while a leftover holds its output"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let g: i32 = wait_for_file(&gpid).trim().parse().unwrap();
+    let start = Instant::now();
+    drop(h);
+    assert!(
+        start.elapsed() < Duration::from_secs(15),
+        "shutdown took {:?}",
+        start.elapsed()
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!alive(g), "leftover {g} survived");
+}

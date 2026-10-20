@@ -189,6 +189,14 @@ fn signal_group(pid: u32, sig: i32) {
     }
 }
 
+/// Waits up to `limit` for the output readers to reach end of file.
+fn wait_for(readers: &[std::thread::JoinHandle<()>], limit: Duration) {
+    let deadline = Instant::now() + limit;
+    while readers.iter().any(|r| !r.is_finished()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// Stops a child: SIGTERM to its group, SIGKILL after `grace`.
 fn terminate(child: &mut Child, grace: Duration) {
     let pid = child.id();
@@ -300,8 +308,11 @@ fn supervise(thread_name: &str, launch: Launch, stop: Arc<AtomicBool>, status: A
                     }
                     match child.try_wait() {
                         Ok(Some(st)) => {
-                            // Children it left behind in its group.
+                            // Children it left behind in its group: SIGTERM,
+                            // then SIGKILL for those still holding its output.
                             signal_group(pid, libc::SIGTERM);
+                            wait_for(&readers, Duration::from_secs(5));
+                            signal_group(pid, libc::SIGKILL);
                             break Some(st);
                         }
                         Ok(None) => std::thread::sleep(Duration::from_millis(100)),
@@ -311,8 +322,15 @@ fn supervise(thread_name: &str, launch: Launch, stop: Arc<AtomicBool>, status: A
                         }
                     }
                 };
+                // A process that left the group may hold the output open
+                // for good: its reader is left behind rather than waited for.
+                wait_for(&readers, Duration::from_secs(1));
                 for r in readers {
-                    let _ = r.join();
+                    if r.is_finished() {
+                        let _ = r.join();
+                    } else {
+                        warn!("{}: output still open after exit", launch.label);
+                    }
                 }
                 status.lock().unwrap().pid = None;
                 match exit {

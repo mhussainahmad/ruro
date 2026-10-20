@@ -612,9 +612,10 @@ fn stop_graph(st: &Arc<State>) -> Result<Option<String>> {
     session::stop_playback(st);
     st.sup.lock().stop_all();
     *st.origin.lock() = None;
-    let recorded = session::finish_recording(st, false)?;
+    // Peers stop even if the recording could not be finished.
+    let recorded = session::finish_recording(st, false);
     stop_peers(st, std::mem::take(&mut *st.peers.lock()), &BTreeSet::new());
-    Ok(recorded)
+    recorded
 }
 
 /// Validates `yaml`, sends the groups of other machines to their daemons and

@@ -155,15 +155,20 @@ impl Depacketizer {
 
     /// Feeds one packet; completed frames are appended to `out`.
     pub fn push(&mut self, pkt: &RtpPacket, out: &mut Vec<AccessUnit>) {
-        if let Some(last) = self.last_seq
-            && pkt.sequence != last.wrapping_add(1)
-        {
-            self.broken = true;
-            self.fu = None;
-        }
+        let gap = self
+            .last_seq
+            .is_some_and(|last| pkt.sequence != last.wrapping_add(1));
         self.last_seq = Some(pkt.sequence);
         if self.timestamp.is_some_and(|t| t != pkt.timestamp) {
+            // Without a marker bit the lost packets may be the tail of the
+            // frame this ends...
+            self.broken |= gap;
             self.flush(out);
+        }
+        if gap {
+            // ... or the head of the frame this packet belongs to.
+            self.broken = true;
+            self.fu = None;
         }
         self.timestamp = Some(pkt.timestamp);
         let p = pkt.payload;
@@ -395,5 +400,24 @@ mod tests {
     fn annex_b_with_three_and_four_byte_start_codes() {
         let s = [0, 0, 0, 1, 0x67, 1, 0, 0, 1, 0x68, 2, 0, 0, 0, 1, 0x65, 3];
         assert_eq!(split_annex_b(&s), [&[0x67, 1][..], &[0x68, 2], &[0x65, 3]]);
+    }
+
+    #[test]
+    fn loss_at_a_frame_start_without_marker_breaks_that_frame() {
+        // A camera that never sets the marker bit: frames end at a timestamp change.
+        let mut d = Depacketizer::new(&[SPS.to_vec(), PPS.to_vec()]);
+        let mut out = Vec::new();
+        let mut push = |seq, ts, p: &[u8]| {
+            let pkt = rtp::build(false, 96, seq, ts, 1, p);
+            d.push(&rtp::parse(&pkt).unwrap(), &mut out);
+        };
+        push(1, 3000, &nal(NAL_IDR, 10));
+        push(2, 6000, &nal(1, 10));
+        // The next frame is a two-slice IDR whose first slice (seq 3) is lost.
+        push(4, 9000, &nal(NAL_IDR, 10));
+        push(5, 12000, &nal(1, 10)); // refers to the damaged IDR
+        push(6, 15000, &nal(1, 10)); // ends the previous frame
+        assert_eq!(out.iter().map(|a| a.timestamp).collect::<Vec<_>>(), [3000]);
+        assert_eq!(d.dropped, 3);
     }
 }

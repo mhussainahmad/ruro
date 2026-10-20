@@ -175,7 +175,9 @@ fn hash_for(want: &Want, endpoint: Option<&Endpoint>) -> Result<Option<String>> 
 /// An active generic subscription.
 pub struct AnySubState {
     want: Want,
-    _endpoint: Arc<Endpoint>,
+    /// The hash subscribed with.
+    hash: String,
+    endpoint: Arc<Endpoint>,
     _subscriber: Subscriber,
 }
 
@@ -237,8 +239,18 @@ impl AnySub {
             &self.router,
             &self.token,
         )?;
-        if self.state.as_ref().is_some_and(|s| s.want == want) {
-            return Ok(());
+        if let Some(s) = &self.state
+            && s.want == want
+        {
+            // Publishers that appeared since may announce another hash, and
+            // so use another key: follow them.
+            if !want.hash.is_empty() {
+                return Ok(());
+            }
+            match announced_hash(&s.endpoint, &want.settings.topic, &want.ty) {
+                Ok(Some(h)) if h != s.hash => {}
+                _ => return Ok(()),
+            }
         }
         self.state = None;
         let endpoint = want.settings.endpoint()?;
@@ -265,7 +277,8 @@ impl AnySub {
         );
         self.state = Some(AnySubState {
             want,
-            _endpoint: endpoint,
+            hash,
+            endpoint,
             _subscriber: subscriber,
         });
         Ok(())

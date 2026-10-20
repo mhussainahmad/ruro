@@ -64,15 +64,16 @@ that skip in CI:
 - **RTSP cameras** against the mediamtx server (H.264 from ffmpeg, MJPEG from GStreamer),
   not against IP cameras.
 - **MuJoCo** (`sim/mujoco`) against MuJoCo 3.15.0.
+- **RealSense** (`hw/realsense`) with librealsense 2.56.3 on a D455 and two D455Fs: every
+  output from each camera, 60 fps, and all three at once. See
+  [Hardware drivers](hardware.md#intel-realsense).
 - **LeRobot datasets** with the Hugging Face `datasets` library when `RURO_LEROBOT_PYTHON`
   is set; not yet loaded by LeRobot itself.
 
 ## Implemented, not verified against the real thing
 
-- **Hardware drivers** have not been run against the physical devices they drive. See
-  [Hardware drivers](hardware.md) for what each one is tested against.
-- **RealSense** (`hw/realsense`): checked against the librealsense2 2.59 headers and unit
-  tested, never run with the library or a camera.
+- **Hardware drivers** other than RealSense have not been run against the physical devices
+  they drive. See [Hardware drivers](hardware.md) for what each one is tested against.
 - **Isaac Sim**: the example graph is written from Isaac Sim's documentation and only
   checked to parse and validate.
 - **Bridge nodes** `ros2/call-trigger`, `ros2/call-set-bool`, `ros2/serve-set-bool` and

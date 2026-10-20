@@ -7,7 +7,8 @@
 //! frames out of the library: each one is copied into a [`RawFrame`] and
 //! converted to messages by the plain code in the parent module.
 //!
-//! Not yet run against a camera or a real librealsense2 build.
+//! Run against librealsense 2.56.3 with a D455 and two D455Fs
+//! (`tests/realsense.rs`).
 
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::ptr::null_mut;
@@ -22,6 +23,8 @@ pub const LIB_ENV: &str = "RURO_REALSENSE_LIB";
 
 type H = *mut c_void;
 type E = *mut *mut c_void;
+/// `rs2_frame_callback_ptr`: takes ownership of the frame.
+type FrameCallback = unsafe extern "C" fn(H, *mut c_void);
 
 const EXTENSION_DEPTH_SENSOR: c_int = 7;
 const EXTENSION_VIDEO_FRAME: c_int = 8;
@@ -38,6 +41,7 @@ struct Fns {
     query_devices: unsafe extern "C" fn(H, E) -> H,
     get_device_count: unsafe extern "C" fn(H, E) -> c_int,
     delete_device_list: unsafe extern "C" fn(H),
+    create_device: unsafe extern "C" fn(H, c_int, E) -> H,
     delete_device: unsafe extern "C" fn(H),
     get_device_info: unsafe extern "C" fn(H, c_int, E) -> *const c_char,
     create_pipeline: unsafe extern "C" fn(H, E) -> H,
@@ -46,7 +50,8 @@ struct Fns {
     delete_config: unsafe extern "C" fn(H),
     config_enable_stream: unsafe extern "C" fn(H, c_int, c_int, c_int, c_int, c_int, c_int, E),
     config_enable_device: unsafe extern "C" fn(H, *const c_char, E),
-    pipeline_start_with_config: unsafe extern "C" fn(H, H, E) -> H,
+    pipeline_start_with_config_and_callback:
+        unsafe extern "C" fn(H, H, FrameCallback, *mut c_void, E) -> H,
     pipeline_stop: unsafe extern "C" fn(H, E),
     delete_pipeline_profile: unsafe extern "C" fn(H),
     pipeline_profile_get_device: unsafe extern "C" fn(H, E) -> H,
@@ -57,7 +62,17 @@ struct Fns {
     delete_sensor_list: unsafe extern "C" fn(H),
     is_sensor_extendable_to: unsafe extern "C" fn(H, c_int, E) -> c_int,
     get_depth_scale: unsafe extern "C" fn(H, E) -> f32,
-    pipeline_poll_for_frames: unsafe extern "C" fn(H, *mut H, E) -> c_int,
+    get_stream_profiles: unsafe extern "C" fn(H, E) -> H,
+    get_stream_profiles_count: unsafe extern "C" fn(H, E) -> c_int,
+    get_stream_profile: unsafe extern "C" fn(H, c_int, E) -> H,
+    is_stream_profile_default: unsafe extern "C" fn(H, E) -> c_int,
+    delete_stream_profiles_list: unsafe extern "C" fn(H),
+    open_multiple: unsafe extern "C" fn(H, *const H, c_int, E),
+    start_queue: unsafe extern "C" fn(H, H, E),
+    sensor_stop: unsafe extern "C" fn(H, E),
+    close: unsafe extern "C" fn(H, E),
+    poll_for_frame: unsafe extern "C" fn(H, *mut H, E) -> c_int,
+    enqueue_frame: FrameCallback,
     embedded_frames_count: unsafe extern "C" fn(H, E) -> c_int,
     extract_frame: unsafe extern "C" fn(H, c_int, E) -> H,
     release_frame: unsafe extern "C" fn(H),
@@ -171,6 +186,7 @@ impl Api {
                 query_devices: sym!("rs2_query_devices"),
                 get_device_count: sym!("rs2_get_device_count"),
                 delete_device_list: sym!("rs2_delete_device_list"),
+                create_device: sym!("rs2_create_device"),
                 delete_device: sym!("rs2_delete_device"),
                 get_device_info: sym!("rs2_get_device_info"),
                 create_pipeline: sym!("rs2_create_pipeline"),
@@ -179,7 +195,9 @@ impl Api {
                 delete_config: sym!("rs2_delete_config"),
                 config_enable_stream: sym!("rs2_config_enable_stream"),
                 config_enable_device: sym!("rs2_config_enable_device"),
-                pipeline_start_with_config: sym!("rs2_pipeline_start_with_config"),
+                pipeline_start_with_config_and_callback: sym!(
+                    "rs2_pipeline_start_with_config_and_callback"
+                ),
                 pipeline_stop: sym!("rs2_pipeline_stop"),
                 delete_pipeline_profile: sym!("rs2_delete_pipeline_profile"),
                 pipeline_profile_get_device: sym!("rs2_pipeline_profile_get_device"),
@@ -190,7 +208,17 @@ impl Api {
                 delete_sensor_list: sym!("rs2_delete_sensor_list"),
                 is_sensor_extendable_to: sym!("rs2_is_sensor_extendable_to"),
                 get_depth_scale: sym!("rs2_get_depth_scale"),
-                pipeline_poll_for_frames: sym!("rs2_pipeline_poll_for_frames"),
+                get_stream_profiles: sym!("rs2_get_stream_profiles"),
+                get_stream_profiles_count: sym!("rs2_get_stream_profiles_count"),
+                get_stream_profile: sym!("rs2_get_stream_profile"),
+                is_stream_profile_default: sym!("rs2_is_stream_profile_default"),
+                delete_stream_profiles_list: sym!("rs2_delete_stream_profiles_list"),
+                open_multiple: sym!("rs2_open_multiple"),
+                start_queue: sym!("rs2_start_queue"),
+                sensor_stop: sym!("rs2_stop"),
+                close: sym!("rs2_close"),
+                poll_for_frame: sym!("rs2_poll_for_frame"),
+                enqueue_frame: sym!("rs2_enqueue_frame"),
                 embedded_frames_count: sym!("rs2_embedded_frames_count"),
                 extract_frame: sym!("rs2_extract_frame"),
                 release_frame: sym!("rs2_release_frame"),
@@ -225,6 +253,73 @@ impl Api {
         let v = api.call(|e| unsafe { (api.f.get_api_version)(e) })?;
         api.version = format!("{}.{}.{}", v / 10000, v / 100 % 100, v % 100);
         Ok(api)
+    }
+
+    /// Name and serial number of each connected camera.
+    pub fn devices(&self) -> Result<Vec<(String, String)>, String> {
+        let f = &self.f;
+        // SAFETY: each handle is live from its creation to its deletion
+        // below; device info strings are copied before the device is deleted.
+        unsafe {
+            let version = self.call(|e| (f.get_api_version)(e))?;
+            let ctx = self.call(|e| (f.create_context)(version, e))?;
+            let r = (|| {
+                let list = self.call(|e| (f.query_devices)(ctx, e))?;
+                let r = (|| {
+                    let n = self.call(|e| (f.get_device_count)(list, e))?;
+                    let mut out = Vec::new();
+                    for i in 0..n {
+                        let dev = self.call(|e| (f.create_device)(list, i, e))?;
+                        let info = |k| {
+                            cstr(
+                                self.call(|e| (f.get_device_info)(dev, k, e))
+                                    .unwrap_or(std::ptr::null()),
+                            )
+                        };
+                        out.push((info(CAMERA_INFO_NAME), info(CAMERA_INFO_SERIAL_NUMBER)));
+                        (f.delete_device)(dev);
+                    }
+                    Ok(out)
+                })();
+                (f.delete_device_list)(list);
+                r
+            })();
+            (f.delete_context)(ctx);
+            r
+        }
+    }
+
+    /// The camera with `serial`, or the first one if it is empty.
+    ///
+    /// # Safety
+    /// `ctx` must be a live context.
+    unsafe fn find_device(&self, ctx: H, serial: &str) -> Result<H, String> {
+        let f = &self.f;
+        // SAFETY: the list and each device not returned are deleted once.
+        unsafe {
+            let list = self.call(|e| (f.query_devices)(ctx, e))?;
+            let r = (|| {
+                let n = self.call(|e| (f.get_device_count)(list, e))?;
+                for i in 0..n {
+                    let dev = self.call(|e| (f.create_device)(list, i, e))?;
+                    let sn = cstr(
+                        self.call(|e| (f.get_device_info)(dev, CAMERA_INFO_SERIAL_NUMBER, e))
+                            .unwrap_or(std::ptr::null()),
+                    );
+                    if serial.is_empty() || sn == serial {
+                        return Ok(dev);
+                    }
+                    (f.delete_device)(dev);
+                }
+                Err(if n == 0 {
+                    "no RealSense device connected".to_owned()
+                } else {
+                    format!("no RealSense device with serial number {serial}")
+                })
+            })();
+            (f.delete_device_list)(list);
+            r
+        }
     }
 
     /// Runs one C call with an error slot and turns a set error into `Err`.
@@ -269,8 +364,15 @@ pub struct Camera {
     ctx: H,
     pipe: H,
     profile: H,
+    /// Every frameset the pipeline produces, in order. The pipeline's own
+    /// queue, read by `rs2_pipeline_poll_for_frames`, keeps only the newest.
+    sets: H,
     /// Align processing block and its output queue.
     align: Option<(H, H)>,
+    /// The motion sensor, started apart from the pipeline, and its queue.
+    motion: Option<(H, H)>,
+    /// A failure in [`Camera::poll`] after some frames were taken, for the next call.
+    error: Option<String>,
     pub depth_scale: f32,
     pub name: String,
     pub serial: String,
@@ -294,7 +396,10 @@ impl Camera {
                 ctx,
                 pipe: null_mut(),
                 profile: null_mut(),
+                sets: null_mut(),
                 align: None,
+                motion: None,
+                error: None,
                 depth_scale: 0.001,
                 name: String::new(),
                 serial: String::new(),
@@ -305,35 +410,53 @@ impl Camera {
             if count? == 0 {
                 return Err("no RealSense device connected".into());
             }
-            cam.pipe = api.call(|e| (f.create_pipeline)(ctx, e))?;
-            let config = api.call(|e| (f.create_config)(e))?;
-            let r = (|| {
-                if !cfg.serial.is_empty() {
-                    let s = CString::new(cfg.serial.as_str()).map_err(|e| e.to_string())?;
-                    api.call(|e| (f.config_enable_device)(config, s.as_ptr(), e))?;
-                }
-                let (w, h, fps) = (cfg.width, cfg.height, cfg.fps);
-                let enable = |s, index, w, h, fmt, fps| {
-                    api.call(|e| (f.config_enable_stream)(config, s, index, w, h, fmt, fps, e))
-                };
-                if cfg.color {
-                    enable(stream::COLOR, -1, w, h, format::RGB8, fps)?;
-                }
-                if cfg.depth {
-                    enable(stream::DEPTH, -1, w, h, format::Z16, fps)?;
-                }
-                if cfg.infrared {
-                    enable(stream::INFRARED, 1, w, h, format::Y8, fps)?;
-                }
-                if cfg.imu {
-                    enable(stream::GYRO, -1, 0, 0, format::MOTION_XYZ32F, 0)?;
-                    enable(stream::ACCEL, -1, 0, 0, format::MOTION_XYZ32F, 0)?;
-                }
-                api.call(|e| (f.pipeline_start_with_config)(cam.pipe, config, e))
-            })();
-            (f.delete_config)(config);
-            cam.profile = r?;
-            let dev = api.call(|e| (f.pipeline_profile_get_device)(cam.profile, e))?;
+            let video = cfg.color || cfg.depth || cfg.infrared;
+            if !video && !cfg.imu {
+                return Err("no stream enabled".into());
+            }
+            let dev = if video {
+                cam.pipe = api.call(|e| (f.create_pipeline)(ctx, e))?;
+                // Half a second of framesets between polls; older ones are dropped.
+                cam.sets = api.call(|e| (f.create_frame_queue)((cfg.fps / 2).max(4), e))?;
+                let config = api.call(|e| (f.create_config)(e))?;
+                let r = (|| {
+                    if !cfg.serial.is_empty() {
+                        let s = CString::new(cfg.serial.as_str()).map_err(|e| e.to_string())?;
+                        api.call(|e| (f.config_enable_device)(config, s.as_ptr(), e))?;
+                    }
+                    let (w, h, fps) = (cfg.width, cfg.height, cfg.fps);
+                    let enable = |s, index, w, h, fmt, fps| {
+                        api.call(|e| (f.config_enable_stream)(config, s, index, w, h, fmt, fps, e))
+                    };
+                    if cfg.color {
+                        enable(stream::COLOR, -1, w, h, format::RGB8, fps)?;
+                    }
+                    if cfg.depth {
+                        enable(stream::DEPTH, -1, w, h, format::Z16, fps)?;
+                    }
+                    if cfg.infrared {
+                        enable(stream::INFRARED, 1, w, h, format::Y8, fps)?;
+                    }
+                    // rs2_enqueue_frame is a frame callback whose user pointer is
+                    // the queue: framesets go straight into `sets`.
+                    api.call(|e| {
+                        (f.pipeline_start_with_config_and_callback)(
+                            cam.pipe,
+                            config,
+                            f.enqueue_frame,
+                            cam.sets,
+                            e,
+                        )
+                    })
+                })();
+                (f.delete_config)(config);
+                cam.profile = r?;
+                api.call(|e| (f.pipeline_profile_get_device)(cam.profile, e))?
+            } else {
+                // A pipeline without streams starts its default ones, the
+                // motion sensor among them: open the device directly.
+                api.find_device(ctx, &cfg.serial)?
+            };
             cam.name = cstr(
                 api.call(|e| (f.get_device_info)(dev, CAMERA_INFO_NAME, e))
                     .unwrap_or(std::ptr::null()),
@@ -354,11 +477,26 @@ impl Camera {
                     {
                         cam.depth_scale = scale;
                     }
+                    if cfg.imu && cam.motion.is_none() {
+                        match cam.start_motion(s) {
+                            Ok(true) => continue, // `cam` owns the sensor now
+                            Ok(false) => {}
+                            Err(err) => {
+                                (f.delete_sensor)(s);
+                                (f.delete_sensor_list)(sensors);
+                                (f.delete_device)(dev);
+                                return Err(err);
+                            }
+                        }
+                    }
                     (f.delete_sensor)(s);
                 }
                 (f.delete_sensor_list)(sensors);
             }
             (f.delete_device)(dev);
+            if cfg.imu && cam.motion.is_none() {
+                return Err(format!("{} has no IMU", cam.name));
+            }
             if cfg.align && cfg.color && cfg.depth {
                 let block = api.call(|e| (f.create_align)(stream::COLOR, e))?;
                 let queue = match api.call(|e| (f.create_frame_queue)(1, e)) {
@@ -372,6 +510,75 @@ impl Camera {
                 api.call(|e| (f.start_processing_queue)(block, queue, e))?;
             }
             Ok(cam)
+        }
+    }
+
+    /// Starts gyro and accelerometer on `sensor` if it has them, into a
+    /// queue of their own. The pipeline delivers motion samples bundled into
+    /// video framesets, one per set, and keeps one set: most samples would be
+    /// lost. Returns whether `sensor` was started (and is then owned by `self`).
+    ///
+    /// # Safety
+    /// `sensor` must be a live sensor handle.
+    unsafe fn start_motion(&mut self, sensor: H) -> Result<bool, String> {
+        let (api, f) = (&self.api, &self.api.f);
+        unsafe {
+            let list = api.call(|e| (f.get_stream_profiles)(sensor, e))?;
+            let n = api
+                .call(|e| (f.get_stream_profiles_count)(list, e))
+                .unwrap_or(0);
+            // Per stream: the default profile, else the first one listed;
+            // with whether it is the default.
+            let (mut gyro, mut accel) = (None::<(H, bool)>, None::<(H, bool)>);
+            for i in 0..n {
+                let Ok(p) = api.call(|e| (f.get_stream_profile)(list, i, e)) else {
+                    continue;
+                };
+                let (mut s, mut fmt, mut index, mut uid, mut fps) = (0, 0, 0, 0, 0);
+                if api
+                    .call(|e| {
+                        (f.get_stream_profile_data)(
+                            p, &mut s, &mut fmt, &mut index, &mut uid, &mut fps, e,
+                        )
+                    })
+                    .is_err()
+                    || fmt != format::MOTION_XYZ32F
+                {
+                    continue;
+                }
+                let default = api.call(|e| (f.is_stream_profile_default)(p, e)) == Ok(1);
+                let slot = match s {
+                    stream::GYRO => &mut gyro,
+                    stream::ACCEL => &mut accel,
+                    _ => continue,
+                };
+                if slot.is_none_or(|(_, d)| default && !d) {
+                    *slot = Some((p, default));
+                }
+            }
+            let (Some((g, _)), Some((a, _))) = (gyro, accel) else {
+                (f.delete_stream_profiles_list)(list);
+                return Ok(false);
+            };
+            let profiles = [g, a];
+            let opened = api.call(|e| (f.open_multiple)(sensor, profiles.as_ptr(), 2, e));
+            (f.delete_stream_profiles_list)(list);
+            opened?;
+            // Room for well over a second of samples between polls.
+            let queue = match api.call(|e| (f.create_frame_queue)(1024, e)) {
+                Ok(q) => q,
+                Err(err) => {
+                    let _ = api.call(|e| (f.close)(sensor, e));
+                    return Err(err);
+                }
+            };
+            if let Err(err) = api.call(|e| (f.start_queue)(sensor, queue, e)) {
+                let _ = api.call(|e| (f.close)(sensor, e));
+                (f.delete_frame_queue)(queue);
+                return Err(err);
+            }
+            self.motion = Some((sensor, queue));
+            Ok(true)
         }
     }
 
@@ -459,18 +666,38 @@ impl Camera {
         }
     }
 
-    /// Frames that arrived since the last call, aligned if configured. Does
-    /// not block.
-    pub fn poll(&mut self) -> Result<Vec<RawFrame>, String> {
-        let (api, f) = (&self.api, &self.api.f);
+    /// Frames that arrived since the last call, one group per frameset
+    /// (aligned if configured), then one group of motion samples. Does not
+    /// block. Should a frame fail, those taken off the queues before it are
+    /// still returned and the error comes with the next call.
+    pub fn poll(&mut self) -> Result<Vec<Vec<RawFrame>>, String> {
+        if let Some(err) = self.error.take() {
+            return Err(err);
+        }
         let mut out = Vec::new();
+        let r = self
+            .poll_sets(&mut out)
+            .and_then(|()| self.poll_motion(&mut out));
+        match r {
+            Err(err) if !out.is_empty() => {
+                self.error = Some(err);
+                Ok(out)
+            }
+            r => r.map(|()| out),
+        }
+    }
+
+    fn poll_sets(&self, out: &mut Vec<Vec<RawFrame>>) -> Result<(), String> {
+        let (api, f) = (&self.api, &self.api.f);
+        if self.sets.is_null() {
+            return Ok(());
+        }
         loop {
             let mut set: H = null_mut();
-            // SAFETY: live pipeline; `set` receives a frame we then own.
-            let got =
-                api.call(|e| unsafe { (f.pipeline_poll_for_frames)(self.pipe, &mut set, e) })?;
+            // SAFETY: live queue; `set` receives a frame we then own.
+            let got = api.call(|e| unsafe { (f.poll_for_frame)(self.sets, &mut set, e) })?;
             if got == 0 || set.is_null() {
-                return Ok(out);
+                return Ok(());
             }
             let mut frames = Vec::new();
             // SAFETY: `set` is ours; align takes a reference of its own.
@@ -487,8 +714,41 @@ impl Camera {
                     _ => self.take_set(set, &mut frames)?,
                 }
             }
-            out.extend(frames);
+            out.push(frames);
         }
+    }
+
+    fn poll_motion(&self, out: &mut Vec<Vec<RawFrame>>) -> Result<(), String> {
+        let (api, f) = (&self.api, &self.api.f);
+        let Some((_, queue)) = self.motion else {
+            return Ok(());
+        };
+        let mut samples = Vec::new();
+        let r = loop {
+            let mut frame: H = null_mut();
+            // SAFETY: live queue; `frame` receives a frame we then own.
+            let got = match api.call(|e| unsafe { (f.poll_for_frame)(queue, &mut frame, e) }) {
+                Ok(got) => got,
+                Err(err) => break Err(err),
+            };
+            if got == 0 || frame.is_null() {
+                break Ok(());
+            }
+            // SAFETY: `frame` is ours and released once.
+            let r = unsafe {
+                let r = self.copy(frame);
+                (f.release_frame)(frame);
+                r
+            };
+            match r {
+                Ok(raw) => samples.extend(raw),
+                Err(err) => break Err(err),
+            }
+        };
+        if !samples.is_empty() {
+            out.push(samples);
+        }
+        r
     }
 }
 
@@ -497,12 +757,22 @@ impl Drop for Camera {
         let f = &self.api.f;
         // SAFETY: every non-null handle is live and deleted once.
         unsafe {
+            if let Some((sensor, queue)) = self.motion.take() {
+                let _ = self.api.call(|e| (f.sensor_stop)(sensor, e));
+                let _ = self.api.call(|e| (f.close)(sensor, e));
+                (f.delete_frame_queue)(queue);
+                (f.delete_sensor)(sensor);
+            }
             if !self.pipe.is_null() && !self.profile.is_null() {
                 let _ = self.api.call(|e| (f.pipeline_stop)(self.pipe, e));
             }
             if let Some((block, queue)) = self.align.take() {
                 (f.delete_processing_block)(block);
                 (f.delete_frame_queue)(queue);
+            }
+            // After the pipeline stopped: it no longer delivers into `sets`.
+            if !self.sets.is_null() {
+                (f.delete_frame_queue)(self.sets);
             }
             if !self.profile.is_null() {
                 (f.delete_pipeline_profile)(self.profile);
@@ -564,7 +834,7 @@ mod tests {
         let start = std::time::Instant::now();
         let mut frames = Vec::new();
         while frames.len() < 10 && start.elapsed().as_secs() < 10 {
-            frames.extend(cam.poll().unwrap());
+            frames.extend(cam.poll().unwrap().into_iter().flatten());
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(!frames.is_empty(), "no frames in 10 s");

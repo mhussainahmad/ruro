@@ -11,7 +11,8 @@ use super::ffi::{Api, Camera, Config};
 /// `depth` is 16-bit millimetres (`mono16`, ROS `16UC1`; 0 means no
 /// measurement), aligned to `color` unless `align` is off. `points` is in
 /// metres in the optical frame of the depth image. `imu` pairs each gyro
-/// sample with the latest accelerometer sample.
+/// sample with the latest accelerometer sample. Every frame that arrived
+/// since the last step is published, whatever `fps` is.
 #[derive(Node)]
 #[node(kind = "hw/realsense", rate = 30)]
 pub struct RealSense {
@@ -105,28 +106,28 @@ impl Node for RealSense {
         let (Some(cam), Some(conv)) = (self.camera.as_mut(), self.converter.as_mut()) else {
             bail!("not started");
         };
-        let frames = cam.poll().map_err(|e| anyhow!("RealSense: {e}"))?;
-        if frames.is_empty() {
-            return Ok(());
-        }
-        let m = conv.convert(&frames, ctx.now_ns())?;
-        if let Some((img, info)) = m.color {
-            self.color_info.send(info)?;
-            self.color.send(img)?;
-        }
-        if let Some((img, info)) = m.depth {
-            self.depth_info.send(info)?;
-            self.depth.send(img)?;
-        }
-        if let Some((img, info)) = m.infrared {
-            self.infrared_info.send(info)?;
-            self.infrared.send(img)?;
-        }
-        if let Some(pc) = m.points {
-            self.points.send(pc)?;
-        }
-        for i in m.imu {
-            self.imu.send(i)?;
+        // Every frameset since the last step: the camera's rate need not
+        // match the node's.
+        for set in cam.poll().map_err(|e| anyhow!("RealSense: {e}"))? {
+            let m = conv.convert(&set, ctx.now_ns())?;
+            if let Some((img, info)) = m.color {
+                self.color_info.send(info)?;
+                self.color.send(img)?;
+            }
+            if let Some((img, info)) = m.depth {
+                self.depth_info.send(info)?;
+                self.depth.send(img)?;
+            }
+            if let Some((img, info)) = m.infrared {
+                self.infrared_info.send(info)?;
+                self.infrared.send(img)?;
+            }
+            if let Some(pc) = m.points {
+                self.points.send(pc)?;
+            }
+            for i in m.imu {
+                self.imu.send(i)?;
+            }
         }
         Ok(())
     }

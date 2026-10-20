@@ -23,7 +23,7 @@ devices on a pseudo-terminal (`nodes/ruro-nodes-hw/tests/graph.rs`).
 | `hw/v4l2-camera` | UVC/V4L2 cameras | → `std/Image` (RGB8), `std/CameraInfo` | YUYV→RGB against BT.601 colour bars, MJPEG decode (including UVC frames without Huffman tables), ioctl numbers and struct layouts against `<linux/videodev2.h>`, capability query on a real webcam (opt-in) | streaming (`REQBUFS`, `mmap`, `DQBUF`) |
 | `hw/mjpeg-http-camera` | IP cameras, ESP32-CAM, mjpg-streamer | → `std/Image`, `std/CameraInfo` | multipart parsing against a local HTTP server, with and without `Content-Length` | real cameras |
 | `hw/rtsp-camera` | RTSP network cameras (H.264, Motion JPEG) | → `std/Image`, `std/Bytes` (encoded), `std/CameraInfo` | the node against an in-process RTSP server: TCP and UDP, Basic and Digest auth, keep-alives, reconnection, H.264 from OpenH264's encoder (feature `h264`) and JPEG; MD5 and Digest against the RFC 1321 and RFC 2617 examples. Also run against mediamtx, see [below](#rtsp-cameras) | real cameras |
-| `hw/realsense` | Intel RealSense (feature `realsense`) | → `std/Image` (colour, 16-bit depth, infrared), `std/CameraInfo`, `std/PointCloud`, `std/Imu` | frame conversion, depth units, intrinsics to `CameraInfo`, deprojection for each distortion model, IMU pairing, the error without librealsense2 | everything that touches librealsense2 |
+| `hw/realsense` | Intel RealSense (feature `realsense`) | → `std/Image` (colour, 16-bit depth, infrared), `std/CameraInfo`, `std/PointCloud`, `std/Imu` | frame conversion, depth units, intrinsics to `CameraInfo`, deprojection for each distortion model, IMU pairing, the error without librealsense2. Also run with librealsense 2.56.3 on a D455 and two D455Fs, see [below](#intel-realsense) | other models (D435i, L515) |
 | `hw/serial` | any serial port | `std/Bytes` ↔ `std/Bytes` | both directions over a pty | — |
 | `hw/can` | SocketCAN (`can0`, `vcan0`) | `hw/CanFrame` ↔ `hw/CanFrame` | frame encoding (standard, extended, RTR, error frames) | a CAN interface (`vcan` loopback test is opt-in) |
 | `hw/gpio-out`, `hw/gpio-in` | GPIO character devices (uAPI v2) | `std/Flag` | request/values encoding against `<linux/gpio.h>` | a GPIO chip you may drive |
@@ -107,10 +107,10 @@ and versioned copies in the usual library directories. Without it the node fails
 with a message saying to install librealsense2 or set `RURO_REALSENSE_LIB`. An example
 graph is `examples/realsense.yaml`.
 
-> **Not tested with a camera or with a real librealsense2.** The C signatures and enum
-> values were checked against the librealsense 2.59 headers, and everything between the
-> library's frames and ruro messages is plain Rust with unit tests, but the binding itself
-> has never run.
+Run with librealsense 2.56.3 on a D455 and two D455Fs on one USB 3 controller
+(`tests/realsense.rs`, below): every output at 640x480 and 30 fps from each camera, 60 fps
+from one, and colour and depth from all three at once, with no frames lost. Other models
+have not been tried.
 
 - `color` is RGB8, `infrared` the left imager as `mono8`.
 - `depth` is `mono16` (ROS `16UC1`) in millimetres, 0 meaning no measurement, converted from
@@ -128,7 +128,9 @@ graph is `examples/realsense.yaml`.
   Orientation is unknown (covariance -1).
 
 Stamps come from the camera when librealsense maps its clock to host time, otherwise from the
-node's clock. Frames are polled at the node rate, so set it to `fps`.
+node's clock; on the D455 they were 50-80 ms old when the message arrived. The node steps at
+30 Hz and publishes every frame that arrived since the last step, so `fps` may be higher.
+Stopping the node takes 2-4 s, spent in librealsense stopping the camera.
 
 ## Camera calibration
 
@@ -162,6 +164,9 @@ RURO_TEST_RTSP_URL=rtsp://127.0.0.1:8554/stream \
 # Loads librealsense2 (RURO_REALSENSE_LIB or the system library); with
 # RURO_TEST_REALSENSE=1 it also streams colour and aligned depth from the first camera.
 cargo test -p ruro-nodes-hw --features realsense real_library -- --nocapture
+# Every connected camera: each stream's rate, content, calibration, stamps and the IMU at
+# rest, then all cameras at once. The cameras should stand still, facing a scene.
+RURO_TEST_REALSENSE=1 cargo test -p ruro-nodes-hw --features realsense --test realsense -- --nocapture
 ```
 
 The RTSP test has been run against [mediamtx](https://github.com/bluenviron/mediamtx)
@@ -169,8 +174,11 @@ The RTSP test has been run against [mediamtx](https://github.com/bluenviron/medi
 (`videotestsrc ! jpegenc ! rtpjpegpay` into a `udp+rtp` source), with Basic and with Digest
 authentication. 30 frames arrived over each transport and decoded, and ffmpeg decoded the
 recorded `encoded` output without errors. With `RURO_TEST_RTSP_SECONDS=75` sessions over
-both transports outlived the server's 60 s session timeout on keep-alives. The RealSense
-test has not been run with the library present.
+both transports outlived the server's 60 s session timeout on keep-alives.
+
+The RealSense tests have been run with librealsense 2.56.3 on a D455 and two D455Fs. On
+the D455Fs depth auto-exposure sometimes hunts for a moment, leaving a few frames with
+almost no valid depth, so the tests judge depth by the median frame.
 
 ## Driver notes
 

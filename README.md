@@ -61,13 +61,13 @@ real software outside CI:
 - **Gazebo Harmonic** headless in a container;
 - **GPU buffers** on an RTX 4090;
 - **RTSP** against the mediamtx server;
-- **MuJoCo** against MuJoCo 3.15.0.
+- **MuJoCo** against MuJoCo 3.15.0;
+- **RealSense** with librealsense 2.56.3 on a D455 and two D455Fs.
 
 Others are implemented to their specifications but not yet verified against the real thing:
 
 - the **hardware drivers** are tested only against protocol fixtures and simulated devices
-  on pseudo-terminals, never against the physical devices; **RealSense** has never run with
-  a camera;
+  on pseudo-terminals, never against the physical devices (RealSense excepted);
 - **Isaac Sim** support is an example written from its documentation;
 - **multi-machine graphs** have been tested with two daemons on one machine.
 

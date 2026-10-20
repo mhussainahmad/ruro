@@ -345,7 +345,8 @@ pub fn imu(gyro: [f32; 3], accel: [f32; 3], frame_id: &str, stamp_ns: u64) -> Im
     m
 }
 
-/// Messages from one batch of frames; the newest frame of each stream wins.
+/// Messages from one frameset (or one batch of motion samples); should a
+/// batch hold several frames of a stream, the newest wins.
 #[derive(Debug, Default)]
 pub struct Messages {
     pub color: Option<(Image, CameraInfo)>,

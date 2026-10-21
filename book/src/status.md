@@ -57,8 +57,8 @@ that skip in CI:
   `.idl` types installed there, and demo nodes run from their launch file through
   `ros2/node`. See [ROS 2 bridge](ros2.md).
 - **Gazebo Harmonic** through the ROS 2 bridge, headless in a container
-  (`RURO_GAZEBO_CONTAINER`): lidar scans and odometry reach the graph and velocity commands
-  move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).
+  (`RURO_GAZEBO_CONTAINER`): lidar scans and odometry reach the graph, the graph runs on
+  Gazebo's `/clock`, and velocity commands move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).
 - **GPU buffers** on one machine with an RTX 4090 (driver 610.57.04): in one process, across
   two processes and under the daemon. See [GPU buffers](gpu.md).
 - **RTSP cameras** against the mediamtx server (H.264 from ffmpeg, MJPEG from GStreamer),

@@ -1,6 +1,7 @@
 //! The rover example against Gazebo Harmonic through ros_gz_bridge and the
-//! ROS 2 bridge: scans and odometry arrive, and the avoider's velocity
-//! commands move the simulated rover.
+//! ROS 2 bridge: scans and odometry arrive, the graph follows Gazebo's
+//! simulated time, and the avoider's velocity commands move the simulated
+//! rover.
 //!
 //! Opt in with `RURO_GAZEBO_CONTAINER`: a command prefix that runs a program
 //! with ROS 2 Jazzy, rmw_zenoh and ros_gz available, host networking and this
@@ -115,7 +116,7 @@ fn the_rover_example_drives_in_gazebo() {
             .wait()
             .unwrap()
     };
-    let (scans, odom) = (tap("lidar", "out"), tap("odom", "out"));
+    let (scans, odom, clock) = (tap("lidar", "out"), tap("odom", "out"), tap("clock", "out"));
     let frame = |s: &zenoh::sample::Sample| -> TapFrame {
         ruro_proto::decode(&s.payload().to_bytes()).unwrap()
     };
@@ -125,7 +126,17 @@ fn the_rover_example_drives_in_gazebo() {
     let mut scan_points = 0;
     let mut first: Option<[f32; 3]> = None;
     let mut moved = 0.0_f32;
-    while start.elapsed() < Duration::from_secs(120) && (scan_points == 0 || moved < 0.5) {
+    let mut sim_time: Option<f64> = None;
+    while start.elapsed() < Duration::from_secs(120)
+        && (scan_points == 0 || moved < 0.5 || sim_time.is_none())
+    {
+        while let Ok(Some(s)) = clock.try_recv() {
+            if let Preview::Values(v) = frame(&s).preview
+                && let Some((_, ns)) = v.first()
+            {
+                sim_time = Some(ns / 1e9);
+            }
+        }
         while let Ok(Some(s)) = scans.try_recv() {
             if let Preview::Points { points, .. } = frame(&s).preview {
                 scan_points = scan_points.max(points.len());
@@ -143,9 +154,13 @@ fn the_rover_example_drives_in_gazebo() {
         std::thread::sleep(Duration::from_millis(50));
     }
     eprintln!(
-        "after {:.1} s: {scan_points} scan points, odometry from {first:?}, moved {moved:.2} m",
+        "after {:.1} s: {scan_points} scan points, odometry from {first:?}, moved {moved:.2} m, \
+         simulated time {sim_time:?} s",
         start.elapsed().as_secs_f32()
     );
+    // Gazebo's time starts at zero when the world loads.
+    let sim_time = sim_time.expect("no /clock arrived");
+    assert!(sim_time < 600.0, "not simulated time: {sim_time} s");
     assert!(scan_points > 100, "no laser scans arrived");
     assert!(first.is_some(), "no odometry arrived");
     assert!(moved >= 0.5, "the rover did not move: {moved} m");

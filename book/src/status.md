@@ -58,7 +58,7 @@ that skip in CI:
   `ros2/node`. See [ROS 2 bridge](ros2.md).
 - **`ros2 param`** (Jazzy) against a deployed graph with `ros2: { parameters: true }`:
   `node list`, `param list`, `get`, `describe`, `set` (the node's output changes, and an
-  out-of-range value is refused) and `dump`.
+  out-of-range value is refused), `dump`, and the change on `/parameter_events`.
 - **Gazebo Harmonic** through the ROS 2 bridge, headless in a container
   (`RURO_GAZEBO_CONTAINER`): lidar scans and odometry reach the graph, the graph runs on
   Gazebo's `/clock`, and velocity commands move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).
@@ -94,7 +94,7 @@ that skip in CI:
 
 - ROS 2: deadline, lifespan and liveliness are announced but not enforced (as in
   rmw_zenoh); the generic bridges are always volatile; a ruro ROS node offers no type
-  description service and publishes no `/parameter_events`.
+  description service.
 - GPU buffers work between processes on one machine only, and ONNX Runtime does not take
   them yet (its CUDA provider is not wired up). Python nodes cannot receive them.
 - H.265 RTSP streams are refused.

@@ -43,9 +43,6 @@ fn ros_reads_and_sets_parameters_of_ruro_nodes() {
         "name: p\nros2: {{ parameters: true, router: \"{endpoint}\", domain_id: 9 }}\nnodes:\n  src: {{ type: std/sine, rate: 100 }}\n  gain: {{ type: std/gain, params: {{ k: 3 }} }}\nwires: [src.value -> gain.input]\n"
     ))
     .unwrap();
-    let exec = Arc::new(Executor::start(&graph, "main", Remote::Disabled).unwrap());
-    let _services = ruro_host::ros2_params::attach(&exec, graph.ros2.as_ref().unwrap()).unwrap();
-
     let ros = Endpoint::open(EndpointConfig {
         connect: vec![endpoint],
         domain: 9,
@@ -53,6 +50,14 @@ fn ros_reads_and_sets_parameters_of_ruro_nodes() {
         ..EndpointConfig::default()
     })
     .unwrap();
+    let (events_tx, events) = std::sync::mpsc::channel();
+    let _events = ros
+        .subscriber::<msg::ParameterEvent>("/parameter_events", Qos::default(), move |e, _| {
+            let _ = events_tx.send(e.unwrap());
+        })
+        .unwrap();
+    let exec = Arc::new(Executor::start(&graph, "main", Remote::Disabled).unwrap());
+    let _services = ruro_host::ros2_params::attach(&exec, graph.ros2.as_ref().unwrap()).unwrap();
     let timeout = Duration::from_secs(5);
     let get = ros
         .client::<srv::GetParameters>("/ruro_gain/get_parameters", Qos::services())
@@ -161,6 +166,23 @@ fn ros_reads_and_sets_parameters_of_ruro_nodes() {
         assert!(start.elapsed() < timeout, "{:?}", get_k());
         std::thread::sleep(Duration::from_millis(20));
     }
+
+    // Every change is announced on /parameter_events, as rclcpp does.
+    let mut changes: Vec<(String, f64)> = Vec::new();
+    let mut announced = Vec::new();
+    while changes.len() < 2 {
+        let e = events.recv_timeout(timeout).expect("parameter events");
+        if e.node == "/ruro_gain" {
+            announced.extend(e.new_parameters.into_iter().map(|p| p.name));
+            changes.extend(
+                e.changed_parameters
+                    .into_iter()
+                    .map(|p| (p.name, p.value.double_value)),
+            );
+        }
+    }
+    assert_eq!(announced, ["k", "use_sim_time"]);
+    assert_eq!(changes, [("k".to_owned(), 2.0), ("k".to_owned(), -0.5)]);
     exec.shutdown();
 }
 
@@ -233,10 +255,17 @@ fn ros2_param_tunes_a_deployed_graph() {
         "ros2 param set /ruro_gain k 5000",
         "ros2 param dump /ruro_gain",
     ];
-    let shell: Vec<String> = commands
+    let mut shell: Vec<String> = commands
         .iter()
         .map(|c| format!("echo '>>> {c}'; timeout 60 {c} 2>&1"))
         .collect();
+    // A listener on /parameter_events from before the set.
+    shell.insert(
+        4,
+        "(timeout 60 ros2 topic echo --once --filter \"m.node == '/ruro_gain'\" /parameter_events > /tmp/events 2>&1 &); sleep 5"
+            .into(),
+    );
+    shell.push("sleep 2; echo '>>> events'; cat /tmp/events".into());
     let out = std::process::Command::new(&script)
         .arg(shell.join("; "))
         .env("ZENOH_ROUTER", &endpoint)
@@ -278,6 +307,13 @@ fn ros2_param_tunes_a_deployed_graph() {
     assert!(
         dump.contains("ros__parameters") && dump.contains("k: 2.0"),
         "{dump}"
+    );
+    let events = section("events");
+    assert!(
+        events.contains("node: /ruro_gain")
+            && events.contains("name: k")
+            && events.contains("double_value: 2.0"),
+        "{events}"
     );
     // The node took the value.
     assert_eq!(latest(), 3.0);

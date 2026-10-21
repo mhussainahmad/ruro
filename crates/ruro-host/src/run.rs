@@ -32,6 +32,17 @@ pub struct ParamChange {
     pub reply: Option<Sender<Result<(), String>>>,
 }
 
+/// A parameter a node has applied.
+#[derive(Debug, Clone)]
+pub struct ParamUpdate {
+    pub node: String,
+    pub name: String,
+    pub value: Value,
+}
+
+/// Where applied parameter changes are announced.
+pub type ParamListeners = Arc<Mutex<Vec<Sender<ParamUpdate>>>>;
+
 /// One node and everything needed to step it.
 pub struct Runner {
     pub id: String,
@@ -41,6 +52,7 @@ pub struct Runner {
     params: Receiver<ParamChange>,
     /// Current parameter values, updated as changes are applied.
     values: Arc<Mutex<BTreeMap<String, Value>>>,
+    listeners: ParamListeners,
     pub stats: Arc<NodeStats>,
     /// Timer period; `None` for input-triggered nodes.
     pub period: Option<Duration>,
@@ -64,6 +76,7 @@ pub struct RunnerParts {
     pub waker: Arc<Waker>,
     pub params: Receiver<ParamChange>,
     pub values: Arc<Mutex<BTreeMap<String, Value>>>,
+    pub listeners: ParamListeners,
     pub stats: Arc<NodeStats>,
     pub period: Option<Duration>,
     pub deadline: Option<Duration>,
@@ -85,6 +98,7 @@ impl Runner {
             waker: p.waker,
             params: p.params,
             values: p.values,
+            listeners: p.listeners,
             stats: p.stats,
             period: p.period,
             deadline: p.deadline,
@@ -128,6 +142,14 @@ impl Runner {
                 Ok(()) => {
                     tracing::info!("{}.{name} = {value}", self.id);
                     self.values.lock().insert(name.clone(), value.clone());
+                    let update = ParamUpdate {
+                        node: self.id.clone(),
+                        name: name.clone(),
+                        value: value.clone(),
+                    };
+                    self.listeners
+                        .lock()
+                        .retain(|l| l.send(update.clone()).is_ok());
                 }
                 Err(e) => tracing::warn!("cannot set {}.{name}: {e:#}", self.id),
             }

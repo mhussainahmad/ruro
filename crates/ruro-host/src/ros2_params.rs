@@ -12,16 +12,22 @@
 //! has applied them.
 //!
 //! As in rclcpp, every node also has a read-only `use_sim_time`, true when
-//! the graph runs on `clock: sim`.
+//! the graph runs on `clock: sim`, and announces its parameters and every
+//! change to them on `/parameter_events`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::Result;
 use ruro_graph::{ParamDesc, ParamKind, Ros2Settings};
 use ruro_ros2::RosService;
 use ruro_ros2::msgs::rcl_interfaces::{msg, srv};
-use ruro_ros2::rmw::{Credentials, Endpoint, EndpointConfig, PendingRequest, Qos, RawService};
+use ruro_ros2::rmw::{
+    Credentials, Endpoint, EndpointConfig, History, PendingRequest, Publisher, Qos, RawService,
+};
 use serde_json::Value;
 
 use crate::executor::Executor;
@@ -41,6 +47,26 @@ const APPLY_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct ParamServers {
     _services: Vec<RawService>,
     _endpoints: Vec<Arc<Endpoint>>,
+    stop: Arc<AtomicBool>,
+    events: Option<JoinHandle<()>>,
+}
+
+impl Drop for ParamServers {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.events.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// `/parameter_events` as rclcpp publishes it.
+fn events_qos() -> Qos {
+    Qos {
+        depth: 1000,
+        history: History::KeepLast,
+        ..Qos::default()
+    }
 }
 
 /// The ROS node name of a ruro node, as the bridge nodes name theirs.
@@ -56,6 +82,9 @@ pub fn ros_node_name(id: &str) -> String {
 pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServers> {
     let mut services = Vec::new();
     let mut endpoints = Vec::new();
+    let mut events: HashMap<String, Publisher<msg::ParameterEvent>> = HashMap::new();
+    // Subscribed before the first event goes out, so no change is missed.
+    let updates = exec.param_updates();
     for id in exec.node_ids().map(str::to_owned).collect::<Vec<_>>() {
         let endpoint = endpoint(settings, &ros_node_name(&id))?;
         let base = format!("/{}", ros_node_name(&id));
@@ -114,11 +143,65 @@ pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServ
                 });
             },
         )?);
+        let publisher =
+            endpoint.publisher::<msg::ParameterEvent>("/parameter_events", events_qos())?;
+        // Declared parameters are announced as new, as when an rclcpp node
+        // declares them.
+        let mut declared: Vec<msg::Parameter> = exec
+            .params(&id)
+            .unwrap_or_default()
+            .iter()
+            .map(|(p, v)| msg::Parameter {
+                name: p.name.clone(),
+                value: to_ros(p.kind, v),
+            })
+            .collect();
+        declared.push(msg::Parameter {
+            name: USE_SIM_TIME.into(),
+            value: to_ros(ParamKind::Bool, &Value::Bool(exec.clock().is_sim())),
+        });
+        let _ = publisher.publish(&msg::ParameterEvent {
+            stamp: ruro_ros2::time::time_from_ns(exec.clock().now_ns()),
+            node: base,
+            new_parameters: declared,
+            ..Default::default()
+        });
+        events.insert(id, publisher);
         endpoints.push(endpoint);
     }
+    let stop = Arc::new(AtomicBool::new(false));
+    let (exec, done) = (exec.clone(), stop.clone());
+    let events = std::thread::Builder::new()
+        .name("ros2-param-events".into())
+        .spawn(move || {
+            while !done.load(Ordering::Relaxed) {
+                let Ok(u) = updates.recv_timeout(Duration::from_millis(200)) else {
+                    continue;
+                };
+                let (Some(publisher), Some(kind)) = (
+                    events.get(&u.node),
+                    exec.params(&u.node)
+                        .and_then(|ps| ps.into_iter().find(|(p, _)| p.name == u.name))
+                        .map(|(p, _)| p.kind),
+                ) else {
+                    continue;
+                };
+                let _ = publisher.publish(&msg::ParameterEvent {
+                    stamp: ruro_ros2::time::time_from_ns(exec.clock().now_ns()),
+                    node: format!("/{}", ros_node_name(&u.node)),
+                    changed_parameters: vec![msg::Parameter {
+                        name: u.name,
+                        value: to_ros(kind, &u.value),
+                    }],
+                    ..Default::default()
+                });
+            }
+        })?;
     Ok(ParamServers {
         _services: services,
         _endpoints: endpoints,
+        stop,
+        events: Some(events),
     })
 }
 

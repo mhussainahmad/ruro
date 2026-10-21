@@ -235,8 +235,8 @@ ros2 param dump /ruro_gain
 - Every node also has a read-only `use_sim_time`, true when the graph has `clock: sim`.
 - `set_parameters_atomically` checks every value before applying any, but a node that then
   refuses one keeps those applied before it.
-- `/parameter_events` is not published, and parameters cannot be declared or deleted from
-  ROS.
+- Each node announces its parameters on `/parameter_events` when it starts and every change
+  after, as rclcpp nodes do. Parameters cannot be declared or deleted from ROS.
 - A bridge node and its parameters are one ROS node when the graph's `ros2.router` and
   domain match the bridge node's.
 

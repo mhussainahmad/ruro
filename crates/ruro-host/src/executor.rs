@@ -24,7 +24,8 @@ use zenoh::Wait;
 use crate::record::Recorder;
 use crate::rt;
 use crate::run::{
-    Cycle, ParamChange, Runner, RunnerParts, run_deterministic, run_threaded, step_order,
+    Cycle, ParamChange, ParamListeners, ParamUpdate, Runner, RunnerParts, run_deterministic,
+    run_threaded, step_order,
 };
 use crate::stats::{MetricsWindow, NodeStats};
 
@@ -89,6 +90,7 @@ pub struct Executor {
     threads: Mutex<Vec<JoinHandle<()>>>,
     recorder: Mutex<Option<Recorder>>,
     clock: GraphClock,
+    param_listeners: ParamListeners,
     _shm: Option<Arc<Shm>>,
     _subscribers: Vec<zenoh::pubsub::Subscriber<()>>,
 }
@@ -466,6 +468,7 @@ impl Executor {
         let mut nodes = Vec::new();
         let mut runners = Vec::new();
         let mut max_rate: Option<f64> = None;
+        let param_listeners = ParamListeners::default();
         for (id, b) in built {
             let inst = &graph.nodes[&id];
             let desc = ruro_node::descriptor(&inst.kind).expect("built above");
@@ -507,6 +510,7 @@ impl Executor {
                 waker: waker.clone(),
                 params: params_rx,
                 values: values.clone(),
+                listeners: param_listeners.clone(),
                 stats: stats.clone(),
                 period: rate.map(|r| Duration::from_secs_f64(1.0 / r)),
                 deadline: deadline_of(&id),
@@ -611,6 +615,7 @@ impl Executor {
             threads: Mutex::new(threads),
             recorder: Mutex::new(None),
             clock,
+            param_listeners,
             _shm: shm,
             _subscribers: subscribers,
         })
@@ -644,6 +649,13 @@ impl Executor {
                 .map(|p| (p.clone(), values.get(&p.name).cloned().unwrap_or_default()))
                 .collect(),
         )
+    }
+
+    /// Every parameter change a node of this group applies from now on.
+    pub fn param_updates(&self) -> crossbeam_channel::Receiver<ParamUpdate> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        self.param_listeners.lock().push(tx);
+        rx
     }
 
     /// The clock nodes of this group follow.

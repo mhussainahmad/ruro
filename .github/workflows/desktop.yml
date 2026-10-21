@@ -29,10 +29,13 @@ jobs:
       - name: Build
         run: cargo build --release --locked -p ruro-cli -p ruro-studio
       - name: Smoke test
+        shell: bash
         run: |
-          target\release\ruro.exe --version
-          target\release\ruro.exe daemon 2>&1 | Select-String "runs on Linux and macOS"
-          if (-not $?) { exit 1 }
+          target/release/ruro.exe --version
+          # Refused, with a message that says what to do instead.
+          if out=$(target/release/ruro.exe daemon 2>&1); then exit 1; fi
+          echo "::notice::ruro daemon on Windows: $out"
+          grep -q "runs on Linux and macOS" <<<"$out"
       - name: Package
         shell: pwsh
         run: |

@@ -207,24 +207,30 @@ fn daemons_update_in_place_and_refuse_binaries_that_do_not_start() {
     );
 
     // A binary that exits at once is tried and refused; nothing changes.
+    // (Only where `false` is built for this machine: under emulation it is
+    // the host's, and is refused for its architecture before any trial.)
     let installed = std::fs::read(f.path("bin/ruro")).unwrap();
     let falsy = ["/bin/false", "/usr/bin/false"]
         .into_iter()
         .find(|p| Path::new(p).exists())
         .unwrap();
-    let broken = f.signed(Path::new(falsy), "broken", Some("99.0.0"));
-    let out = f.cli(&["update", broken.to_str().unwrap(), "--timeout", "10"]);
-    assert!(!out.status.success());
-    let t = text(&out);
-    assert!(
-        t.contains("failed its trial start")
-            && t.contains("exited")
-            && t.contains("nothing was replaced"),
-        "{t}"
-    );
-    assert_eq!(std::fs::read(f.path("bin/ruro")).unwrap(), installed);
-    let st = f.wait_status(|_| true);
-    assert_eq!((st.version.as_str(), st.pid), (VERSION, pid));
+    if ruro_daemon::update::elf_arch(Path::new(falsy)).unwrap() == Some(std::env::consts::ARCH) {
+        let broken = f.signed(Path::new(falsy), "broken", Some("99.0.0"));
+        let out = f.cli(&["update", broken.to_str().unwrap(), "--timeout", "10"]);
+        assert!(!out.status.success());
+        let t = text(&out);
+        assert!(
+            t.contains("failed its trial start")
+                && t.contains("exited")
+                && t.contains("nothing was replaced"),
+            "{t}"
+        );
+        assert_eq!(std::fs::read(f.path("bin/ruro")).unwrap(), installed);
+        let st = f.wait_status(|_| true);
+        assert_eq!((st.version.as_str(), st.pid), (VERSION, pid));
+    } else {
+        eprintln!("skipped the broken-binary check: {falsy} is not built for this machine");
+    }
 
     // Downgrades need saying so.
     let old = f.signed(Path::new(RURO), "old", Some(OLD));

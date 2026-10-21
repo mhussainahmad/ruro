@@ -4,7 +4,36 @@ ruro runs on Linux. It is developed on x86-64; 64-bit ARM binaries of the headle
 cross-compiled in CI (see [Cross-compiling for ARM](deployment.md#cross-compiling-for-arm)).
 There are no prebuilt releases yet: build from source, or build one of the packages below
 from a checkout. Releases will attach `ruro` and `ruro-host` for x86-64 and 64-bit ARM, the
-studio for x86-64, and the Debian package, with their SHA-256 sums.
+studio for x86-64, the Debian package, the AppImage, and the Windows and macOS packages, with
+their SHA-256 sums.
+
+## Windows and macOS
+
+On Windows and macOS, the studio and the `ruro` command line are **clients**: they connect
+to a daemon on a Linux computer, usually the robot, and do everything the Linux versions do
+with it (edit, deploy, watch, tune, record, the emergency stop). The daemon itself and the
+hosts that run nodes need Linux; `ruro daemon` says so on Windows, and the studio does not
+start a local daemon there.
+
+| System | Package | What it contains |
+|---|---|---|
+| Windows 10 or 11 (x86-64) | `ruro-windows-x86_64.zip` | `ruro-studio.exe`, `ruro.exe` |
+| macOS 11 or newer (Apple silicon) | `ruro-macos-arm64.dmg` | `ruro studio.app`, with `ruro` inside it |
+
+Both are built by `.github/workflows/desktop.yml` on GitHub's Windows and macOS machines
+(download them from a run's artifacts until there is a release). To connect, start the
+studio and use **File > Connect to Daemon…** (it opens by itself the first time): give the
+robot's endpoint, for example `tls/robot.local:7447`, the CA certificate and the token (see
+[Security](security.md)). The studio remembers the endpoint. From a terminal:
+`ruro --connect tls/robot.local:7447 --tls-ca ca.pem --token-file token status`.
+
+They are not signed with a code-signing certificate:
+
+- **Windows:** SmartScreen warns about an unknown publisher; choose **More info > Run
+  anyway**.
+- **macOS:** the app is signed ad hoc, not with a Developer ID, and not notarized. The first
+  time, right-click the app and choose **Open**, or run
+  `xattr -d com.apple.quarantine "/Applications/ruro studio.app"`.
 
 | Method | Contents | Best for |
 |---|---|---|

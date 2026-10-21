@@ -519,6 +519,9 @@ fn run(cli: Cli) -> Result<()> {
 /// installed, which it then starts in place of this process.
 fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
     use ruro_daemon::update::{Handoff, Trial};
+    if cfg!(not(unix)) {
+        bail!("the ruro daemon runs on Linux and macOS; from here, connect to one with --connect");
+    }
     // Started by a daemon to try this binary before installing it.
     if let Some(trial) = Trial::from_env() {
         return trial.run(config);

@@ -45,6 +45,11 @@ optional ML and camera features):
 - **GPU buffers:** without a GPU, only that the GPU nodes refuse to start with a clear
   message.
 
+- **Windows and macOS clients** (`desktop.yml`, on GitHub's Windows and macOS machines): the
+  protocol and graph crates' tests pass, the CLI and the studio build and start, and the
+  packages are made. Using them against a daemon on another machine has not been tried on
+  either system yet.
+
 ## Verified outside CI
 
 These were checked against the real software on a development machine, with opt-in tests

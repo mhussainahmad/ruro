@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'ports/**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -137,10 +137,16 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
           QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
-        run: >
-          cargo test --locked --target ${{ matrix.target }}
-          --workspace --exclude ruro-py --exclude ruro-host-py --exclude ruro-studio
-          -- --skip uploaded_host_binaries_run_groups
+        # Failing tests are also reported as annotations, which can be read
+        # without access to the log.
+        run: |
+          set -o pipefail
+          cargo test --locked --target ${{ matrix.target }} --no-fail-fast \
+            --workspace --exclude ruro-py --exclude ruro-host-py --exclude ruro-studio \
+            -- --skip uploaded_host_binaries_run_groups 2>&1 | tee test.log || {
+            grep -E -A2 "^test .* FAILED$|panicked at" test.log | grep -v "^--$" | head -60 | sed 's/^/::error::/'
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: ruro-${{ matrix.target }}

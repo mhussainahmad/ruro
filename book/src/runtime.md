@@ -115,7 +115,7 @@ until a command arrives that was sent after the release:
 | `sim/mujoco` | zero velocity or effort controls, or hold the present joint positions for position actuators; the physics keeps running |
 
 Each node's documentation (`ruro nodes -v`) describes its behaviour in detail. Python nodes
-have no e-stop hook yet.
+get `on_estop(self, ctx)` and `ctx.estopped` too (see [Python nodes](python.md)).
 
 Limits to be aware of:
 

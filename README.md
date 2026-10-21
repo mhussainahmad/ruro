@@ -35,7 +35,8 @@ the `ruro` CLI.
   across machines, replay into a running graph, and lossless import of ROS 2 bags.
 - **Multi-machine.** Daemons connect as peers; one graph can span several computers, with
   an emergency stop that reaches all of them, TLS, mutual TLS and token authentication, and
-  signed over-the-air daemon updates with automatic rollback.
+  signed over-the-air daemon updates, rolled back automatically when the new daemon fails
+  to start or dies soon after.
 - **Node SDKs.** Rust (`#[derive(Node)]`, `ruro new`, `ruro build`) and Python (with
   NumPy views of images and hot reload).
 - **ROS 2 topics, services and actions, any message type, and your launch files.** Over

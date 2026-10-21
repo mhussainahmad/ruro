@@ -133,8 +133,8 @@ Everyone participating in this project is expected to follow the
 
 Maintainers only. Every step below that publishes something cannot be undone.
 
-1. Set the version in `[workspace.package]` and `[workspace.dependencies]` of `Cargo.toml`,
-   and in `crates/ruro-py/pyproject.toml`. Move `[Unreleased]` in `CHANGELOG.md` to the new
+1. Set the version in `[workspace.package]` and `[workspace.dependencies]` of `Cargo.toml`
+   (the Python package takes its version from there). Move `[Unreleased]` in `CHANGELOG.md` to the new
    version with today's date.
 2. Check that every crate packages: `cargo publish --workspace --dry-run`.
 3. Tag and push: `git tag v<version> && git push origin v<version>`. The release workflow

@@ -17,8 +17,8 @@ the order it will be done. An item is ticked only when a test proves it, and
 - [x] Every crate passes `cargo publish --dry-run`, in dependency order.
 - [ ] A release workflow builds `ruro` and `ruro-host` for Linux x86_64 and aarch64 (written,
   its packaging step checked locally; first tagged run pending).
-- [ ] Cross-built aarch64 binaries pass the tests under emulation, in CI (job written; passes
-  locally except for container-only failures; first CI run pending).
+- [ ] Cross-built aarch64 binaries pass the tests under emulation, in CI (job written;
+  run locally, the only failures came from the container itself; first CI run pending).
 
 ## ROS 2
 

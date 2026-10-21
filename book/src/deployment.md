@@ -136,7 +136,8 @@ cargo install cross --locked
 cross build --release --target aarch64-unknown-linux-gnu -p ruro-cli -p ruro-host
 ```
 
-CI builds the ARM binaries on every push.
+CI builds the ARM binaries, and runs the tests on them under emulation, for pull requests
+and pushes to `main`.
 
 ## Checklist
 

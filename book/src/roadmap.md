@@ -34,7 +34,7 @@ the order it will be done. An item is ticked only when a test proves it, and
   (`scripts/multi-machine/run.sh`).
 - [x] A daemon update that starts and then dies within its probation is rolled back
   automatically.
-- [ ] An hour-long run of a realistic graph without growing memory or file descriptors.
+- [x] An hour-long run of a realistic graph without growing memory or file descriptors.
 
 ## Later
 

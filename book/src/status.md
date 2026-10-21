@@ -62,6 +62,9 @@ that skip in CI:
 - **`ros2 param`** (Jazzy) against a deployed graph with `ros2: { parameters: true }`:
   `node list`, `param list`, `get`, `describe`, `set` (the node's output changes, and an
   out-of-range value is refused), `dump`, and the change on `/parameter_events`.
+- **An hour-long soak** of `examples/camera.yaml` (`ruro soak --duration 3600`): no memory
+  growth in either process, no drops, errors or restarts, the daemon's file descriptors and
+  threads flat; then 30 kills of the camera process left no shared memory behind.
 - **Multi-machine graphs** between two containers on their own network
   (`scripts/multi-machine/run.sh`): TLS and token refusals, a graph spanning both, the
   emergency stop from either side, 50 ms delay with 2% loss, a 20 s partition (the graph

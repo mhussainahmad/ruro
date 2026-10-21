@@ -53,6 +53,8 @@ pub struct Harness {
     estop: Arc<AtomicBool>,
     /// The e-stop was engaged and `on_estop` has not run yet.
     estop_pending: bool,
+    /// Set by [`Harness::set_sim_time`].
+    sim: Option<GraphClock>,
 }
 
 impl Harness {
@@ -97,7 +99,25 @@ impl Harness {
             started: false,
             estop,
             estop_pending: false,
+            sim: None,
         }
+    }
+
+    /// Puts the node on a simulated clock at `time_ns`, as in a graph with
+    /// `clock: sim`, and moves that clock on later calls. The first call
+    /// must come before the first step.
+    pub fn set_sim_time(&mut self, time_ns: u64) {
+        let clock = match &self.sim {
+            Some(c) => c.clone(),
+            None => {
+                assert!(!self.started, "set_sim_time before the first step");
+                let c = GraphClock::sim();
+                self.ctx = Ctx::with_runtime("test", c.clone(), self.estop.clone());
+                self.sim = Some(c.clone());
+                c
+            }
+        };
+        clock.sim_clock().expect("a simulated clock").set(time_ns);
     }
 
     /// Engages or releases the emergency stop. Like a host, engaging runs the

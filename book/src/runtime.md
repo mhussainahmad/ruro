@@ -52,7 +52,9 @@ the clock over shared memory (or the network), so every process follows the same
   step.
 - A node that falls behind the simulated clock catches up at most 100 ticks at once; a
   clock that goes backwards gives `dt` = 0.
-- Message stamps (`Sample::stamp_ns`) stay wall time.
+- Message stamps (`Sample::stamp_ns`) stay wall time. Headers that nodes fill from
+  `ctx.now_ns()` carry graph time, and the ROS 2 publisher bridges stamp the messages they
+  build with graph time, so ROS nodes run with `use_sim_time` see simulated stamps.
 - The daemon checks at deploy time that a `clock: sim` graph has exactly one `std/Clock`
   output, and so does `ruro check` when it can reach a daemon.
 

@@ -396,12 +396,15 @@ macro_rules! bridge {
                     while self.input.recv().is_some() {}
                     self.held = ctx.estopped();
                     if self.held {
-                        self.publish(&safe, ruro::msg::now_ns())?;
+                        self.publish(&safe, ctx.now_ns())?;
                     }
                     return Ok(());
                 }
                 while let Some(sample) = self.input.recv() {
-                    self.publish(&sample.msg, sample.stamp_ns)?;
+                    // Sample stamps are wall time; ROS nodes on a simulated
+                    // clock expect simulated stamps.
+                    let stamp = if ctx.sim_time() { ctx.now_ns() } else { sample.stamp_ns };
+                    self.publish(&sample.msg, stamp)?;
                 }
                 Ok(())
             }
@@ -409,7 +412,7 @@ macro_rules! bridge {
             fn on_estop(&mut self, ctx: &mut Ctx) {
                 let Some(safe) = Self::safe() else { return };
                 self.held = true;
-                let sent = self.ensure(ctx).and_then(|()| self.publish(&safe, ruro::msg::now_ns()));
+                let sent = self.ensure(ctx).and_then(|()| self.publish(&safe, ctx.now_ns()));
                 if let Err(e) = sent {
                     warn!("e-stop: could not publish on {}: {e:#}", self.topic);
                 }

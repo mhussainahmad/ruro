@@ -79,6 +79,11 @@ impl Ctx {
         self.clock.now_ns()
     }
 
+    /// True when graph time is simulated (`clock: sim`).
+    pub fn sim_time(&self) -> bool {
+        self.clock.is_sim()
+    }
+
     /// True while the emergency stop is engaged. Nodes that drive actuators
     /// must command a safe state (for example zero velocity) while it is set.
     pub fn estopped(&self) -> bool {

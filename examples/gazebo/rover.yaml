@@ -10,10 +10,17 @@
 #   ruro run examples/gazebo/rover.yaml --overlay real
 #
 # Bridge nodes reach ROS 2 through the Zenoh router given as `router`: the
-# daemon the graph runs on, on its default port.
+# daemon the graph runs on, on its default port. In the simulation the graph
+# follows Gazebo's /clock; the real rover runs on the wall clock.
 name: rover
+clock: sim
 nodes:
   # --- robot: Gazebo here, real hardware in the `real` overlay ---
+  clock:
+    type: ros2/sub-clock
+    group: robot
+    params: { topic: /clock, router: tcp/127.0.0.1:7447 }
+    pos: [0, 360]
   lidar:
     type: ros2/sub-laser-scan
     group: robot
@@ -41,7 +48,12 @@ overlays:
   # The simulation, as in the graph itself, for naming it explicitly. `sim`
   # and `real` are alternatives: `sim` does not undo `real`'s rewiring.
   sim:
+    clock: sim
     nodes:
+      clock:
+        type: ros2/sub-clock
+        group: robot
+        params: { topic: /clock, router: tcp/127.0.0.1:7447 }
       lidar:
         type: ros2/sub-laser-scan
         params: { topic: /scan, qos: best_effort, router: tcp/127.0.0.1:7447 }
@@ -50,9 +62,11 @@ overlays:
   # and publishes /odom (for example a TurtleBot or Create 3 base). The
   # `robot` group runs on the daemon named `rover`.
   real:
+    clock: wall
     groups:
       robot: { machine: rover }
     nodes:
+      clock: null
       lidar:
         type: hw/rplidar
         rate: 200

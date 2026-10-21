@@ -78,9 +78,7 @@ The book's [project status](book/src/status.md) page has the details and the kno
 - A first release: crates on crates.io, the Python package on PyPI, prebuilt packages
 - Validating the hardware drivers on the physical devices, starting with the SO-100 arm
 - Verifying real-time behaviour on a PREEMPT_RT kernel
-- An e-stop hook for Python nodes, and peer e-stops that travel back
 - GPU tensors straight into ONNX Runtime's CUDA provider
-- Following a ROS 2 `/clock` for simulated time
 
 ## Quick start
 

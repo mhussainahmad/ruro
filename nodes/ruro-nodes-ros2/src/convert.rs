@@ -7,7 +7,9 @@
 
 use anyhow::{Result, bail};
 use ruro::msg as r;
-use ruro_ros2::msgs::{geometry_msgs as gm, nav_msgs, sensor_msgs as sm, std_msgs, tf2_msgs};
+use ruro_ros2::msgs::{
+    geometry_msgs as gm, nav_msgs, rosgraph_msgs, sensor_msgs as sm, std_msgs, tf2_msgs,
+};
 use ruro_ros2::time::{time_from_ns, time_to_ns};
 
 /// What a publisher knows besides the ruro message.
@@ -124,6 +126,18 @@ pub fn float64_from_ros(m: std_msgs::msg::Float64) -> Result<r::Scalar> {
 
 pub fn float64_to_ros(m: &r::Scalar, _: &PubContext) -> Result<std_msgs::msg::Float64> {
     Ok(std_msgs::msg::Float64 { data: m.0 })
+}
+
+pub fn clock_from_ros(m: rosgraph_msgs::msg::Clock) -> Result<r::Clock> {
+    Ok(r::Clock {
+        time_ns: time_to_ns(&m.clock),
+    })
+}
+
+pub fn clock_to_ros(m: &r::Clock, _: &PubContext) -> Result<rosgraph_msgs::msg::Clock> {
+    Ok(rosgraph_msgs::msg::Clock {
+        clock: time_from_ns(m.time_ns),
+    })
 }
 
 pub fn string_from_ros(m: std_msgs::msg::String) -> Result<r::Text> {

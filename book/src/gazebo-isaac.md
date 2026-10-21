@@ -76,9 +76,5 @@ adapter. This was not tried.
 
 ## Gaps
 
-- **Simulated time.** Both simulators publish `/clock`, but the ROS 2 bridge has no
-  `rosgraph_msgs/Clock` node, so a graph cannot follow simulated time (`clock: sim` needs a
-  `std/Clock` output in the graph). The examples run on the wall clock, which matches as
-  long as the simulator runs in real time.
 - **Joint commands.** The bridge has no node for `std/JointCommand`, so arms in either
   simulator cannot be commanded yet; `ros2/pub-twist` covers velocity-driven bases.

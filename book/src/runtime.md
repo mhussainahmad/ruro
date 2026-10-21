@@ -57,7 +57,13 @@ the clock over shared memory (or the network), so every process follows the same
   output, and so does `ruro check` when it can reach a daemon.
 
 The MuJoCo node (`sim/mujoco`) publishes its simulation time as a `std/Clock`; see
-`examples/arm.yaml`, whose `real` overlay switches the graph back to the wall clock. Flattening composite nodes keeps the graph's `clock` setting.
+`examples/arm.yaml`, whose `real` overlay switches the graph back to the wall clock.
+Flattening composite nodes keeps the graph's `clock` setting.
+
+To follow a simulator or a bag outside ruro, `ros2/sub-clock` turns a ROS 2 `/clock`
+(`rosgraph_msgs/Clock`, from Gazebo, Isaac Sim or `ros2 bag play --clock`) into the graph's
+`std/Clock`; `examples/gazebo/rover.yaml` does this. In the other direction,
+`ros2/pub-clock` publishes a ruro simulator's clock for ROS nodes run with `use_sim_time`.
 
 ## Emergency stop
 

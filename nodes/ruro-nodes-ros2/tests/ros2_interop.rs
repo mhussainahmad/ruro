@@ -70,3 +70,58 @@ fn ros_calls_a_serve_trigger_node() {
     );
     assert_eq!(server.take::<Flag>("triggered").unwrap(), [Flag(true)]);
 }
+
+#[test]
+fn a_ros_clock_drives_sub_clock() {
+    let Some(script) = std::env::var("RURO_ROS2_CONTAINER")
+        .ok()
+        .filter(|s| !s.is_empty())
+    else {
+        eprintln!("skipped: set RURO_ROS2_CONTAINER to a ROS 2 run script to test interop");
+        return;
+    };
+    ruro_nodes_ros2::link();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let endpoint = format!("tcp/127.0.0.1:{port}");
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", "\"router\"").unwrap();
+    c.insert_json5("listen/endpoints", &format!("[\"{endpoint}\"]"))
+        .unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .unwrap();
+    let _router = zenoh::open(c).wait().unwrap();
+
+    let mut clock = Harness::new(
+        "ros2/sub-clock",
+        json!({ "router": endpoint, "domain_id": 0 }),
+    )
+    .unwrap();
+    clock.step().unwrap();
+    // What Gazebo's bridge or `ros2 bag play --clock` publish.
+    let mut child = Command::new(&script)
+        .arg(
+            "timeout 120 ros2 topic pub -r 20 /clock rosgraph_msgs/msg/Clock \
+             '{clock: {sec: 1234, nanosec: 5}}'",
+        )
+        .env("ZENOH_ROUTER", &endpoint)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    let got = loop {
+        let got = clock.take::<ruro::msg::Clock>("out").unwrap();
+        if !got.is_empty() {
+            break got;
+        }
+        assert!(start.elapsed() < Duration::from_secs(120), "no clock");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    assert_eq!(got[0].time_ns, 1_234_000_000_005);
+}

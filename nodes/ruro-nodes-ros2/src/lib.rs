@@ -23,6 +23,7 @@
 //! | `Scalar` | `std_msgs/Float64` | `ros2/sub-float64`, `ros2/pub-float64` |
 //! | `Text` | `std_msgs/String` | `ros2/sub-string`, `ros2/pub-string` |
 //! | `Flag` | `std_msgs/Bool` | `ros2/sub-bool`, `ros2/pub-bool` |
+//! | `Clock` | `rosgraph_msgs/Clock` | `ros2/sub-clock`, `ros2/pub-clock` |
 //!
 //! Messages of any other type go through the generic `ros2/sub` and
 //! `ros2/pub` nodes as `ros2/Any`, unchanged; `ros2/field` and `ros2/decode`
@@ -421,7 +422,9 @@ macro_rules! bridge {
     };
 }
 
-use ruro_ros2::msgs::{geometry_msgs as gm, nav_msgs, sensor_msgs as sm, std_msgs, tf2_msgs};
+use ruro_ros2::msgs::{
+    geometry_msgs as gm, nav_msgs, rosgraph_msgs, sensor_msgs as sm, std_msgs, tf2_msgs,
+};
 
 bridge!(
     "ros2/sub-twist",
@@ -599,6 +602,21 @@ bridge!(
     convert::bool_to_ros,
     "/flag",
     "std_msgs/Bool"
+);
+bridge!(
+    "ros2/sub-clock",
+    SubClock,
+    "ros2/pub-clock",
+    PubClock,
+    ruro::msg::Clock,
+    rosgraph_msgs::msg::Clock,
+    convert::clock_from_ros,
+    convert::clock_to_ros,
+    "/clock",
+    "rosgraph_msgs/Clock",
+    note = "Simulated time: in a graph with `clock: sim`, `ros2/sub-clock` is the clock the \
+            graph follows (Gazebo, Isaac Sim, `ros2 bag play --clock`), and `ros2/pub-clock` \
+            gives a ruro simulator's clock to ROS nodes run with `use_sim_time`."
 );
 
 #[cfg(test)]

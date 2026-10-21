@@ -19,6 +19,9 @@ and compute type hashes without a ROS installation.
 | `nav_msgs` | 5.3.8 | https://github.com/ros2/common_interfaces | Apache License 2.0 |
 | `example_interfaces` | 0.12.1 | https://github.com/ros2/example_interfaces | Apache License 2.0 |
 | `tf2_msgs` | 0.36.23 | https://github.com/ros2/geometry2 | BSD 3-Clause |
+| `rosgraph_msgs` | 2.0.4 | https://github.com/ros2/rcl_interfaces | Apache License 2.0 |
+| `rcl_interfaces` | 2.0.4 | https://github.com/ros2/rcl_interfaces | Apache License 2.0 |
+| `type_description_interfaces` | 2.0.4 | https://github.com/ros2/rcl_interfaces | Apache License 2.0 |
 
 Copyright of the definitions belongs to their authors (Open Source Robotics
 Foundation, Inc. and contributors). The Apache License 2.0 text is available at

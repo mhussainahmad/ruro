@@ -4421,6 +4421,2065 @@ impl crate::RosService for SetMap {
 }
 }
 
+pub mod rcl_interfaces {
+pub mod msg {
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
+
+/// `rcl_interfaces/msg/FloatingPointRange`
+#[derive(Debug, Clone, PartialEq)]
+pub struct FloatingPointRange {
+    pub from_value: f64,
+    pub to_value: f64,
+    pub step: f64,
+}
+
+impl ::core::default::Default for FloatingPointRange {
+    fn default() -> Self {
+        Self {
+            from_value: ::core::default::Default::default(),
+            to_value: ::core::default::Default::default(),
+            step: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for FloatingPointRange {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.f64(self.from_value);
+        w.f64(self.to_value);
+        w.f64(self.step);
+    }
+}
+
+impl crate::cdr::CdrDecode for FloatingPointRange {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            from_value: r.f64()?,
+            to_value: r.f64()?,
+            step: r.f64()?,
+        })
+    }
+}
+
+impl crate::RosMessage for FloatingPointRange {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/FloatingPointRange";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::FloatingPointRange_";
+    const TYPE_HASH: &'static str = "RIHS01_e6af23a23c177fee5f3075c8b1e435162a9b63c863d78c06017460b49684262d";
+}
+
+/// `rcl_interfaces/msg/IntegerRange`
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegerRange {
+    pub from_value: i64,
+    pub to_value: i64,
+    pub step: u64,
+}
+
+impl ::core::default::Default for IntegerRange {
+    fn default() -> Self {
+        Self {
+            from_value: ::core::default::Default::default(),
+            to_value: ::core::default::Default::default(),
+            step: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for IntegerRange {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.i64(self.from_value);
+        w.i64(self.to_value);
+        w.u64(self.step);
+    }
+}
+
+impl crate::cdr::CdrDecode for IntegerRange {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            from_value: r.i64()?,
+            to_value: r.i64()?,
+            step: r.u64()?,
+        })
+    }
+}
+
+impl crate::RosMessage for IntegerRange {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/IntegerRange";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::IntegerRange_";
+    const TYPE_HASH: &'static str = "RIHS01_f7b7fdc0f65f07702e099218e13288c3963bcb9345bde78b560e6cd19800fc5a";
+}
+
+/// `rcl_interfaces/msg/ListParametersResult`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListParametersResult {
+    pub names: ::std::vec::Vec<::std::string::String>,
+    pub prefixes: ::std::vec::Vec<::std::string::String>,
+}
+
+impl ::core::default::Default for ListParametersResult {
+    fn default() -> Self {
+        Self {
+            names: ::core::default::Default::default(),
+            prefixes: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for ListParametersResult {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.names, w);
+        crate::cdr::CdrEncode::encode(&self.prefixes, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for ListParametersResult {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            names: crate::cdr::CdrDecode::decode(r)?,
+            prefixes: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for ListParametersResult {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/ListParametersResult";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::ListParametersResult_";
+    const TYPE_HASH: &'static str = "RIHS01_237ae3428413dcbcfb452b510c42355f3a2b021dc091afa3e18526d57022f1cd";
+}
+
+/// `rcl_interfaces/msg/Log`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Log {
+    pub stamp: crate::msgs::builtin_interfaces::msg::Time,
+    pub level: u8,
+    pub name: ::std::string::String,
+    pub msg: ::std::string::String,
+    pub file: ::std::string::String,
+    pub function: ::std::string::String,
+    pub line: u32,
+}
+
+impl ::core::default::Default for Log {
+    fn default() -> Self {
+        Self {
+            stamp: ::core::default::Default::default(),
+            level: ::core::default::Default::default(),
+            name: ::core::default::Default::default(),
+            msg: ::core::default::Default::default(),
+            file: ::core::default::Default::default(),
+            function: ::core::default::Default::default(),
+            line: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl Log {
+    pub const DEBUG: u8 = 10_u8;
+    pub const INFO: u8 = 20_u8;
+    pub const WARN: u8 = 30_u8;
+    pub const ERROR: u8 = 40_u8;
+    pub const FATAL: u8 = 50_u8;
+}
+
+impl crate::cdr::CdrEncode for Log {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.stamp, w);
+        w.u8(self.level);
+        w.string(&self.name);
+        w.string(&self.msg);
+        w.string(&self.file);
+        w.string(&self.function);
+        w.u32(self.line);
+    }
+}
+
+impl crate::cdr::CdrDecode for Log {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            stamp: crate::cdr::CdrDecode::decode(r)?,
+            level: r.u8()?,
+            name: r.string()?,
+            msg: r.string()?,
+            file: r.string()?,
+            function: r.string()?,
+            line: r.u32()?,
+        })
+    }
+}
+
+impl crate::RosMessage for Log {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/Log";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::Log_";
+    const TYPE_HASH: &'static str = "RIHS01_e28ce254ca8abc06abf92773b74602cdbf116ed34fbaf294fb9f81da9f318eac";
+}
+
+/// `rcl_interfaces/msg/LoggerLevel`
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoggerLevel {
+    pub name: ::std::string::String,
+    pub level: u32,
+}
+
+impl ::core::default::Default for LoggerLevel {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            level: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl LoggerLevel {
+    pub const LOG_LEVEL_UNKNOWN: u8 = 0_u8;
+    pub const LOG_LEVEL_DEBUG: u8 = 10_u8;
+    pub const LOG_LEVEL_INFO: u8 = 20_u8;
+    pub const LOG_LEVEL_WARN: u8 = 30_u8;
+    pub const LOG_LEVEL_ERROR: u8 = 40_u8;
+    pub const LOG_LEVEL_FATAL: u8 = 50_u8;
+}
+
+impl crate::cdr::CdrEncode for LoggerLevel {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        w.u32(self.level);
+    }
+}
+
+impl crate::cdr::CdrDecode for LoggerLevel {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            level: r.u32()?,
+        })
+    }
+}
+
+impl crate::RosMessage for LoggerLevel {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/LoggerLevel";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::LoggerLevel_";
+    const TYPE_HASH: &'static str = "RIHS01_95785cc42f048ab4f395af65035aeaf2181d8e1c7a44edb8ad4558445fdb43c0";
+}
+
+/// `rcl_interfaces/msg/Parameter`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Parameter {
+    pub name: ::std::string::String,
+    pub value: crate::msgs::rcl_interfaces::msg::ParameterValue,
+}
+
+impl ::core::default::Default for Parameter {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            value: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Parameter {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        crate::cdr::CdrEncode::encode(&self.value, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for Parameter {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            value: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for Parameter {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/Parameter";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::Parameter_";
+    const TYPE_HASH: &'static str = "RIHS01_ddfe6442cffc462317adb5c92536a7b6dd55858c5c3e1e328165a6b73c2831af";
+}
+
+/// `rcl_interfaces/msg/ParameterDescriptor`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterDescriptor {
+    pub name: ::std::string::String,
+    pub r#type: u8,
+    pub description: ::std::string::String,
+    pub additional_constraints: ::std::string::String,
+    pub read_only: bool,
+    pub dynamic_typing: bool,
+    pub floating_point_range: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::FloatingPointRange>,
+    pub integer_range: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::IntegerRange>,
+}
+
+impl ::core::default::Default for ParameterDescriptor {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            r#type: ::core::default::Default::default(),
+            description: ::core::default::Default::default(),
+            additional_constraints: ::core::default::Default::default(),
+            read_only: false,
+            dynamic_typing: false,
+            floating_point_range: ::core::default::Default::default(),
+            integer_range: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for ParameterDescriptor {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        w.u8(self.r#type);
+        w.string(&self.description);
+        w.string(&self.additional_constraints);
+        w.bool(self.read_only);
+        w.bool(self.dynamic_typing);
+        crate::cdr::CdrEncode::encode(&self.floating_point_range, w);
+        crate::cdr::CdrEncode::encode(&self.integer_range, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for ParameterDescriptor {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            r#type: r.u8()?,
+            description: r.string()?,
+            additional_constraints: r.string()?,
+            read_only: r.bool()?,
+            dynamic_typing: r.bool()?,
+            floating_point_range: crate::cdr::CdrDecode::decode(r)?,
+            integer_range: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for ParameterDescriptor {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/ParameterDescriptor";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::ParameterDescriptor_";
+    const TYPE_HASH: &'static str = "RIHS01_52175dbfda6c51153101d33d2a9da05743f66f02d5ab2ca9ec4709b46b73d704";
+}
+
+/// `rcl_interfaces/msg/ParameterEvent`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterEvent {
+    pub stamp: crate::msgs::builtin_interfaces::msg::Time,
+    pub node: ::std::string::String,
+    pub new_parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::Parameter>,
+    pub changed_parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::Parameter>,
+    pub deleted_parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::Parameter>,
+}
+
+impl ::core::default::Default for ParameterEvent {
+    fn default() -> Self {
+        Self {
+            stamp: ::core::default::Default::default(),
+            node: ::core::default::Default::default(),
+            new_parameters: ::core::default::Default::default(),
+            changed_parameters: ::core::default::Default::default(),
+            deleted_parameters: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for ParameterEvent {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.stamp, w);
+        w.string(&self.node);
+        crate::cdr::CdrEncode::encode(&self.new_parameters, w);
+        crate::cdr::CdrEncode::encode(&self.changed_parameters, w);
+        crate::cdr::CdrEncode::encode(&self.deleted_parameters, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for ParameterEvent {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            stamp: crate::cdr::CdrDecode::decode(r)?,
+            node: r.string()?,
+            new_parameters: crate::cdr::CdrDecode::decode(r)?,
+            changed_parameters: crate::cdr::CdrDecode::decode(r)?,
+            deleted_parameters: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for ParameterEvent {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/ParameterEvent";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::ParameterEvent_";
+    const TYPE_HASH: &'static str = "RIHS01_043e627780fcad87a22d225bc2a037361dba713fca6a6b9f4b869a5aa0393204";
+}
+
+/// `rcl_interfaces/msg/ParameterEventDescriptors`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterEventDescriptors {
+    pub new_parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::ParameterDescriptor>,
+    pub changed_parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::ParameterDescriptor>,
+    pub deleted_parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::ParameterDescriptor>,
+}
+
+impl ::core::default::Default for ParameterEventDescriptors {
+    fn default() -> Self {
+        Self {
+            new_parameters: ::core::default::Default::default(),
+            changed_parameters: ::core::default::Default::default(),
+            deleted_parameters: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for ParameterEventDescriptors {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.new_parameters, w);
+        crate::cdr::CdrEncode::encode(&self.changed_parameters, w);
+        crate::cdr::CdrEncode::encode(&self.deleted_parameters, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for ParameterEventDescriptors {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            new_parameters: crate::cdr::CdrDecode::decode(r)?,
+            changed_parameters: crate::cdr::CdrDecode::decode(r)?,
+            deleted_parameters: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for ParameterEventDescriptors {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/ParameterEventDescriptors";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::ParameterEventDescriptors_";
+    const TYPE_HASH: &'static str = "RIHS01_456f90915d72ef69379e702ef3ba2a115098ff677eab9c0080fa11239c6b147e";
+}
+
+/// `rcl_interfaces/msg/ParameterType`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterType {
+}
+
+impl ::core::default::Default for ParameterType {
+    fn default() -> Self {
+        Self {
+        }
+    }
+}
+
+impl ParameterType {
+    pub const PARAMETER_NOT_SET: u8 = 0_u8;
+    pub const PARAMETER_BOOL: u8 = 1_u8;
+    pub const PARAMETER_INTEGER: u8 = 2_u8;
+    pub const PARAMETER_DOUBLE: u8 = 3_u8;
+    pub const PARAMETER_STRING: u8 = 4_u8;
+    pub const PARAMETER_BYTE_ARRAY: u8 = 5_u8;
+    pub const PARAMETER_BOOL_ARRAY: u8 = 6_u8;
+    pub const PARAMETER_INTEGER_ARRAY: u8 = 7_u8;
+    pub const PARAMETER_DOUBLE_ARRAY: u8 = 8_u8;
+    pub const PARAMETER_STRING_ARRAY: u8 = 9_u8;
+}
+
+impl crate::cdr::CdrEncode for ParameterType {
+    fn encode(&self, _w: &mut crate::cdr::CdrWriter) {
+        _w.u8(0);
+    }
+}
+
+impl crate::cdr::CdrDecode for ParameterType {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        r.u8()?;
+        Ok(Self {})
+    }
+}
+
+impl crate::RosMessage for ParameterType {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/ParameterType";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::ParameterType_";
+    const TYPE_HASH: &'static str = "RIHS01_df29ed057a834862187be24dd187d981790ff3ea6502f4cd27b432cbc42c6d46";
+}
+
+/// `rcl_interfaces/msg/ParameterValue`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterValue {
+    pub r#type: u8,
+    pub bool_value: bool,
+    pub integer_value: i64,
+    pub double_value: f64,
+    pub string_value: ::std::string::String,
+    pub byte_array_value: ::std::vec::Vec<u8>,
+    pub bool_array_value: ::std::vec::Vec<bool>,
+    pub integer_array_value: ::std::vec::Vec<i64>,
+    pub double_array_value: ::std::vec::Vec<f64>,
+    pub string_array_value: ::std::vec::Vec<::std::string::String>,
+}
+
+impl ::core::default::Default for ParameterValue {
+    fn default() -> Self {
+        Self {
+            r#type: ::core::default::Default::default(),
+            bool_value: ::core::default::Default::default(),
+            integer_value: ::core::default::Default::default(),
+            double_value: ::core::default::Default::default(),
+            string_value: ::core::default::Default::default(),
+            byte_array_value: ::core::default::Default::default(),
+            bool_array_value: ::core::default::Default::default(),
+            integer_array_value: ::core::default::Default::default(),
+            double_array_value: ::core::default::Default::default(),
+            string_array_value: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for ParameterValue {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.u8(self.r#type);
+        w.bool(self.bool_value);
+        w.i64(self.integer_value);
+        w.f64(self.double_value);
+        w.string(&self.string_value);
+        w.byte_seq(&self.byte_array_value);
+        crate::cdr::CdrEncode::encode(&self.bool_array_value, w);
+        crate::cdr::CdrEncode::encode(&self.integer_array_value, w);
+        crate::cdr::CdrEncode::encode(&self.double_array_value, w);
+        crate::cdr::CdrEncode::encode(&self.string_array_value, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for ParameterValue {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            r#type: r.u8()?,
+            bool_value: r.bool()?,
+            integer_value: r.i64()?,
+            double_value: r.f64()?,
+            string_value: r.string()?,
+            byte_array_value: r.byte_seq()?,
+            bool_array_value: crate::cdr::CdrDecode::decode(r)?,
+            integer_array_value: crate::cdr::CdrDecode::decode(r)?,
+            double_array_value: crate::cdr::CdrDecode::decode(r)?,
+            string_array_value: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for ParameterValue {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/ParameterValue";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::ParameterValue_";
+    const TYPE_HASH: &'static str = "RIHS01_115fc089a387e23c7ecd3525c9189c379109119d6ab82e8dfbde0fdf6a7f9b68";
+}
+
+/// `rcl_interfaces/msg/SetLoggerLevelsResult`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLoggerLevelsResult {
+    pub successful: bool,
+    pub reason: ::std::string::String,
+}
+
+impl ::core::default::Default for SetLoggerLevelsResult {
+    fn default() -> Self {
+        Self {
+            successful: ::core::default::Default::default(),
+            reason: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetLoggerLevelsResult {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.bool(self.successful);
+        w.string(&self.reason);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetLoggerLevelsResult {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            successful: r.bool()?,
+            reason: r.string()?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetLoggerLevelsResult {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/SetLoggerLevelsResult";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::SetLoggerLevelsResult_";
+    const TYPE_HASH: &'static str = "RIHS01_9316e5e679a5b72d2dd7fd80c539bae9e106fa0890a06dc5da3a8177a3ff6909";
+}
+
+/// `rcl_interfaces/msg/SetParametersResult`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetParametersResult {
+    pub successful: bool,
+    pub reason: ::std::string::String,
+}
+
+impl ::core::default::Default for SetParametersResult {
+    fn default() -> Self {
+        Self {
+            successful: ::core::default::Default::default(),
+            reason: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetParametersResult {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.bool(self.successful);
+        w.string(&self.reason);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetParametersResult {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            successful: r.bool()?,
+            reason: r.string()?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetParametersResult {
+    const TYPE_NAME: &'static str = "rcl_interfaces/msg/SetParametersResult";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::msg::dds_::SetParametersResult_";
+    const TYPE_HASH: &'static str = "RIHS01_cfcc0fb0371ee5159b403960ef4300f8f9d2f1fd6117c8666b7f9654d528a9b1";
+}
+
+}
+pub mod srv {
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
+
+/// `rcl_interfaces/srv/DescribeParameters_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct DescribeParameters_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::DescribeParameters_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::DescribeParameters_Response>,
+}
+
+impl ::core::default::Default for DescribeParameters_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for DescribeParameters_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for DescribeParameters_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for DescribeParameters_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/DescribeParameters_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::DescribeParameters_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_3deba64c035093033c690184834441551a53128ea2539f71f2596fbc4ed9de43";
+}
+
+/// `rcl_interfaces/srv/DescribeParameters_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct DescribeParameters_Request {
+    pub names: ::std::vec::Vec<::std::string::String>,
+}
+
+impl ::core::default::Default for DescribeParameters_Request {
+    fn default() -> Self {
+        Self {
+            names: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for DescribeParameters_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.names, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for DescribeParameters_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            names: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for DescribeParameters_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/DescribeParameters_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::DescribeParameters_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_05dd1c2bc87dec2627105c8070d6f9725c781a4f2ab852975bf105462b82b644";
+}
+
+/// `rcl_interfaces/srv/DescribeParameters_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct DescribeParameters_Response {
+    pub descriptors: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::ParameterDescriptor>,
+}
+
+impl ::core::default::Default for DescribeParameters_Response {
+    fn default() -> Self {
+        Self {
+            descriptors: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for DescribeParameters_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.descriptors, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for DescribeParameters_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            descriptors: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for DescribeParameters_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/DescribeParameters_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::DescribeParameters_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_ad6747319613c6131589e062e095b469a46cc764f7d0f12a001a49e6cd893995";
+}
+
+/// `rcl_interfaces/srv/GetLoggerLevels_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetLoggerLevels_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::GetLoggerLevels_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::GetLoggerLevels_Response>,
+}
+
+impl ::core::default::Default for GetLoggerLevels_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetLoggerLevels_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetLoggerLevels_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetLoggerLevels_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetLoggerLevels_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetLoggerLevels_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_c835a586d832cb17c01c512f8ffd449fd5384f5bd33fb44d76329d875d1f0875";
+}
+
+/// `rcl_interfaces/srv/GetLoggerLevels_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetLoggerLevels_Request {
+    pub names: ::std::vec::Vec<::std::string::String>,
+}
+
+impl ::core::default::Default for GetLoggerLevels_Request {
+    fn default() -> Self {
+        Self {
+            names: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetLoggerLevels_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.names, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetLoggerLevels_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            names: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetLoggerLevels_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetLoggerLevels_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetLoggerLevels_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_490ace424a5f5b14cb4e1e95030d7fe366d8df0fd9fe4d03b44d6009504fd2cc";
+}
+
+/// `rcl_interfaces/srv/GetLoggerLevels_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetLoggerLevels_Response {
+    pub levels: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::LoggerLevel>,
+}
+
+impl ::core::default::Default for GetLoggerLevels_Response {
+    fn default() -> Self {
+        Self {
+            levels: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetLoggerLevels_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.levels, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetLoggerLevels_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            levels: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetLoggerLevels_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetLoggerLevels_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetLoggerLevels_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_228685d350911d213047abe756f5bf566d2f76b359c4e9fac16e5ef652aff910";
+}
+
+/// `rcl_interfaces/srv/GetParameterTypes_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetParameterTypes_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::GetParameterTypes_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::GetParameterTypes_Response>,
+}
+
+impl ::core::default::Default for GetParameterTypes_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetParameterTypes_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetParameterTypes_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetParameterTypes_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameterTypes_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameterTypes_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_9516adca0cc885d46a59c2362fb8eb5f4906b046518266f8c645b454b0dddc60";
+}
+
+/// `rcl_interfaces/srv/GetParameterTypes_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetParameterTypes_Request {
+    pub names: ::std::vec::Vec<::std::string::String>,
+}
+
+impl ::core::default::Default for GetParameterTypes_Request {
+    fn default() -> Self {
+        Self {
+            names: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetParameterTypes_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.names, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetParameterTypes_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            names: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetParameterTypes_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameterTypes_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameterTypes_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_87d7ec5ef545d4daa289d500025d31fb2437bc8b8365ca367161c4dac4be33fd";
+}
+
+/// `rcl_interfaces/srv/GetParameterTypes_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetParameterTypes_Response {
+    pub types: ::std::vec::Vec<u8>,
+}
+
+impl ::core::default::Default for GetParameterTypes_Response {
+    fn default() -> Self {
+        Self {
+            types: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetParameterTypes_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.byte_seq(&self.types);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetParameterTypes_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            types: r.byte_seq()?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetParameterTypes_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameterTypes_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameterTypes_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_ac1335dce67c478e669434f6ac2fbff34fcd529580f272d3006785ba8b54e47f";
+}
+
+/// `rcl_interfaces/srv/GetParameters_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetParameters_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::GetParameters_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::GetParameters_Response>,
+}
+
+impl ::core::default::Default for GetParameters_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetParameters_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetParameters_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetParameters_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameters_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameters_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_84eeb9247b09067c35bd8750d5c8555b700e394a616737c4624f15ae02e64c4d";
+}
+
+/// `rcl_interfaces/srv/GetParameters_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetParameters_Request {
+    pub names: ::std::vec::Vec<::std::string::String>,
+}
+
+impl ::core::default::Default for GetParameters_Request {
+    fn default() -> Self {
+        Self {
+            names: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetParameters_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.names, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetParameters_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            names: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetParameters_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameters_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameters_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_135a9e1c3d7cebef792f6687d7ddf99949b21a0bd9a320d863a9110a3f5cf4d6";
+}
+
+/// `rcl_interfaces/srv/GetParameters_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetParameters_Response {
+    pub values: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::ParameterValue>,
+}
+
+impl ::core::default::Default for GetParameters_Response {
+    fn default() -> Self {
+        Self {
+            values: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetParameters_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.values, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetParameters_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            values: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetParameters_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameters_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameters_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_9fa773b46e39cc5d02db6224d8fd520bb9caeeffc2b27c96c1e59431baba9f2a";
+}
+
+/// `rcl_interfaces/srv/ListParameters_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListParameters_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::ListParameters_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::ListParameters_Response>,
+}
+
+impl ::core::default::Default for ListParameters_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for ListParameters_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for ListParameters_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for ListParameters_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/ListParameters_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::ListParameters_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_89c5b5aaf68ec925ae9bbc5569ee21de82959b4d1496dbd498792ad825b9b292";
+}
+
+/// `rcl_interfaces/srv/ListParameters_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListParameters_Request {
+    pub prefixes: ::std::vec::Vec<::std::string::String>,
+    pub depth: u64,
+}
+
+impl ::core::default::Default for ListParameters_Request {
+    fn default() -> Self {
+        Self {
+            prefixes: ::core::default::Default::default(),
+            depth: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl ListParameters_Request {
+    pub const DEPTH_RECURSIVE: u64 = 0_u64;
+}
+
+impl crate::cdr::CdrEncode for ListParameters_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.prefixes, w);
+        w.u64(self.depth);
+    }
+}
+
+impl crate::cdr::CdrDecode for ListParameters_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            prefixes: crate::cdr::CdrDecode::decode(r)?,
+            depth: r.u64()?,
+        })
+    }
+}
+
+impl crate::RosMessage for ListParameters_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/ListParameters_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::ListParameters_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_a1b0b5d6b967a5b8ac5bc8563c3ea678f349e312a6a4967227c5a96bc5ce38df";
+}
+
+/// `rcl_interfaces/srv/ListParameters_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListParameters_Response {
+    pub result: crate::msgs::rcl_interfaces::msg::ListParametersResult,
+}
+
+impl ::core::default::Default for ListParameters_Response {
+    fn default() -> Self {
+        Self {
+            result: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for ListParameters_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.result, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for ListParameters_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            result: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for ListParameters_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/ListParameters_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::ListParameters_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_31b937b82de3612426be79f231e386259f97e8dc843e3f2845288b4bfa296bdd";
+}
+
+/// `rcl_interfaces/srv/SetLoggerLevels_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLoggerLevels_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::SetLoggerLevels_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::SetLoggerLevels_Response>,
+}
+
+impl ::core::default::Default for SetLoggerLevels_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetLoggerLevels_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetLoggerLevels_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetLoggerLevels_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetLoggerLevels_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetLoggerLevels_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_ce7d563c54edbff5addfea9ae8f8bcb7ba755673cdc0761064ec0d4adf18b6d9";
+}
+
+/// `rcl_interfaces/srv/SetLoggerLevels_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLoggerLevels_Request {
+    pub levels: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::LoggerLevel>,
+}
+
+impl ::core::default::Default for SetLoggerLevels_Request {
+    fn default() -> Self {
+        Self {
+            levels: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetLoggerLevels_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.levels, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetLoggerLevels_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            levels: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetLoggerLevels_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetLoggerLevels_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetLoggerLevels_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_4e7768e0f4c749205f35bc05449f83fad18c42de52c16b1934d66c2f68ffd862";
+}
+
+/// `rcl_interfaces/srv/SetLoggerLevels_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLoggerLevels_Response {
+    pub results: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::SetLoggerLevelsResult>,
+}
+
+impl ::core::default::Default for SetLoggerLevels_Response {
+    fn default() -> Self {
+        Self {
+            results: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetLoggerLevels_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.results, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetLoggerLevels_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            results: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetLoggerLevels_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetLoggerLevels_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetLoggerLevels_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_ba51739027e57cb9120015737f4618579684047d862b2b16a76bc399d987d6d3";
+}
+
+/// `rcl_interfaces/srv/SetParametersAtomically_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetParametersAtomically_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::SetParametersAtomically_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::SetParametersAtomically_Response>,
+}
+
+impl ::core::default::Default for SetParametersAtomically_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetParametersAtomically_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetParametersAtomically_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetParametersAtomically_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParametersAtomically_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParametersAtomically_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_42fc0821e6e8fcff2b150cefc7d8269f0ce65139e1dc715b15267a4bcf63a189";
+}
+
+/// `rcl_interfaces/srv/SetParametersAtomically_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetParametersAtomically_Request {
+    pub parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::Parameter>,
+}
+
+impl ::core::default::Default for SetParametersAtomically_Request {
+    fn default() -> Self {
+        Self {
+            parameters: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetParametersAtomically_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.parameters, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetParametersAtomically_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            parameters: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetParametersAtomically_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParametersAtomically_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParametersAtomically_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_db0bd950ed5ed867a0e90b225e44dea382d762c0762ff3e0ee842190042a59e5";
+}
+
+/// `rcl_interfaces/srv/SetParametersAtomically_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetParametersAtomically_Response {
+    pub result: crate::msgs::rcl_interfaces::msg::SetParametersResult,
+}
+
+impl ::core::default::Default for SetParametersAtomically_Response {
+    fn default() -> Self {
+        Self {
+            result: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetParametersAtomically_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.result, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetParametersAtomically_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            result: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetParametersAtomically_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParametersAtomically_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParametersAtomically_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_31b1a38c5b0b9d893ee24da45f69638f4561c78461d82d52750f429b534502b8";
+}
+
+/// `rcl_interfaces/srv/SetParameters_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetParameters_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::SetParameters_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::rcl_interfaces::srv::SetParameters_Response>,
+}
+
+impl ::core::default::Default for SetParameters_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetParameters_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetParameters_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetParameters_Event {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParameters_Event";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParameters_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_5060f52369bcff7f9dbd6eca21ee521859e471e71b33a8a8df26d5236fe54a80";
+}
+
+/// `rcl_interfaces/srv/SetParameters_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetParameters_Request {
+    pub parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::Parameter>,
+}
+
+impl ::core::default::Default for SetParameters_Request {
+    fn default() -> Self {
+        Self {
+            parameters: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetParameters_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.parameters, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetParameters_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            parameters: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetParameters_Request {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParameters_Request";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParameters_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_130d46386b7e84ea9ecf60608a4d83cbe5e5cb7c6cc5b712b7a4e3a6c254e932";
+}
+
+/// `rcl_interfaces/srv/SetParameters_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetParameters_Response {
+    pub results: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::SetParametersResult>,
+}
+
+impl ::core::default::Default for SetParameters_Response {
+    fn default() -> Self {
+        Self {
+            results: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for SetParameters_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.results, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for SetParameters_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            results: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for SetParameters_Response {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParameters_Response";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParameters_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_7a0e8140a0b8d98308fa81a5403a766e610af29a239caf54b7553227906fc266";
+}
+
+/// `rcl_interfaces/srv/DescribeParameters`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DescribeParameters;
+
+impl crate::RosService for DescribeParameters {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/DescribeParameters";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::DescribeParameters_";
+    const TYPE_HASH: &'static str = "RIHS01_845b484d71eb0673dae682f2e3ba3c4851a65a3dcfb97bddd82c5b57e91e4cff";
+    type Request = DescribeParameters_Request;
+    type Response = DescribeParameters_Response;
+}
+
+/// `rcl_interfaces/srv/GetLoggerLevels`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GetLoggerLevels;
+
+impl crate::RosService for GetLoggerLevels {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetLoggerLevels";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetLoggerLevels_";
+    const TYPE_HASH: &'static str = "RIHS01_03bf1bebd0d6514c7ed0ba7c5e08dc9f2f39c759fe99e1e30ea4157d7674f72d";
+    type Request = GetLoggerLevels_Request;
+    type Response = GetLoggerLevels_Response;
+}
+
+/// `rcl_interfaces/srv/GetParameterTypes`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GetParameterTypes;
+
+impl crate::RosService for GetParameterTypes {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameterTypes";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameterTypes_";
+    const TYPE_HASH: &'static str = "RIHS01_da199c878688b3e530bdfe3ca8f74cb9fa0c303101e980a9e8f260e25e1c80ca";
+    type Request = GetParameterTypes_Request;
+    type Response = GetParameterTypes_Response;
+}
+
+/// `rcl_interfaces/srv/GetParameters`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GetParameters;
+
+impl crate::RosService for GetParameters {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/GetParameters";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::GetParameters_";
+    const TYPE_HASH: &'static str = "RIHS01_bf9803d5c74cf989a5de3e0c2e99444599a627c7ff75f97b8c05b01003675cbc";
+    type Request = GetParameters_Request;
+    type Response = GetParameters_Response;
+}
+
+/// `rcl_interfaces/srv/ListParameters`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ListParameters;
+
+impl crate::RosService for ListParameters {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/ListParameters";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::ListParameters_";
+    const TYPE_HASH: &'static str = "RIHS01_3e6062bfbb27bfb8730d4cef2558221f51a11646d78e7bb30a1e83afac3aad9d";
+    type Request = ListParameters_Request;
+    type Response = ListParameters_Response;
+}
+
+/// `rcl_interfaces/srv/SetLoggerLevels`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SetLoggerLevels;
+
+impl crate::RosService for SetLoggerLevels {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetLoggerLevels";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetLoggerLevels_";
+    const TYPE_HASH: &'static str = "RIHS01_3ff86cb4e91fbf9abae15c234ecc874448de6ece8e193401c077cf116e4f6d78";
+    type Request = SetLoggerLevels_Request;
+    type Response = SetLoggerLevels_Response;
+}
+
+/// `rcl_interfaces/srv/SetParameters`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SetParameters;
+
+impl crate::RosService for SetParameters {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParameters";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParameters_";
+    const TYPE_HASH: &'static str = "RIHS01_56eed9a67e169f9cb6c1f987bc88f868c14a8fc9f743a263bc734c154015d7e0";
+    type Request = SetParameters_Request;
+    type Response = SetParameters_Response;
+}
+
+/// `rcl_interfaces/srv/SetParametersAtomically`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SetParametersAtomically;
+
+impl crate::RosService for SetParametersAtomically {
+    const TYPE_NAME: &'static str = "rcl_interfaces/srv/SetParametersAtomically";
+    const DDS_TYPE_NAME: &'static str = "rcl_interfaces::srv::dds_::SetParametersAtomically_";
+    const TYPE_HASH: &'static str = "RIHS01_0e192ef259c07fc3c07a13191d27002222e65e00ccec653ca05e856f79285fcd";
+    type Request = SetParametersAtomically_Request;
+    type Response = SetParametersAtomically_Response;
+}
+
+}
+}
+
+pub mod rosgraph_msgs {
+pub mod msg {
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
+
+/// `rosgraph_msgs/msg/Action`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Action {
+    pub name: ::std::string::String,
+    pub send_goal: crate::msgs::rosgraph_msgs::msg::Service,
+    pub get_result: crate::msgs::rosgraph_msgs::msg::Service,
+    pub cancel_goal: crate::msgs::rosgraph_msgs::msg::Service,
+    pub feedback: crate::msgs::rosgraph_msgs::msg::Topic,
+    pub status: crate::msgs::rosgraph_msgs::msg::Topic,
+}
+
+impl ::core::default::Default for Action {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            send_goal: ::core::default::Default::default(),
+            get_result: ::core::default::Default::default(),
+            cancel_goal: ::core::default::Default::default(),
+            feedback: ::core::default::Default::default(),
+            status: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Action {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        crate::cdr::CdrEncode::encode(&self.send_goal, w);
+        crate::cdr::CdrEncode::encode(&self.get_result, w);
+        crate::cdr::CdrEncode::encode(&self.cancel_goal, w);
+        crate::cdr::CdrEncode::encode(&self.feedback, w);
+        crate::cdr::CdrEncode::encode(&self.status, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for Action {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            send_goal: crate::cdr::CdrDecode::decode(r)?,
+            get_result: crate::cdr::CdrDecode::decode(r)?,
+            cancel_goal: crate::cdr::CdrDecode::decode(r)?,
+            feedback: crate::cdr::CdrDecode::decode(r)?,
+            status: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for Action {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/Action";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::Action_";
+    const TYPE_HASH: &'static str = "RIHS01_221c3b8d63470add1ea70231a2c5c3488bd0a11fab7f4b87bbf06ad341062e39";
+}
+
+/// `rosgraph_msgs/msg/Clock`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Clock {
+    pub clock: crate::msgs::builtin_interfaces::msg::Time,
+}
+
+impl ::core::default::Default for Clock {
+    fn default() -> Self {
+        Self {
+            clock: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Clock {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.clock, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for Clock {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            clock: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for Clock {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/Clock";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::Clock_";
+    const TYPE_HASH: &'static str = "RIHS01_692f7a66e93a3c83e71765d033b60349ba68023a8c689a79e48078bcb5c58564";
+}
+
+/// `rosgraph_msgs/msg/Graph`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Graph {
+    pub nodes: ::std::vec::Vec<crate::msgs::rosgraph_msgs::msg::Node>,
+}
+
+impl ::core::default::Default for Graph {
+    fn default() -> Self {
+        Self {
+            nodes: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Graph {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.nodes, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for Graph {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            nodes: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for Graph {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/Graph";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::Graph_";
+    const TYPE_HASH: &'static str = "RIHS01_46e58f3566aba3e489d14877ea71c339e4267aaa769bcd9d7e2d031850a05dfb";
+}
+
+/// `rosgraph_msgs/msg/InterfaceType`
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceType {
+    pub name: ::std::string::String,
+    pub hash: crate::msgs::rosgraph_msgs::msg::TypeHash,
+}
+
+impl ::core::default::Default for InterfaceType {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            hash: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for InterfaceType {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        crate::cdr::CdrEncode::encode(&self.hash, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for InterfaceType {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            hash: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for InterfaceType {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/InterfaceType";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::InterfaceType_";
+    const TYPE_HASH: &'static str = "RIHS01_08e222a0b6950d275c45c2924b6bb6b79b7fdede9c90cdf5d6952dc6f197916c";
+}
+
+/// `rosgraph_msgs/msg/Node`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Node {
+    pub name: ::std::string::String,
+    pub parameters: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::ParameterDescriptor>,
+    pub parameter_values: ::std::vec::Vec<crate::msgs::rcl_interfaces::msg::ParameterValue>,
+    pub publishers: ::std::vec::Vec<crate::msgs::rosgraph_msgs::msg::Topic>,
+    pub subscriptions: ::std::vec::Vec<crate::msgs::rosgraph_msgs::msg::Topic>,
+    pub service_clients: ::std::vec::Vec<crate::msgs::rosgraph_msgs::msg::Service>,
+    pub service_servers: ::std::vec::Vec<crate::msgs::rosgraph_msgs::msg::Service>,
+    pub action_clients: ::std::vec::Vec<crate::msgs::rosgraph_msgs::msg::Action>,
+    pub action_servers: ::std::vec::Vec<crate::msgs::rosgraph_msgs::msg::Action>,
+}
+
+impl ::core::default::Default for Node {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            parameters: ::core::default::Default::default(),
+            parameter_values: ::core::default::Default::default(),
+            publishers: ::core::default::Default::default(),
+            subscriptions: ::core::default::Default::default(),
+            service_clients: ::core::default::Default::default(),
+            service_servers: ::core::default::Default::default(),
+            action_clients: ::core::default::Default::default(),
+            action_servers: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Node {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        crate::cdr::CdrEncode::encode(&self.parameters, w);
+        crate::cdr::CdrEncode::encode(&self.parameter_values, w);
+        crate::cdr::CdrEncode::encode(&self.publishers, w);
+        crate::cdr::CdrEncode::encode(&self.subscriptions, w);
+        crate::cdr::CdrEncode::encode(&self.service_clients, w);
+        crate::cdr::CdrEncode::encode(&self.service_servers, w);
+        crate::cdr::CdrEncode::encode(&self.action_clients, w);
+        crate::cdr::CdrEncode::encode(&self.action_servers, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for Node {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            parameters: crate::cdr::CdrDecode::decode(r)?,
+            parameter_values: crate::cdr::CdrDecode::decode(r)?,
+            publishers: crate::cdr::CdrDecode::decode(r)?,
+            subscriptions: crate::cdr::CdrDecode::decode(r)?,
+            service_clients: crate::cdr::CdrDecode::decode(r)?,
+            service_servers: crate::cdr::CdrDecode::decode(r)?,
+            action_clients: crate::cdr::CdrDecode::decode(r)?,
+            action_servers: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for Node {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/Node";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::Node_";
+    const TYPE_HASH: &'static str = "RIHS01_2260c5128039783515bd98bc77bbb49ae4758818d9e3c6536b313c2024c77045";
+}
+
+/// `rosgraph_msgs/msg/QoSProfile`
+#[derive(Debug, Clone, PartialEq)]
+pub struct QoSProfile {
+    pub depth: u32,
+    pub deadline: crate::msgs::builtin_interfaces::msg::Duration,
+    pub lifespan: crate::msgs::builtin_interfaces::msg::Duration,
+    pub history: u8,
+    pub reliability: u8,
+    pub durability: u8,
+    pub liveliness: u8,
+    pub liveliness_lease_duration: crate::msgs::builtin_interfaces::msg::Duration,
+}
+
+impl ::core::default::Default for QoSProfile {
+    fn default() -> Self {
+        Self {
+            depth: ::core::default::Default::default(),
+            deadline: ::core::default::Default::default(),
+            lifespan: ::core::default::Default::default(),
+            history: ::core::default::Default::default(),
+            reliability: ::core::default::Default::default(),
+            durability: ::core::default::Default::default(),
+            liveliness: ::core::default::Default::default(),
+            liveliness_lease_duration: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl QoSProfile {
+    pub const HISTORY_SYSTEM_DEFAULT: u8 = 0_u8;
+    pub const HISTORY_KEEP_LAST: u8 = 1_u8;
+    pub const HISTORY_KEEP_ALL: u8 = 2_u8;
+    pub const HISTORY_UNKNOWN: u8 = 3_u8;
+    pub const RELIABILITY_SYSTEM_DEFAULT: u8 = 0_u8;
+    pub const RELIABILITY_RELIABLE: u8 = 1_u8;
+    pub const RELIABILITY_BEST_EFFORT: u8 = 2_u8;
+    pub const RELIABILITY_UNKNOWN: u8 = 3_u8;
+    pub const RELIABILITY_BEST_AVAILABLE: u8 = 4_u8;
+    pub const DURABILITY_SYSTEM_DEFAULT: u8 = 0_u8;
+    pub const DURABILITY_TRANSIENT_LOCAL: u8 = 1_u8;
+    pub const DURABILITY_VOLATILE: u8 = 2_u8;
+    pub const DURABILITY_UNKNOWN: u8 = 3_u8;
+    pub const DURABILITY_BEST_AVAILABLE: u8 = 4_u8;
+    pub const LIVELINESS_SYSTEM_DEFAULT: u8 = 0_u8;
+    pub const LIVELINESS_AUTOMATIC: u8 = 1_u8;
+    pub const LIVELINESS_MANUAL_BY_TOPIC: u8 = 3_u8;
+    pub const LIVELINESS_UNKNOWN: u8 = 4_u8;
+    pub const LIVELINESS_BEST_AVAILABLE: u8 = 5_u8;
+}
+
+impl crate::cdr::CdrEncode for QoSProfile {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.u32(self.depth);
+        crate::cdr::CdrEncode::encode(&self.deadline, w);
+        crate::cdr::CdrEncode::encode(&self.lifespan, w);
+        w.u8(self.history);
+        w.u8(self.reliability);
+        w.u8(self.durability);
+        w.u8(self.liveliness);
+        crate::cdr::CdrEncode::encode(&self.liveliness_lease_duration, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for QoSProfile {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            depth: r.u32()?,
+            deadline: crate::cdr::CdrDecode::decode(r)?,
+            lifespan: crate::cdr::CdrDecode::decode(r)?,
+            history: r.u8()?,
+            reliability: r.u8()?,
+            durability: r.u8()?,
+            liveliness: r.u8()?,
+            liveliness_lease_duration: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for QoSProfile {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/QoSProfile";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::QoSProfile_";
+    const TYPE_HASH: &'static str = "RIHS01_0c83305c2c647eecbf3a0ad549c121d6cf12606d902915a28e904d8f2aba42ee";
+}
+
+/// `rosgraph_msgs/msg/Service`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Service {
+    pub name: ::std::string::String,
+    pub request_type: crate::msgs::rosgraph_msgs::msg::InterfaceType,
+    pub request_qos: crate::msgs::rosgraph_msgs::msg::QoSProfile,
+    pub response_type: crate::msgs::rosgraph_msgs::msg::InterfaceType,
+    pub response_qos: crate::msgs::rosgraph_msgs::msg::QoSProfile,
+}
+
+impl ::core::default::Default for Service {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            request_type: ::core::default::Default::default(),
+            request_qos: ::core::default::Default::default(),
+            response_type: ::core::default::Default::default(),
+            response_qos: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Service {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        crate::cdr::CdrEncode::encode(&self.request_type, w);
+        crate::cdr::CdrEncode::encode(&self.request_qos, w);
+        crate::cdr::CdrEncode::encode(&self.response_type, w);
+        crate::cdr::CdrEncode::encode(&self.response_qos, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for Service {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            request_type: crate::cdr::CdrDecode::decode(r)?,
+            request_qos: crate::cdr::CdrDecode::decode(r)?,
+            response_type: crate::cdr::CdrDecode::decode(r)?,
+            response_qos: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for Service {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/Service";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::Service_";
+    const TYPE_HASH: &'static str = "RIHS01_01a80e1dc066d6f37846e00029710c39cfdfd8c807be16f8f6181f5834f5c679";
+}
+
+/// `rosgraph_msgs/msg/Topic`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Topic {
+    pub name: ::std::string::String,
+    pub r#type: crate::msgs::rosgraph_msgs::msg::InterfaceType,
+    pub qos: crate::msgs::rosgraph_msgs::msg::QoSProfile,
+}
+
+impl ::core::default::Default for Topic {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            r#type: ::core::default::Default::default(),
+            qos: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Topic {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        crate::cdr::CdrEncode::encode(&self.r#type, w);
+        crate::cdr::CdrEncode::encode(&self.qos, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for Topic {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            r#type: crate::cdr::CdrDecode::decode(r)?,
+            qos: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for Topic {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/Topic";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::Topic_";
+    const TYPE_HASH: &'static str = "RIHS01_e378dfc444e3e04c76ffdda3caa997f107b6f2d9ba059fcf09b2f39433a149e4";
+}
+
+/// `rosgraph_msgs/msg/TypeHash`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeHash {
+    pub version: u8,
+    pub value: [u8; 32],
+}
+
+impl ::core::default::Default for TypeHash {
+    fn default() -> Self {
+        Self {
+            version: 1_u8,
+            value: ::std::array::from_fn(|_| ::core::default::Default::default()),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for TypeHash {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.u8(self.version);
+        crate::cdr::CdrEncode::encode(&self.value, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for TypeHash {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            version: r.u8()?,
+            value: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for TypeHash {
+    const TYPE_NAME: &'static str = "rosgraph_msgs/msg/TypeHash";
+    const DDS_TYPE_NAME: &'static str = "rosgraph_msgs::msg::dds_::TypeHash_";
+    const TYPE_HASH: &'static str = "RIHS01_b57248b9d4ea0964bd583c53ae3b94354e599b8183a135af48826287bef3c1f6";
+}
+
+}
+}
+
 pub mod sensor_msgs {
 pub mod msg {
 #![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
@@ -8207,6 +10266,499 @@ impl crate::RosService for FrameGraph {
     const TYPE_HASH: &'static str = "RIHS01_0d1fbc6222c018ba5f33822904a2fdd4063705289956d3fdde07cd8c50fe8067";
     type Request = FrameGraph_Request;
     type Response = FrameGraph_Response;
+}
+
+}
+}
+
+pub mod type_description_interfaces {
+pub mod msg {
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
+
+/// `type_description_interfaces/msg/Field`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Field {
+    pub name: ::std::string::String,
+    pub r#type: crate::msgs::type_description_interfaces::msg::FieldType,
+    pub default_value: ::std::string::String,
+}
+
+impl ::core::default::Default for Field {
+    fn default() -> Self {
+        Self {
+            name: ::core::default::Default::default(),
+            r#type: ::core::default::Default::default(),
+            default_value: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for Field {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.name);
+        crate::cdr::CdrEncode::encode(&self.r#type, w);
+        w.string(&self.default_value);
+    }
+}
+
+impl crate::cdr::CdrDecode for Field {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            name: r.string()?,
+            r#type: crate::cdr::CdrDecode::decode(r)?,
+            default_value: r.string()?,
+        })
+    }
+}
+
+impl crate::RosMessage for Field {
+    const TYPE_NAME: &'static str = "type_description_interfaces/msg/Field";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::msg::dds_::Field_";
+    const TYPE_HASH: &'static str = "RIHS01_c0b01379cd4226281285ccaf6be46653968f855f7c5e41614ff5d7a854efef7c";
+}
+
+/// `type_description_interfaces/msg/FieldType`
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldType {
+    pub type_id: u8,
+    pub capacity: u64,
+    pub string_capacity: u64,
+    pub nested_type_name: ::std::string::String,
+}
+
+impl ::core::default::Default for FieldType {
+    fn default() -> Self {
+        Self {
+            type_id: 0_u8,
+            capacity: ::core::default::Default::default(),
+            string_capacity: ::core::default::Default::default(),
+            nested_type_name: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl FieldType {
+    pub const FIELD_TYPE_NOT_SET: u8 = 0_u8;
+    pub const FIELD_TYPE_NESTED_TYPE: u8 = 1_u8;
+    pub const FIELD_TYPE_INT8: u8 = 2_u8;
+    pub const FIELD_TYPE_UINT8: u8 = 3_u8;
+    pub const FIELD_TYPE_INT16: u8 = 4_u8;
+    pub const FIELD_TYPE_UINT16: u8 = 5_u8;
+    pub const FIELD_TYPE_INT32: u8 = 6_u8;
+    pub const FIELD_TYPE_UINT32: u8 = 7_u8;
+    pub const FIELD_TYPE_INT64: u8 = 8_u8;
+    pub const FIELD_TYPE_UINT64: u8 = 9_u8;
+    pub const FIELD_TYPE_FLOAT: u8 = 10_u8;
+    pub const FIELD_TYPE_DOUBLE: u8 = 11_u8;
+    pub const FIELD_TYPE_LONG_DOUBLE: u8 = 12_u8;
+    pub const FIELD_TYPE_CHAR: u8 = 13_u8;
+    pub const FIELD_TYPE_WCHAR: u8 = 14_u8;
+    pub const FIELD_TYPE_BOOLEAN: u8 = 15_u8;
+    pub const FIELD_TYPE_BYTE: u8 = 16_u8;
+    pub const FIELD_TYPE_STRING: u8 = 17_u8;
+    pub const FIELD_TYPE_WSTRING: u8 = 18_u8;
+    pub const FIELD_TYPE_FIXED_STRING: u8 = 19_u8;
+    pub const FIELD_TYPE_FIXED_WSTRING: u8 = 20_u8;
+    pub const FIELD_TYPE_BOUNDED_STRING: u8 = 21_u8;
+    pub const FIELD_TYPE_BOUNDED_WSTRING: u8 = 22_u8;
+    pub const FIELD_TYPE_NESTED_TYPE_ARRAY: u8 = 49_u8;
+    pub const FIELD_TYPE_INT8_ARRAY: u8 = 50_u8;
+    pub const FIELD_TYPE_UINT8_ARRAY: u8 = 51_u8;
+    pub const FIELD_TYPE_INT16_ARRAY: u8 = 52_u8;
+    pub const FIELD_TYPE_UINT16_ARRAY: u8 = 53_u8;
+    pub const FIELD_TYPE_INT32_ARRAY: u8 = 54_u8;
+    pub const FIELD_TYPE_UINT32_ARRAY: u8 = 55_u8;
+    pub const FIELD_TYPE_INT64_ARRAY: u8 = 56_u8;
+    pub const FIELD_TYPE_UINT64_ARRAY: u8 = 57_u8;
+    pub const FIELD_TYPE_FLOAT_ARRAY: u8 = 58_u8;
+    pub const FIELD_TYPE_DOUBLE_ARRAY: u8 = 59_u8;
+    pub const FIELD_TYPE_LONG_DOUBLE_ARRAY: u8 = 60_u8;
+    pub const FIELD_TYPE_CHAR_ARRAY: u8 = 61_u8;
+    pub const FIELD_TYPE_WCHAR_ARRAY: u8 = 62_u8;
+    pub const FIELD_TYPE_BOOLEAN_ARRAY: u8 = 63_u8;
+    pub const FIELD_TYPE_BYTE_ARRAY: u8 = 64_u8;
+    pub const FIELD_TYPE_STRING_ARRAY: u8 = 65_u8;
+    pub const FIELD_TYPE_WSTRING_ARRAY: u8 = 66_u8;
+    pub const FIELD_TYPE_FIXED_STRING_ARRAY: u8 = 67_u8;
+    pub const FIELD_TYPE_FIXED_WSTRING_ARRAY: u8 = 68_u8;
+    pub const FIELD_TYPE_BOUNDED_STRING_ARRAY: u8 = 69_u8;
+    pub const FIELD_TYPE_BOUNDED_WSTRING_ARRAY: u8 = 70_u8;
+    pub const FIELD_TYPE_NESTED_TYPE_BOUNDED_SEQUENCE: u8 = 97_u8;
+    pub const FIELD_TYPE_INT8_BOUNDED_SEQUENCE: u8 = 98_u8;
+    pub const FIELD_TYPE_UINT8_BOUNDED_SEQUENCE: u8 = 99_u8;
+    pub const FIELD_TYPE_INT16_BOUNDED_SEQUENCE: u8 = 100_u8;
+    pub const FIELD_TYPE_UINT16_BOUNDED_SEQUENCE: u8 = 101_u8;
+    pub const FIELD_TYPE_INT32_BOUNDED_SEQUENCE: u8 = 102_u8;
+    pub const FIELD_TYPE_UINT32_BOUNDED_SEQUENCE: u8 = 103_u8;
+    pub const FIELD_TYPE_INT64_BOUNDED_SEQUENCE: u8 = 104_u8;
+    pub const FIELD_TYPE_UINT64_BOUNDED_SEQUENCE: u8 = 105_u8;
+    pub const FIELD_TYPE_FLOAT_BOUNDED_SEQUENCE: u8 = 106_u8;
+    pub const FIELD_TYPE_DOUBLE_BOUNDED_SEQUENCE: u8 = 107_u8;
+    pub const FIELD_TYPE_LONG_DOUBLE_BOUNDED_SEQUENCE: u8 = 108_u8;
+    pub const FIELD_TYPE_CHAR_BOUNDED_SEQUENCE: u8 = 109_u8;
+    pub const FIELD_TYPE_WCHAR_BOUNDED_SEQUENCE: u8 = 110_u8;
+    pub const FIELD_TYPE_BOOLEAN_BOUNDED_SEQUENCE: u8 = 111_u8;
+    pub const FIELD_TYPE_BYTE_BOUNDED_SEQUENCE: u8 = 112_u8;
+    pub const FIELD_TYPE_STRING_BOUNDED_SEQUENCE: u8 = 113_u8;
+    pub const FIELD_TYPE_WSTRING_BOUNDED_SEQUENCE: u8 = 114_u8;
+    pub const FIELD_TYPE_FIXED_STRING_BOUNDED_SEQUENCE: u8 = 115_u8;
+    pub const FIELD_TYPE_FIXED_WSTRING_BOUNDED_SEQUENCE: u8 = 116_u8;
+    pub const FIELD_TYPE_BOUNDED_STRING_BOUNDED_SEQUENCE: u8 = 117_u8;
+    pub const FIELD_TYPE_BOUNDED_WSTRING_BOUNDED_SEQUENCE: u8 = 118_u8;
+    pub const FIELD_TYPE_NESTED_TYPE_UNBOUNDED_SEQUENCE: u8 = 145_u8;
+    pub const FIELD_TYPE_INT8_UNBOUNDED_SEQUENCE: u8 = 146_u8;
+    pub const FIELD_TYPE_UINT8_UNBOUNDED_SEQUENCE: u8 = 147_u8;
+    pub const FIELD_TYPE_INT16_UNBOUNDED_SEQUENCE: u8 = 148_u8;
+    pub const FIELD_TYPE_UINT16_UNBOUNDED_SEQUENCE: u8 = 149_u8;
+    pub const FIELD_TYPE_INT32_UNBOUNDED_SEQUENCE: u8 = 150_u8;
+    pub const FIELD_TYPE_UINT32_UNBOUNDED_SEQUENCE: u8 = 151_u8;
+    pub const FIELD_TYPE_INT64_UNBOUNDED_SEQUENCE: u8 = 152_u8;
+    pub const FIELD_TYPE_UINT64_UNBOUNDED_SEQUENCE: u8 = 153_u8;
+    pub const FIELD_TYPE_FLOAT_UNBOUNDED_SEQUENCE: u8 = 154_u8;
+    pub const FIELD_TYPE_DOUBLE_UNBOUNDED_SEQUENCE: u8 = 155_u8;
+    pub const FIELD_TYPE_LONG_DOUBLE_UNBOUNDED_SEQUENCE: u8 = 156_u8;
+    pub const FIELD_TYPE_CHAR_UNBOUNDED_SEQUENCE: u8 = 157_u8;
+    pub const FIELD_TYPE_WCHAR_UNBOUNDED_SEQUENCE: u8 = 158_u8;
+    pub const FIELD_TYPE_BOOLEAN_UNBOUNDED_SEQUENCE: u8 = 159_u8;
+    pub const FIELD_TYPE_BYTE_UNBOUNDED_SEQUENCE: u8 = 160_u8;
+    pub const FIELD_TYPE_STRING_UNBOUNDED_SEQUENCE: u8 = 161_u8;
+    pub const FIELD_TYPE_WSTRING_UNBOUNDED_SEQUENCE: u8 = 162_u8;
+    pub const FIELD_TYPE_FIXED_STRING_UNBOUNDED_SEQUENCE: u8 = 163_u8;
+    pub const FIELD_TYPE_FIXED_WSTRING_UNBOUNDED_SEQUENCE: u8 = 164_u8;
+    pub const FIELD_TYPE_BOUNDED_STRING_UNBOUNDED_SEQUENCE: u8 = 165_u8;
+    pub const FIELD_TYPE_BOUNDED_WSTRING_UNBOUNDED_SEQUENCE: u8 = 166_u8;
+}
+
+impl crate::cdr::CdrEncode for FieldType {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.u8(self.type_id);
+        w.u64(self.capacity);
+        w.u64(self.string_capacity);
+        w.string(&self.nested_type_name);
+    }
+}
+
+impl crate::cdr::CdrDecode for FieldType {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            type_id: r.u8()?,
+            capacity: r.u64()?,
+            string_capacity: r.u64()?,
+            nested_type_name: r.string()?,
+        })
+    }
+}
+
+impl crate::RosMessage for FieldType {
+    const TYPE_NAME: &'static str = "type_description_interfaces/msg/FieldType";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::msg::dds_::FieldType_";
+    const TYPE_HASH: &'static str = "RIHS01_a70b6dd919645a03a3586f7f821defbc886ea3e531a1d95cc0f380a3973ccaa6";
+}
+
+/// `type_description_interfaces/msg/IndividualTypeDescription`
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndividualTypeDescription {
+    pub type_name: ::std::string::String,
+    pub fields: ::std::vec::Vec<crate::msgs::type_description_interfaces::msg::Field>,
+}
+
+impl ::core::default::Default for IndividualTypeDescription {
+    fn default() -> Self {
+        Self {
+            type_name: ::core::default::Default::default(),
+            fields: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for IndividualTypeDescription {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.type_name);
+        crate::cdr::CdrEncode::encode(&self.fields, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for IndividualTypeDescription {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            type_name: r.string()?,
+            fields: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for IndividualTypeDescription {
+    const TYPE_NAME: &'static str = "type_description_interfaces/msg/IndividualTypeDescription";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::msg::dds_::IndividualTypeDescription_";
+    const TYPE_HASH: &'static str = "RIHS01_55c827d86c3c141bdd318fe6c22e11190e4d3b37c8f4f9751a084aa05ce96560";
+}
+
+/// `type_description_interfaces/msg/KeyValue`
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyValue {
+    pub key: ::std::string::String,
+    pub value: ::std::string::String,
+}
+
+impl ::core::default::Default for KeyValue {
+    fn default() -> Self {
+        Self {
+            key: ::core::default::Default::default(),
+            value: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for KeyValue {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.key);
+        w.string(&self.value);
+    }
+}
+
+impl crate::cdr::CdrDecode for KeyValue {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            key: r.string()?,
+            value: r.string()?,
+        })
+    }
+}
+
+impl crate::RosMessage for KeyValue {
+    const TYPE_NAME: &'static str = "type_description_interfaces/msg/KeyValue";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::msg::dds_::KeyValue_";
+    const TYPE_HASH: &'static str = "RIHS01_274fe56bf14f33c7512e34c646a37579ee36779f745f049a9760763e817f0c42";
+}
+
+/// `type_description_interfaces/msg/TypeDescription`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeDescription {
+    pub type_description: crate::msgs::type_description_interfaces::msg::IndividualTypeDescription,
+    pub referenced_type_descriptions: ::std::vec::Vec<crate::msgs::type_description_interfaces::msg::IndividualTypeDescription>,
+}
+
+impl ::core::default::Default for TypeDescription {
+    fn default() -> Self {
+        Self {
+            type_description: ::core::default::Default::default(),
+            referenced_type_descriptions: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for TypeDescription {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.type_description, w);
+        crate::cdr::CdrEncode::encode(&self.referenced_type_descriptions, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for TypeDescription {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            type_description: crate::cdr::CdrDecode::decode(r)?,
+            referenced_type_descriptions: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for TypeDescription {
+    const TYPE_NAME: &'static str = "type_description_interfaces/msg/TypeDescription";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::msg::dds_::TypeDescription_";
+    const TYPE_HASH: &'static str = "RIHS01_739f2508c9fa3a6f330913ff5b9d25fb74159a077da71e1087f51a60c12a080b";
+}
+
+/// `type_description_interfaces/msg/TypeSource`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeSource {
+    pub type_name: ::std::string::String,
+    pub encoding: ::std::string::String,
+    pub raw_file_contents: ::std::string::String,
+}
+
+impl ::core::default::Default for TypeSource {
+    fn default() -> Self {
+        Self {
+            type_name: ::core::default::Default::default(),
+            encoding: ::core::default::Default::default(),
+            raw_file_contents: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for TypeSource {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.type_name);
+        w.string(&self.encoding);
+        w.string(&self.raw_file_contents);
+    }
+}
+
+impl crate::cdr::CdrDecode for TypeSource {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            type_name: r.string()?,
+            encoding: r.string()?,
+            raw_file_contents: r.string()?,
+        })
+    }
+}
+
+impl crate::RosMessage for TypeSource {
+    const TYPE_NAME: &'static str = "type_description_interfaces/msg/TypeSource";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::msg::dds_::TypeSource_";
+    const TYPE_HASH: &'static str = "RIHS01_faeaec7596c04ecf5b6e99ad225e4c7cbb997ad5435f793526fb3984d011aae5";
+}
+
+}
+pub mod srv {
+#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]
+
+/// `type_description_interfaces/srv/GetTypeDescription_Event`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetTypeDescription_Event {
+    pub info: crate::msgs::service_msgs::msg::ServiceEventInfo,
+    pub request: ::std::vec::Vec<crate::msgs::type_description_interfaces::srv::GetTypeDescription_Request>,
+    pub response: ::std::vec::Vec<crate::msgs::type_description_interfaces::srv::GetTypeDescription_Response>,
+}
+
+impl ::core::default::Default for GetTypeDescription_Event {
+    fn default() -> Self {
+        Self {
+            info: ::core::default::Default::default(),
+            request: ::core::default::Default::default(),
+            response: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetTypeDescription_Event {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        crate::cdr::CdrEncode::encode(&self.info, w);
+        crate::cdr::CdrEncode::encode(&self.request, w);
+        crate::cdr::CdrEncode::encode(&self.response, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetTypeDescription_Event {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            info: crate::cdr::CdrDecode::decode(r)?,
+            request: crate::cdr::CdrDecode::decode(r)?,
+            response: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetTypeDescription_Event {
+    const TYPE_NAME: &'static str = "type_description_interfaces/srv/GetTypeDescription_Event";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::srv::dds_::GetTypeDescription_Event_";
+    const TYPE_HASH: &'static str = "RIHS01_491e3350e7a0b11918fb16a523cf01a22d76fdaa53c43b52164fea14aabb5612";
+}
+
+/// `type_description_interfaces/srv/GetTypeDescription_Request`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetTypeDescription_Request {
+    pub type_name: ::std::string::String,
+    pub type_hash: ::std::string::String,
+    pub include_type_sources: bool,
+}
+
+impl ::core::default::Default for GetTypeDescription_Request {
+    fn default() -> Self {
+        Self {
+            type_name: ::core::default::Default::default(),
+            type_hash: ::core::default::Default::default(),
+            include_type_sources: true,
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetTypeDescription_Request {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.string(&self.type_name);
+        w.string(&self.type_hash);
+        w.bool(self.include_type_sources);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetTypeDescription_Request {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            type_name: r.string()?,
+            type_hash: r.string()?,
+            include_type_sources: r.bool()?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetTypeDescription_Request {
+    const TYPE_NAME: &'static str = "type_description_interfaces/srv/GetTypeDescription_Request";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::srv::dds_::GetTypeDescription_Request_";
+    const TYPE_HASH: &'static str = "RIHS01_470f56ccbcf13d55c78c8b735fb12da03e639e5acded994426c89d94778d9e28";
+}
+
+/// `type_description_interfaces/srv/GetTypeDescription_Response`
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetTypeDescription_Response {
+    pub successful: bool,
+    pub failure_reason: ::std::string::String,
+    pub type_description: crate::msgs::type_description_interfaces::msg::TypeDescription,
+    pub type_sources: ::std::vec::Vec<crate::msgs::type_description_interfaces::msg::TypeSource>,
+    pub extra_information: ::std::vec::Vec<crate::msgs::type_description_interfaces::msg::KeyValue>,
+}
+
+impl ::core::default::Default for GetTypeDescription_Response {
+    fn default() -> Self {
+        Self {
+            successful: ::core::default::Default::default(),
+            failure_reason: ::core::default::Default::default(),
+            type_description: ::core::default::Default::default(),
+            type_sources: ::core::default::Default::default(),
+            extra_information: ::core::default::Default::default(),
+        }
+    }
+}
+
+impl crate::cdr::CdrEncode for GetTypeDescription_Response {
+    fn encode(&self, w: &mut crate::cdr::CdrWriter) {
+        w.bool(self.successful);
+        w.string(&self.failure_reason);
+        crate::cdr::CdrEncode::encode(&self.type_description, w);
+        crate::cdr::CdrEncode::encode(&self.type_sources, w);
+        crate::cdr::CdrEncode::encode(&self.extra_information, w);
+    }
+}
+
+impl crate::cdr::CdrDecode for GetTypeDescription_Response {
+    fn decode(r: &mut crate::cdr::CdrReader<'_>) -> ::core::result::Result<Self, crate::cdr::CdrError> {
+        Ok(Self {
+            successful: r.bool()?,
+            failure_reason: r.string()?,
+            type_description: crate::cdr::CdrDecode::decode(r)?,
+            type_sources: crate::cdr::CdrDecode::decode(r)?,
+            extra_information: crate::cdr::CdrDecode::decode(r)?,
+        })
+    }
+}
+
+impl crate::RosMessage for GetTypeDescription_Response {
+    const TYPE_NAME: &'static str = "type_description_interfaces/srv/GetTypeDescription_Response";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::srv::dds_::GetTypeDescription_Response_";
+    const TYPE_HASH: &'static str = "RIHS01_648c49d976240861a482f961c5621ddd0d2135d8cce6f297a76d4f6376d93b75";
+}
+
+/// `type_description_interfaces/srv/GetTypeDescription`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GetTypeDescription;
+
+impl crate::RosService for GetTypeDescription {
+    const TYPE_NAME: &'static str = "type_description_interfaces/srv/GetTypeDescription";
+    const DDS_TYPE_NAME: &'static str = "type_description_interfaces::srv::dds_::GetTypeDescription_";
+    const TYPE_HASH: &'static str = "RIHS01_69b9c19c1021405984cc60dbbb1edceb147a6538b411d812ba6afabeed962cd5";
+    type Request = GetTypeDescription_Request;
+    type Response = GetTypeDescription_Response;
 }
 
 }

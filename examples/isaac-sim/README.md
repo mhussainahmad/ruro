@@ -65,9 +65,10 @@ switch it to rmw_zenoh as above. This was not tried.
 
 ## Known gaps
 
-- Isaac Sim publishes simulated time on `/clock`, and ROS 2 nodes in the scene may stamp
-  messages with it. ruro's ROS 2 bridge has no `rosgraph_msgs/Clock` node, so the graph
-  runs on the wall clock and cannot follow a paused or slowed simulation.
+- The graph follows Isaac Sim's `/clock` through `ros2/sub-clock` (`clock: sim`), which
+  needs a ROS 2 clock publisher in the scene (Isaac Sim's "ROS2 Publish Clock" OmniGraph
+  node). Without one, timer-driven nodes do not step; remove `clock: sim` and the `clock`
+  node to run on the wall clock instead.
 - The 3D lidar (`/front_3d_lidar/lidar_points`, `sensor_msgs/PointCloud2`) can be added
   with a `ros2/sub-point-cloud2` node if its fields are float32 x, y and z.
 - Camera images must be `rgb8`, `rgba8`, `bgr8`, `bgra8` or `mono8` for the bridge to

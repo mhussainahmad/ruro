@@ -61,10 +61,10 @@ examples/gazebo/rover.yaml` lists the changes. The real overlay has not been run
 
 ## Simulated time
 
-Gazebo publishes `/clock` and `run.sh` bridges it, but the graph runs on the wall clock: the
-ROS 2 bridge has no node for `rosgraph_msgs/Clock` yet, so `clock: sim` cannot follow
-Gazebo's time. Gazebo runs at real-time factor 1, so the two agree as long as the
-simulation keeps up.
+Gazebo publishes `/clock` and `run.sh` bridges it. The graph has `clock: sim` and a
+`ros2/sub-clock` node, so it runs on Gazebo's time: timers step on simulated time, and a
+paused or slowed simulation pauses or slows the graph. The `real` overlay removes the node
+and switches back to the wall clock.
 
 ## Test
 

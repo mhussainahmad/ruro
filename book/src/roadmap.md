@@ -20,7 +20,7 @@ the order it will be done. An item is ticked only when a test proves it, and
 
 ## ROS 2
 
-- [ ] Simulated time follows a ROS `/clock`.
+- [x] Simulated time follows a ROS `/clock`.
 - [ ] ruro nodes offer ROS parameter services (`ros2 param get/set/list`).
 - [ ] ruro nodes offer the type-description service.
 - [ ] The generic bridges can be transient-local.

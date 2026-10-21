@@ -6,8 +6,9 @@
 //! - [`hash`] computes RIHS01 type hashes (REP-2011).
 //! - [`msgs`] holds generated types for `builtin_interfaces`, `std_msgs`,
 //!   `std_srvs`, `geometry_msgs`, `sensor_msgs`, `nav_msgs`, `tf2_msgs`,
-//!   `action_msgs`, `unique_identifier_msgs`, `service_msgs` and
-//!   `example_interfaces`, whose definitions are bundled in `interfaces/`
+//!   `action_msgs`, `unique_identifier_msgs`, `service_msgs`,
+//!   `example_interfaces`, `rosgraph_msgs`, `rcl_interfaces` and
+//!   `type_description_interfaces`, whose definitions are bundled in `interfaces/`
 //!   (see `interfaces/NOTICE.md`).
 //! - [`rmw`] publishes and subscribes the way rmw_zenoh does: the same key
 //!   expressions, attachments and liveliness tokens, so ROS 2 nodes using

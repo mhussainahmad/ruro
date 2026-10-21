@@ -69,6 +69,7 @@ network callback and step once a second only to apply parameter changes, so thei
 | `std/Scalar` | `std_msgs/Float64` | `float64` | `/value` |
 | `std/Text` | `std_msgs/String` | `string` | `/chatter` |
 | `std/Flag` | `std_msgs/Bool` | `bool` | `/flag` |
+| `std/Clock` | `rosgraph_msgs/Clock` | `clock` | `/clock` |
 
 Fields ruro does not model are dropped on the way in and zeroed on the way out (odometry
 covariances, joint names, camera binning and region of interest). Incoming images must be
@@ -360,7 +361,8 @@ messages and services the action protocol wraps them in, and a marker type imple
 
 These interfaces are bundled, copied from ROS 2 Jazzy: `builtin_interfaces`, `std_msgs`,
 `std_srvs`, `geometry_msgs`, `sensor_msgs`, `nav_msgs`, `tf2_msgs`, `action_msgs`,
-`unique_identifier_msgs`, `service_msgs` and `example_interfaces`. Their 214 type hashes,
+`unique_identifier_msgs`, `service_msgs`, `example_interfaces`, `rosgraph_msgs`,
+`rcl_interfaces` and `type_description_interfaces`. Their 278 type hashes,
 service and action types included, are checked against the ones Jazzy publishes.
 
 ## Checking against ROS 2
@@ -405,6 +407,6 @@ against a machine running ROS 2 with rmw_zenoh check the same things by hand.
 - ROS nodes must use rmw_zenoh, also when ruro runs them with `ros2/node`.
 - Type hashes follow REP 2011 (RIHS01), as used by Jazzy and later. Distributions without
   type hashes (Humble) are not supported.
-- There is no bridge node for joint commands (`std/JointCommand`) or for `/clock`.
+- There is no bridge node for joint commands (`std/JointCommand`).
 - The bridge's own ROS node does not offer the parameter or type description services
   rclcpp nodes have, so `ros2 param` and `ros2 node info` see little of it.

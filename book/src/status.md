@@ -91,7 +91,7 @@ that skip in CI:
 
 - ROS 2: deadline, lifespan and liveliness are announced but not enforced (as in
   rmw_zenoh); the generic bridges are always volatile; a ruro ROS node offers no parameter
-  or type-description services; simulated time cannot follow a ROS `/clock`.
+  or type-description services.
 - GPU buffers work between processes on one machine only, and ONNX Runtime does not take
   them yet (its CUDA provider is not wired up). Python nodes cannot receive them.
 - H.265 RTSP streams are refused.

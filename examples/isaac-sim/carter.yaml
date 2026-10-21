@@ -10,7 +10,14 @@
 #   ruro daemon                                  # the Zenoh router Isaac Sim connects to
 #   ruro run examples/isaac-sim/carter.yaml
 name: carter
+# Isaac Sim's time, from its /clock.
+clock: sim
 nodes:
+  clock:
+    type: ros2/sub-clock
+    group: sim
+    params: { topic: /clock, router: tcp/127.0.0.1:7447 }
+    pos: [0, 620]
   scan:
     type: ros2/sub-laser-scan
     group: sim

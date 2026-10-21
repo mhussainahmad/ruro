@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use ruro::msg::{Encoding, Image, Text, Twist, Vec3};
+use ruro::msg::{Clock, Encoding, Image, Text, Twist, Vec3};
 use ruro::node::testing::Harness;
 use serde_json::json;
 use zenoh::Wait;
@@ -79,6 +79,15 @@ fn bridges_relay_through_ros2_topics() {
         .for_each(|(i, b)| *b = i as u8);
     assert_eq!(relay(&mut publ, &mut sub, img.clone())[0], img);
 
+    // Simulated time goes through rosgraph_msgs/Clock.
+    let mut sub = Harness::new("ros2/sub-clock", params("/clock")).unwrap();
+    sub.step().unwrap();
+    let mut publ = Harness::new("ros2/pub-clock", params("/clock")).unwrap();
+    let t = Clock {
+        time_ns: 12_000_000_345,
+    };
+    assert_eq!(relay(&mut publ, &mut sub, t)[0], t);
+
     // Strings, and a parameter change that moves the subscription.
     let mut sub = Harness::new("ros2/sub-string", params("/a")).unwrap();
     sub.step().unwrap();
@@ -117,6 +126,10 @@ fn bridges_relay_through_ros2_topics() {
     );
     assert!(names.contains(&("/camera/image_raw", "sensor_msgs/msg/Image")));
     assert!(names.contains(&("/b", "std_msgs/msg/String")), "{names:?}");
+    assert!(
+        names.contains(&("/clock", "rosgraph_msgs/msg/Clock")),
+        "{names:?}"
+    );
     let cmd = topics.iter().find(|t| t.name == "/cmd_vel").unwrap();
     assert!(cmd.publishers >= 1 && cmd.subscribers >= 1);
 }
@@ -193,6 +206,7 @@ fn every_bridge_kind_is_registered() {
         "float64",
         "string",
         "bool",
+        "clock",
     ] {
         for dir in ["sub", "pub"] {
             let kind = format!("ros2/{dir}-{t}");

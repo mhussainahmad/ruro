@@ -119,6 +119,11 @@ impl Latch {
         !self.origins.is_empty()
     }
 
+    /// The daemons whose stop is latched here.
+    pub fn origins(&self) -> Vec<String> {
+        self.origins.iter().cloned().collect()
+    }
+
     /// A number for a request of this daemon's own, above any before it.
     fn next_seq(&mut self, me: &str) -> Seq {
         self.counter += 1;

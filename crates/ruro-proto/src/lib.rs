@@ -302,6 +302,25 @@ pub struct DaemonStatus {
     /// Outcome of the last update of this daemon, e.g. `updated from 0.1.0`
     /// or why an update was rolled back.
     pub update: Option<String>,
+    /// The daemons whose stop is latched here (this one's own name for a
+    /// stop engaged here). Empty for daemons that predate it.
+    pub estop_by: Vec<String>,
+}
+
+/// The status as published by daemons before `estop_by`.
+#[derive(Deserialize)]
+struct StatusV2 {
+    name: String,
+    version: String,
+    pid: u32,
+    uptime_s: f64,
+    graph: Option<String>,
+    groups: Vec<GroupStatus>,
+    recording: Option<String>,
+    playback: Option<PlaybackStatus>,
+    estopped: bool,
+    target: String,
+    update: Option<String>,
 }
 
 /// The status as published by daemons before `target` and `update`.
@@ -322,6 +341,22 @@ struct StatusV1 {
 /// (Older readers ignore the fields added since, which postcard appends.)
 pub fn decode_status(bytes: &[u8]) -> Result<DaemonStatus> {
     decode(bytes).or_else(|e| {
+        if let Ok(s) = decode::<StatusV2>(bytes) {
+            return Ok(DaemonStatus {
+                name: s.name,
+                version: s.version,
+                pid: s.pid,
+                uptime_s: s.uptime_s,
+                graph: s.graph,
+                groups: s.groups,
+                recording: s.recording,
+                playback: s.playback,
+                estopped: s.estopped,
+                target: s.target,
+                update: s.update,
+                estop_by: Vec::new(),
+            });
+        }
         let Ok(s) = decode::<StatusV1>(bytes) else {
             return Err(e);
         };
@@ -337,6 +372,7 @@ pub fn decode_status(bytes: &[u8]) -> Result<DaemonStatus> {
             estopped: s.estopped,
             target: String::new(),
             update: None,
+            estop_by: Vec::new(),
         })
     })
 }
@@ -1096,11 +1132,19 @@ mod tests {
         );
         assert_eq!((new.target.as_str(), new.update), ("", None));
 
-        let current = DaemonStatus {
+        let v2 = DaemonStatus {
             target: "x86_64-unknown-linux-gnu".into(),
             update: Some("updated from 0.0.9".into()),
             version: "0.2.0".into(),
             ..new
+        };
+        // A status without `estop_by` keeps its target and update.
+        let mut v2_bytes = encode(&v2);
+        assert_eq!(v2_bytes.pop(), Some(0), "an empty list is one zero byte");
+        assert_eq!(decode_status(&v2_bytes).unwrap(), v2);
+        let current = DaemonStatus {
+            estop_by: vec!["laptop".into()],
+            ..v2
         };
         assert_eq!(decode_status(&encode(&current)).unwrap(), current);
         // An old reader ignores the new fields.

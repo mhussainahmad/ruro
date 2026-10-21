@@ -124,16 +124,42 @@ pub fn clock(ts_ns: u64) -> String {
     )
 }
 
-/// Lines about the e-stop of the other machines running the graph: a stop
-/// engaged directly on one of them does not reach this daemon.
-pub fn peer_estop_lines(peers: &[DaemonStatus]) -> Vec<String> {
+/// Where to release the stop latched at daemon `at` by `by`: a stop is
+/// released where it was engaged, or at any daemon with `--all`.
+pub fn release_hint(at: &str, by: &[String], here: &str) -> String {
+    let daemon = |d: &str| {
+        if d == here {
+            String::new()
+        } else {
+            format!("--daemon {d} ")
+        }
+    };
+    match by {
+        // Daemons that do not say who engaged it.
+        [] => format!("release with `ruro {}estop --release`", daemon(at)),
+        [only] => format!("release with `ruro {}estop --release`", daemon(only)),
+        _ => {
+            let who: Vec<String> = by.iter().map(|o| format!("`{o}`")).collect();
+            format!(
+                "engaged by {}: release each there, or all with `ruro {}estop --release --all`",
+                who.join(", "),
+                daemon(at)
+            )
+        }
+    }
+}
+
+/// Lines about the e-stop of the other machines running the graph, as
+/// seen from daemon `here`.
+pub fn peer_estop_lines(peers: &[DaemonStatus], here: &str) -> Vec<String> {
     peers
         .iter()
         .filter(|p| p.estopped)
         .map(|p| {
             format!(
-                "emergency stop engaged on `{}` (release with `ruro --daemon {} estop --release`)",
-                p.name, p.name
+                "emergency stop engaged on `{}` ({})",
+                p.name,
+                release_hint(&p.name, &p.estop_by, here)
             )
         })
         .collect()
@@ -170,11 +196,12 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics], peers: &[Da
     }
     if status.estopped {
         println!(
-            "{} (release with `ruro estop --release`)",
-            paint("1;31", "EMERGENCY STOP ENGAGED")
+            "{} ({})",
+            paint("1;31", "EMERGENCY STOP ENGAGED"),
+            release_hint(&status.name, &status.estop_by, &status.name)
         );
     }
-    for line in peer_estop_lines(peers) {
+    for line in peer_estop_lines(peers, &status.name) {
         println!("{}", paint("1;31", &line));
     }
     if let Some(r) = &status.recording {
@@ -196,8 +223,8 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics], peers: &[Da
     };
     println!("graph  {graph}\n");
     println!(
-        "{:<14} {:<10} {:>7} {:>9} {:>9} {:>9} {:>6} {:>7} {:>9}",
-        "NODE", "STATE", "HZ", "P50", "P99", "AGE", "CPU", "ERRORS", "JIT P99"
+        "{:<14} {:<10} {:>7} {:>9} {:>9} {:>9} {:>7} {:>6} {:>7} {:>9}",
+        "NODE", "STATE", "HZ", "P50", "P99", "AGE", "DROPS", "CPU", "ERRORS", "JIT P99"
     );
     for g in &status.groups {
         let state = match g.state {
@@ -227,13 +254,14 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics], peers: &[Da
                         NodeState::Stopped => "stopped",
                     };
                     println!(
-                        "  {:<12} {:<10} {:>7.1} {:>9} {:>9} {:>9} {:>5.1}% {:>7} {:>9}",
+                        "  {:<12} {:<10} {:>7.1} {:>9} {:>9} {:>9} {:>7} {:>5.1}% {:>7} {:>9}",
                         id,
                         state,
                         n.hz,
                         micros(n.step_p50_us),
                         micros(n.step_p99_us),
                         n.input_age_ms.map_or("-".into(), |a| micros(a * 1000.0)),
+                        n.dropped,
                         n.cpu_pct,
                         n.errors,
                         n.timing
@@ -339,9 +367,26 @@ mod tests {
             estopped,
             target: String::new(),
             update: None,
+            estop_by: Vec::new(),
         };
-        let lines = peer_estop_lines(&[peer("robot", true), peer("arm", false)]);
+        let lines = peer_estop_lines(&[peer("robot", true), peer("arm", false)], "laptop");
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("`robot`"), "{lines:?}");
+
+        // Released where it was engaged, which may be neither machine.
+        let by = |o: &[&str]| o.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            release_hint("robot", &by(&["laptop"]), "laptop"),
+            "release with `ruro estop --release`"
+        );
+        assert_eq!(
+            release_hint("laptop", &by(&["robot"]), "laptop"),
+            "release with `ruro --daemon robot estop --release`"
+        );
+        assert_eq!(
+            release_hint("robot", &by(&["laptop", "console"]), "laptop"),
+            "engaged by `laptop`, `console`: release each there, or all with \
+             `ruro --daemon robot estop --release --all`"
+        );
     }
 }

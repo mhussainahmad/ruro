@@ -572,6 +572,7 @@ fn status(st: &State, started: Instant) -> DaemonStatus {
         estopped: st.estop.load(Ordering::Relaxed),
         target: TARGET.into(),
         update: st.update_note.clone(),
+        estop_by: st.estop_latch.lock().origins(),
     }
 }
 

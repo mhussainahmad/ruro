@@ -58,6 +58,14 @@ part can take longer than the CLI's 10 s request timeout to collect.
 
 `ruro kill`, `ruro echo` and `ruro param` reach the machine that runs the group or node.
 
+Wires between machines cross a network that loses and delays packets. Zenoh retransmits, so
+messages arrive in bursts, and an input keeps only its newest message by default (depth 1):
+on a lossy link many are dropped, which the DROPS column of `ruro status` shows. Give such
+wires a queue when every message counts, for example
+`- { from: lidar.out, to: planner.scan, depth: 32 }`. With 50 ms of delay and 2% loss
+between two containers, depth 1 delivered 70 to 84 of 100 messages a second, and depth 64
+more than 96.
+
 The emergency stop spans machines too: engaged at any machine of the graph, it is passed on
 to every other machine of the graph (see [Emergency stop](runtime.md#emergency-stop)), and
 `ruro status` lists every machine whose stop is engaged. The studio shows the live metrics

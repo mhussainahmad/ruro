@@ -209,9 +209,10 @@ ruro status
 ```
 
 Prints the daemon (with its version, target triple and last update, and the versions of the
-other machines of the graph), the deployed graph's process groups (state, pid, restarts, last exit) and
-live per-node metrics: state, rate, step time p50/p99, input age, CPU, errors and timer
-jitter p99. It also shows the emergency stop, recording and replay when active.
+other machines of the graph), the deployed graph's process groups (state, pid, restarts, last
+exit) and live per-node metrics: state, rate, step time p50/p99, input age, messages dropped
+by full input queues, CPU, errors and timer jitter p99. It also shows the emergency stop
+(and where to release it), recording and replay when active.
 
 ### ruro fleet
 

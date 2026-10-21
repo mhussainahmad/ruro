@@ -5290,6 +5290,7 @@ dependencies = [
  "ruro-nodes-std",
  "ruro-proto",
  "ruro-record",
+ "ruro-ros2",
  "ruro-transport",
  "serde_json",
  "sha2",

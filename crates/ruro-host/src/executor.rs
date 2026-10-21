@@ -3,7 +3,7 @@
 //! queues, cross-process wires over shared memory and wires to other machines
 //! over Zenoh.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -13,7 +13,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
-use ruro_graph::{ClockSource, Graph, PortRef};
+use ruro_graph::{ClockSource, Graph, ParamDesc, PortRef};
 use ruro_msg::Message;
 use ruro_node::{Builder, BuiltNode, ErasedInput, ErasedOutput, GraphClock, RawSink, Waker};
 use ruro_proto::{DataFrame, GroupMetrics, Keys};
@@ -66,6 +66,9 @@ impl Options {
 struct NodeHandle {
     id: String,
     kind: String,
+    /// Declared parameters, and their current values by name.
+    param_descs: Vec<ParamDesc>,
+    values: Arc<Mutex<BTreeMap<String, Value>>>,
     waker: Arc<Waker>,
     params: Sender<ParamChange>,
     stats: Arc<NodeStats>,
@@ -475,6 +478,15 @@ impl Executor {
             }
             let stats = Arc::new(NodeStats::default());
             let (params_tx, params_rx) = crossbeam_channel::unbounded();
+            let values: BTreeMap<String, Value> = desc
+                .params
+                .iter()
+                .map(|p| {
+                    let v = inst.params.get(&p.name).unwrap_or(&p.default);
+                    (p.name.clone(), v.clone())
+                })
+                .collect();
+            let values = Arc::new(Mutex::new(values));
             let muted = Arc::new(AtomicBool::new(opts.muted.contains(&id)));
             // The node that publishes simulated time is itself paced by the wall clock.
             let node_clock = if clock_port.as_ref().is_some_and(|cp| cp.node == id) {
@@ -494,6 +506,7 @@ impl Executor {
                 node,
                 waker: waker.clone(),
                 params: params_rx,
+                values: values.clone(),
                 stats: stats.clone(),
                 period: rate.map(|r| Duration::from_secs_f64(1.0 / r)),
                 deadline: deadline_of(&id),
@@ -503,6 +516,8 @@ impl Executor {
             }));
             nodes.push(NodeHandle {
                 kind: inst.kind.clone(),
+                param_descs: desc.params.clone(),
+                values,
                 id,
                 waker,
                 params: params_tx,
@@ -616,6 +631,19 @@ impl Executor {
 
     pub fn node_ids(&self) -> impl Iterator<Item = &str> {
         self.nodes.iter().map(|n| n.id.as_str())
+    }
+
+    /// The parameters a node of this group declares, with their current
+    /// values: as set in the graph (or the default), then as last applied.
+    pub fn params(&self, node: &str) -> Option<Vec<(ParamDesc, Value)>> {
+        let n = self.nodes.iter().find(|n| n.id == node)?;
+        let values = n.values.lock();
+        Some(
+            n.param_descs
+                .iter()
+                .map(|p| (p.clone(), values.get(&p.name).cloned().unwrap_or_default()))
+                .collect(),
+        )
     }
 
     /// The clock nodes of this group follow.

@@ -22,6 +22,7 @@ ruro-msg = { workspace = true }
 ruro-node = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-proto = { workspace = true }
+ruro-ros2 = { workspace = true }
 ruro-transport = { workspace = true }
 ruro-record = { workspace = true }
 ruro-nodes-std = { workspace = true }

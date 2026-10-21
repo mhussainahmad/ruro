@@ -43,6 +43,10 @@ pub struct Graph {
     /// `std/Clock` output instead of the wall clock.
     #[serde(default, skip_serializing_if = "ClockSource::is_wall")]
     pub clock: ClockSource,
+    /// How the graph's nodes appear to ROS 2. `None`: they do not (bridge
+    /// nodes still talk to ROS 2 on their own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ros2: Option<Ros2Settings>,
     #[serde(default)]
     pub nodes: IndexMap<String, NodeInstance>,
     #[serde(default)]
@@ -89,6 +93,39 @@ pub struct Realtime {
     /// longer is reported as an error and counted in the node's metrics.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub deadlines_us: IndexMap<String, u64>,
+}
+
+/// How a graph's nodes appear to ROS 2 (the graph's `ros2:` section).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ros2Settings {
+    /// Every node offers the ROS 2 parameter services as the ROS node
+    /// `/ruro_<node id>`, so `ros2 param` and rqt can read and set its
+    /// parameters.
+    #[serde(default)]
+    pub parameters: bool,
+    /// Zenoh router shared with the ROS 2 nodes.
+    #[serde(default = "Ros2Settings::default_router")]
+    pub router: String,
+    /// `ROS_DOMAIN_ID`; unset uses the environment variable (default 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_id: Option<u32>,
+}
+
+impl Ros2Settings {
+    fn default_router() -> String {
+        "tcp/127.0.0.1:7447".into()
+    }
+}
+
+impl Default for Ros2Settings {
+    fn default() -> Self {
+        Self {
+            parameters: false,
+            router: Self::default_router(),
+            domain_id: None,
+        }
+    }
 }
 
 /// Where graph time comes from.
@@ -513,5 +550,23 @@ mod group_config_tests {
         let plain = Graph::from_yaml("name: p\n").unwrap();
         assert_eq!(plain.clock, ClockSource::Wall);
         assert!(!plain.to_yaml().unwrap().contains("clock"));
+    }
+
+    #[test]
+    fn ros2_settings_parse() {
+        let g = Graph::from_yaml("name: r\nros2: { parameters: true, domain_id: 3 }\n").unwrap();
+        let r = g.ros2.clone().unwrap();
+        assert!(r.parameters);
+        assert_eq!(r.router, "tcp/127.0.0.1:7447");
+        assert_eq!(r.domain_id, Some(3));
+        assert_eq!(Graph::from_yaml(&g.to_yaml().unwrap()).unwrap(), g);
+        assert!(
+            !Graph::from_yaml("name: p\n")
+                .unwrap()
+                .to_yaml()
+                .unwrap()
+                .contains("ros2")
+        );
+        assert!(Graph::from_yaml("name: r\nros2: { parameter: true }\n").is_err());
     }
 }

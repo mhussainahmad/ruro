@@ -35,6 +35,7 @@ wires:
 | `wires` | list of [wires](#wires) | no | Connections between ports. |
 | `groups` | map of name to [group settings](#groups) | no | Per-process-group settings. |
 | `clock` | `wall` or `sim` | no | Graph time. Default `wall`; `sim` follows the graph's one `std/Clock` output (see [Graph time](../runtime.md#graph-time-and-simulation)). |
+| `ros2` | [ROS 2 settings](#ros-2) | no | How the graph's nodes appear to ROS 2. |
 | `inputs`, `outputs` | map | no | Ports exposed when this graph is used as a [composite node](composites.md). |
 | `overlays` | map of name to [overlay](#overlays) | no | Named variants of the graph, selected with `--overlay`. |
 
@@ -43,6 +44,19 @@ wires:
 Graph names, node ids and group names must match `[A-Za-z0-9_-]+` and be at most 64
 characters long. Unknown keys anywhere in the file are ignored rather than rejected, so
 check the spelling of optional fields.
+
+### ROS 2
+
+```yaml
+ros2:
+  parameters: true                 # ros2 param / rqt see every node's parameters
+  router: tcp/127.0.0.1:7447       # Zenoh router shared with the ROS 2 nodes (default)
+  domain_id: 0                     # ROS_DOMAIN_ID; default: the environment's, else 0
+```
+
+With `parameters: true`, every node appears in the ROS graph as `/ruro_<node id>` and offers
+the ROS 2 parameter services (see [ROS 2 bridge](../ros2.md#parameters)). Only the top-level
+graph may have a `ros2` section; a [composite](composites.md) subgraph with one is refused.
 
 ## Nodes
 

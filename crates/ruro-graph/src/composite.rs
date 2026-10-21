@@ -374,6 +374,7 @@ fn flatten(
         name: g.name.clone(),
         groups: g.groups.clone(),
         clock: g.clock,
+        ros2: g.ros2.clone(),
         ..Default::default()
     };
     let mut ins: HashMap<&str, IndexMap<String, PortList>> = HashMap::new();
@@ -392,6 +393,13 @@ fn flatten(
                 id,
                 "the subgraph has overlays, which only apply to the top-level graph; \
                  move them there",
+            ));
+        }
+        if sub.graph.ros2.is_some() {
+            return Err(err(
+                id,
+                "the subgraph has a `ros2` section, which only applies to the top-level \
+                 graph; move it there",
             ));
         }
         if let Some(file) = &sub.file {
@@ -912,6 +920,21 @@ wires: [cam.image -> outer.image]
         .unwrap();
         let e = g.flatten().unwrap_err().to_string();
         assert!(e.contains("overlays"), "{e}");
+    }
+
+    #[test]
+    fn ros2_settings_come_from_the_top_level_graph() {
+        let top = Graph::from_yaml(
+            "name: top\nros2: { parameters: true }\nnodes:\n  c:\n    type: composite\n    graph:\n      name: inner\n      nodes: { a: { type: t/src, rate: 10 } }\n",
+        )
+        .unwrap();
+        assert!(top.flatten().unwrap().ros2.unwrap().parameters);
+        let inner = Graph::from_yaml(
+            "name: top\nnodes:\n  c:\n    type: composite\n    graph:\n      name: inner\n      ros2: { parameters: true }\n      nodes: { a: { type: t/src, rate: 10 } }\n",
+        )
+        .unwrap();
+        let e = inner.flatten().unwrap_err().to_string();
+        assert!(e.contains("`ros2`"), "{e}");
     }
 
     #[test]

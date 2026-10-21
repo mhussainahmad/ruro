@@ -205,6 +205,41 @@ when the node starts.
 
 [Bringing a ROS 2 system to ruro](ros2-migration.md) puts these together.
 
+## Parameters
+
+With `ros2: { parameters: true }` in the graph, every ruro node appears in the ROS graph as
+`/ruro_<node id>` (characters other than letters and digits become `_`) and offers the
+parameter services rclcpp nodes have, so `ros2 param` and rqt read and tune it:
+
+```yaml
+name: tune
+ros2: { parameters: true }
+nodes:
+  src: { type: std/sine, rate: 50 }
+  gain: { type: std/gain, params: { k: 3 } }
+wires: [src.value -> gain.input]
+```
+
+```sh
+ros2 param list /ruro_gain           # k, use_sim_time
+ros2 param describe /ruro_gain k     # type, documentation and range
+ros2 param set /ruro_gain k 2
+ros2 param dump /ruro_gain
+```
+
+- Values are the node's current ones, whoever changed them (`ruro param`, the studio or
+  ROS). A set goes through the same checks as `ruro param` and answers once the node has
+  applied the value; a value outside the declared range is refused with the reason.
+- Float parameters are doubles, integers integers; an integer is accepted for a double (as
+  `ros2 param set` sends `2`).
+- Every node also has a read-only `use_sim_time`, true when the graph has `clock: sim`.
+- `set_parameters_atomically` checks every value before applying any, but a node that then
+  refuses one keeps those applied before it.
+- `/parameter_events` is not published, and parameters cannot be declared or deleted from
+  ROS.
+- A bridge node and its parameters are one ROS node when the graph's `ros2.router` and
+  domain match the bridge node's.
+
 ## Services
 
 Service nodes call or serve `std_srvs` services from a graph:
@@ -408,5 +443,5 @@ against a machine running ROS 2 with rmw_zenoh check the same things by hand.
 - Type hashes follow REP 2011 (RIHS01), as used by Jazzy and later. Distributions without
   type hashes (Humble) are not supported.
 - There is no bridge node for joint commands (`std/JointCommand`).
-- The bridge's own ROS node does not offer the parameter or type description services
-  rclcpp nodes have, so `ros2 param` and `ros2 node info` see little of it.
+- ruro nodes offer no type description service, so `ros2 node info` and
+  `ros2 topic info --verbose` see less of them than of rclcpp nodes.

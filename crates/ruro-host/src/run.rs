@@ -2,12 +2,14 @@
 //! ([`run_threaded`]) or, for deterministic groups, by one thread that steps
 //! every node of the group in a fixed order each cycle ([`run_deterministic`]).
 
+use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
+use parking_lot::Mutex;
 use ruro_graph::Realtime;
 use ruro_node::{Ctx, DynNode, GraphClock, Waker};
 use ruro_proto::NodeState;
@@ -37,6 +39,8 @@ pub struct Runner {
     node: Box<dyn DynNode>,
     pub waker: Arc<Waker>,
     params: Receiver<ParamChange>,
+    /// Current parameter values, updated as changes are applied.
+    values: Arc<Mutex<BTreeMap<String, Value>>>,
     pub stats: Arc<NodeStats>,
     /// Timer period; `None` for input-triggered nodes.
     pub period: Option<Duration>,
@@ -59,6 +63,7 @@ pub struct RunnerParts {
     pub node: Box<dyn DynNode>,
     pub waker: Arc<Waker>,
     pub params: Receiver<ParamChange>,
+    pub values: Arc<Mutex<BTreeMap<String, Value>>>,
     pub stats: Arc<NodeStats>,
     pub period: Option<Duration>,
     pub deadline: Option<Duration>,
@@ -79,6 +84,7 @@ impl Runner {
             node: p.node,
             waker: p.waker,
             params: p.params,
+            values: p.values,
             stats: p.stats,
             period: p.period,
             deadline: p.deadline,
@@ -119,7 +125,10 @@ impl Runner {
             let (name, value) = (&change.name, &change.value);
             let result = self.node.set_param(name, value);
             match &result {
-                Ok(()) => tracing::info!("{}.{name} = {value}", self.id),
+                Ok(()) => {
+                    tracing::info!("{}.{name} = {value}", self.id);
+                    self.values.lock().insert(name.clone(), value.clone());
+                }
                 Err(e) => tracing::warn!("cannot set {}.{name}: {e:#}", self.id),
             }
             if let Some(reply) = change.reply {

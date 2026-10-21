@@ -17,7 +17,7 @@ pub use overlay::{NodePatch, Overlay, WirePatch};
 pub use placement::{placement_issues, runtime_issues, schema_issues};
 pub use spec::{
     ClockSource, DEFAULT_GROUP, Graph, GraphError, GroupConfig, NodeInstance, PortList, PortRef,
-    Realtime, RestartPolicy, Wire,
+    Realtime, RestartPolicy, Ros2Settings, Wire,
 };
 pub use validate::{Issue, validate, validate_in};
 

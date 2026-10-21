@@ -35,6 +35,7 @@ pub struct Gain {
     input: Input<Scalar>,
     #[output]
     output: Output<Scalar>,
+    /// Factor applied to every sample.
     #[param(default = 1.0, min = -1000, max = 1000)]
     k: f64,
 }

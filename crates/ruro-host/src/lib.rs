@@ -17,6 +17,7 @@ mod control;
 mod executor;
 mod logging;
 mod record;
+pub mod ros2_params;
 pub mod rt;
 mod run;
 mod stats;
@@ -178,6 +179,13 @@ fn run(args: RunArgs) -> Result<()> {
         exec.start_recording(path)?;
     }
     let control = control::attach(&session, &keys, &exec)?;
+    // A ROS 2 network that cannot be reached must not stop the robot.
+    let ros2 = match graph.ros2.as_ref().filter(|r| r.parameters) {
+        Some(r) => ros2_params::attach(&exec, r)
+            .inspect_err(|e| tracing::warn!("no ROS 2 parameter services: {e:#}"))
+            .ok(),
+        None => None,
+    };
     tracing::info!(
         "group `{group}` running {} node(s){}",
         exec.node_ids().count(),
@@ -195,6 +203,7 @@ fn run(args: RunArgs) -> Result<()> {
         }
     }
     tracing::info!("group `{group}` stopping");
+    drop(ros2);
     drop(control);
     exec.shutdown();
     Ok(())

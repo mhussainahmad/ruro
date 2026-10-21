@@ -25,7 +25,9 @@ First version, 0.1.0. Nothing has been released yet.
 - **Emergency stop.** `ruro estop` latches a software stop on the daemon; nodes get an
   `on_estop` hook and `ctx.estopped()`. Every bundled actuator node (`std/fake-arm`,
   `hw/dynamixel`, `hw/so100-arm`, `hw/odrive`, `hw/joint-jog`, `ml/policy`,
-  `ros2/pub-twist`, `sim/mujoco`) goes to a documented safe state.
+  `ros2/pub-twist`, `sim/mujoco`) goes to a documented safe state. Python nodes get
+  `on_estop` and `ctx.estopped` too. A stop engaged on any machine of a multi-machine graph
+  stops all of them.
 - **Node SDK.** `#[derive(Node)]`, `#[derive(Message)]` and `#[derive(Describe)]` in the
   `ruro` crate: typed ports, parameters with defaults, ranges and documentation, live
   parameter updates, timer- or data-driven execution, link-time registration of node types,
@@ -68,9 +70,12 @@ First version, 0.1.0. Nothing has been released yet.
   of images and point clouds, a test harness) and `ruro-host-py`, a host with an embedded
   interpreter that loads node modules and entry points, with hot reload.
 - **ROS 2 bridge.** Over rmw_zenoh, without a ROS installation:
-  - `ros2/sub-*` and `ros2/pub-*` nodes for 14 common message types, with full QoS
+  - `ros2/sub-*` and `ros2/pub-*` nodes for 15 common message types, with full QoS
     (reliability, durability including transient-local, so `/tf_static` latches, history
-    depth).
+    depth). `ros2/sub-clock` lets a `clock: sim` graph follow Gazebo's, Isaac Sim's or a
+    bag's `/clock`; on a simulated clock the publishers stamp with simulated time.
+  - With `ros2: { parameters: true }`, every node is a ROS node with the parameter
+    services, so `ros2 param` and rqt read and tune it.
   - Services and actions: a Rust API for any generated type, and the nodes
     `ros2/call-trigger`, `ros2/call-set-bool`, `ros2/serve-trigger`, `ros2/serve-set-bool`
     and `ros2/fibonacci-goal`, which honour the e-stop.
@@ -140,8 +145,6 @@ First version, 0.1.0. Nothing has been released yet.
 
 ### Known limitations
 
-- An emergency stop engaged directly on a peer does not travel back to the daemon that
-  deployed the graph.
-- Python nodes have no emergency-stop hook.
+See [Project status](book/src/status.md#known-gaps).
 
 [Unreleased]: https://github.com/mhussainahmad/ruro/commits/main

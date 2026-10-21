@@ -9,7 +9,7 @@ use egui_snarl::{InPinId, NodeId, OutPinId, Snarl};
 use indexmap::IndexMap;
 use ruro_graph::{
     ClockSource, Graph, GroupConfig, NodeDescriptor, NodeInstance, Overlay, PortList, PortRef,
-    Registry, RestartPolicy, Wire,
+    Registry, RestartPolicy, Ros2Settings, Wire,
 };
 use serde_json::Value;
 
@@ -83,6 +83,7 @@ pub struct Snapshot {
     outputs: IndexMap<String, PortRef>,
     depths: BTreeMap<(PortRef, PortRef), usize>,
     clock: ClockSource,
+    ros2: Option<Ros2Settings>,
     overlays: IndexMap<String, Overlay>,
 }
 
@@ -90,6 +91,7 @@ impl Snapshot {
     fn same(&self, other: &Snapshot) -> bool {
         if self.name != other.name
             || self.clock != other.clock
+            || self.ros2 != other.ros2
             || self.overlays != other.overlays
             || self.groups != other.groups
             || self.inputs != other.inputs
@@ -151,6 +153,8 @@ pub struct Doc {
     /// Queue depth of wires that set one.
     pub depths: BTreeMap<(PortRef, PortRef), usize>,
     pub clock: ClockSource,
+    /// The graph's `ros2:` section, kept as it is in the file.
+    pub ros2: Option<Ros2Settings>,
     /// Named variants of the graph, kept as they are in the file.
     pub overlays: IndexMap<String, Overlay>,
     /// Differs from the file on disk (or has never been saved).
@@ -178,6 +182,7 @@ impl Doc {
             outputs: IndexMap::new(),
             depths: BTreeMap::new(),
             clock: ClockSource::Wall,
+            ros2: None,
             overlays: IndexMap::new(),
         };
         let mut doc = Self {
@@ -190,6 +195,7 @@ impl Doc {
             outputs: IndexMap::new(),
             depths: BTreeMap::new(),
             clock: ClockSource::Wall,
+            ros2: None,
             overlays: IndexMap::new(),
             dirty: false,
             structure_rev: 0,
@@ -227,6 +233,7 @@ impl Doc {
         self.inputs = graph.inputs.clone();
         self.outputs = graph.outputs.clone();
         self.clock = graph.clock;
+        self.ros2 = graph.ros2.clone();
         self.overlays = graph.overlays.clone();
         self.depths = graph
             .wires
@@ -379,6 +386,7 @@ impl Doc {
         graph.inputs = self.inputs.clone();
         graph.outputs = self.outputs.clone();
         graph.clock = self.clock;
+        graph.ros2 = self.ros2.clone();
         graph.overlays = self.overlays.clone();
         let mut entries: Vec<(NodeId, Pos2, &GNode)> = self.snarl.nodes_pos_ids().collect();
         entries.sort_by_key(|(id, _, _)| *id);
@@ -515,6 +523,7 @@ impl Doc {
             outputs: self.outputs.clone(),
             depths: self.depths.clone(),
             clock: self.clock,
+            ros2: self.ros2.clone(),
             overlays: self.overlays.clone(),
         }
     }
@@ -597,6 +606,7 @@ impl Doc {
         self.outputs = s.outputs;
         self.depths = s.depths;
         self.clock = s.clock;
+        self.ros2 = s.ros2;
         self.overlays = s.overlays;
         self.structure_rev += 1;
         self.update_dirty();
@@ -668,6 +678,7 @@ pub(crate) mod tests {
     const ROUNDTRIP: &str = r#"
 name: rt
 clock: sim
+ros2: { parameters: true, domain_id: 7 }
 groups:
   g1: { machine: robot, realtime: { priority: 50 } }
 nodes:

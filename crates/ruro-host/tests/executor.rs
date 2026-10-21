@@ -87,10 +87,26 @@ wires: [src.value -> gain.input, gain.output -> probe.input]
         &PROBE.lock()[..5]
     );
 
+    // Current values: the graph's, then defaults; changes once applied.
+    let value = |node: &str, name: &str| {
+        exec.params(node)
+            .unwrap()
+            .into_iter()
+            .find(|(p, _)| p.name == name)
+            .map(|(_, v)| v)
+            .unwrap()
+    };
+    assert_eq!(value("gain", "k"), serde_json::json!(2.0));
+    assert_eq!(value("src", "offset"), serde_json::json!(3.0));
+    assert_eq!(value("src", "amplitude"), serde_json::json!(1.0));
+    assert!(exec.params("nobody").is_none());
+
     exec.set_param("gain", "k", serde_json::json!(-1.0))
         .unwrap();
     assert!(wait_until(Duration::from_secs(2), || PROBE.lock().last()
         == Some(&-3.0)));
+    assert!(wait_until(Duration::from_secs(1), || value("gain", "k")
+        == serde_json::json!(-1.0)));
 
     std::thread::sleep(Duration::from_millis(300));
     let m = exec.metrics();

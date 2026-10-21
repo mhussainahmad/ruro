@@ -877,3 +877,48 @@ fn clients_find_the_daemon_they_connected_to() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_machine_that_comes_back_gets_its_part_again() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-back-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let (robot_port, laptop_port) = (free_port(), free_port());
+    let tag = std::process::id();
+    let (robot, laptop) = (format!("brobot{tag}"), format!("blaptop{tag}"));
+    let robot_daemon = daemon(&robot, robot_port, Vec::new(), &host);
+    let _laptop = daemon(
+        &laptop,
+        laptop_port,
+        vec![format!("tcp/127.0.0.1:{robot_port}")],
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{laptop_port}")).unwrap();
+    let graph = format!(
+        "name: back\ngroups:\n  far: {{ machine: {robot} }}\nnodes:\n  a: {{ type: t/x, group: far, rate: 1 }}\n  b: {{ type: t/x, rate: 1 }}\n"
+    );
+    ruro_proto::request(
+        &session,
+        &Keys::new(&laptop),
+        Ctl::Deploy,
+        &graph,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    wait_status(&session, &robot, |s| s.graph.as_deref() == Some("back"));
+
+    // The robot goes away: the laptop says so.
+    drop(robot_daemon);
+    let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&robot));
+    wait_status(&session, &laptop, |s| s.unreachable == [robot.clone()]);
+
+    // It comes back with nothing running (a reboot): it gets its part again.
+    let _robot_back = daemon(&robot, robot_port, Vec::new(), &host);
+    wait_status(&session, &robot, |s| s.graph.as_deref() == Some("back"));
+    wait_status(&session, &laptop, |s| s.unreachable.is_empty());
+
+    for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

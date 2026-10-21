@@ -305,6 +305,25 @@ pub struct DaemonStatus {
     /// The daemons whose stop is latched here (this one's own name for a
     /// stop engaged here). Empty for daemons that predate it.
     pub estop_by: Vec<String>,
+    /// Peers running parts of this daemon's graph that do not answer.
+    pub unreachable: Vec<String>,
+}
+
+/// The status as published by daemons before `unreachable`.
+#[derive(Deserialize)]
+struct StatusV3 {
+    name: String,
+    version: String,
+    pid: u32,
+    uptime_s: f64,
+    graph: Option<String>,
+    groups: Vec<GroupStatus>,
+    recording: Option<String>,
+    playback: Option<PlaybackStatus>,
+    estopped: bool,
+    target: String,
+    update: Option<String>,
+    estop_by: Vec<String>,
 }
 
 /// The status as published by daemons before `estop_by`.
@@ -341,6 +360,23 @@ struct StatusV1 {
 /// (Older readers ignore the fields added since, which postcard appends.)
 pub fn decode_status(bytes: &[u8]) -> Result<DaemonStatus> {
     decode(bytes).or_else(|e| {
+        if let Ok(s) = decode::<StatusV3>(bytes) {
+            return Ok(DaemonStatus {
+                name: s.name,
+                version: s.version,
+                pid: s.pid,
+                uptime_s: s.uptime_s,
+                graph: s.graph,
+                groups: s.groups,
+                recording: s.recording,
+                playback: s.playback,
+                estopped: s.estopped,
+                target: s.target,
+                update: s.update,
+                estop_by: s.estop_by,
+                unreachable: Vec::new(),
+            });
+        }
         if let Ok(s) = decode::<StatusV2>(bytes) {
             return Ok(DaemonStatus {
                 name: s.name,
@@ -355,6 +391,7 @@ pub fn decode_status(bytes: &[u8]) -> Result<DaemonStatus> {
                 target: s.target,
                 update: s.update,
                 estop_by: Vec::new(),
+                unreachable: Vec::new(),
             });
         }
         let Ok(s) = decode::<StatusV1>(bytes) else {
@@ -373,6 +410,7 @@ pub fn decode_status(bytes: &[u8]) -> Result<DaemonStatus> {
             target: String::new(),
             update: None,
             estop_by: Vec::new(),
+            unreachable: Vec::new(),
         })
     })
 }
@@ -1138,9 +1176,12 @@ mod tests {
             version: "0.2.0".into(),
             ..new
         };
-        // A status without `estop_by` keeps its target and update.
+        // A status without `estop_by` (or `unreachable`) keeps its target
+        // and update.
         let mut v2_bytes = encode(&v2);
         assert_eq!(v2_bytes.pop(), Some(0), "an empty list is one zero byte");
+        assert_eq!(decode_status(&v2_bytes).unwrap(), v2);
+        v2_bytes.pop();
         assert_eq!(decode_status(&v2_bytes).unwrap(), v2);
         let current = DaemonStatus {
             estop_by: vec!["laptop".into()],

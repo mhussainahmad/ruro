@@ -56,6 +56,11 @@ the offset is measurable; see
 [Recordings across machines](record-replay.md#recordings-across-machines). A very large peer
 part can take longer than the CLI's 10 s request timeout to collect.
 
+The daemon you deployed to checks on the other machines of the graph every two seconds.
+`ruro status` lists the ones that do not answer. One that answers again without a graph (its
+daemon was restarted, or the computer rebooted) gets its part again, with the emergency stop
+first if it is engaged. One that was given another graph in the meantime is left alone.
+
 `ruro kill`, `ruro echo` and `ruro param` reach the machine that runs the group or node.
 
 Wires between machines cross a network that loses and delays packets. Zenoh retransmits, so

@@ -852,6 +852,7 @@ mod tests {
             target: String::new(),
             update: None,
             estop_by: Vec::new(),
+            unreachable: Vec::new(),
         };
         assert!(runs_node(&status, "imu"));
         assert!(!runs_node(&status, "drivers"));

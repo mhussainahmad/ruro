@@ -194,6 +194,23 @@ pub fn print_status(status: &DaemonStatus, metrics: &[GroupMetrics], peers: &[Da
             .collect();
         println!("other machines: {}", others.join(", "));
     }
+    if !status.unreachable.is_empty() {
+        let names: Vec<String> = status
+            .unreachable
+            .iter()
+            .map(|m| format!("`{m}`"))
+            .collect();
+        println!(
+            "{}",
+            paint(
+                "1;31",
+                &format!(
+                    "not answering: {} (their part of the graph is deployed again when they are back)",
+                    names.join(", ")
+                )
+            )
+        );
+    }
     if status.estopped {
         println!(
             "{} ({})",
@@ -368,6 +385,7 @@ mod tests {
             target: String::new(),
             update: None,
             estop_by: Vec::new(),
+            unreachable: Vec::new(),
         };
         let lines = peer_estop_lines(&[peer("robot", true), peer("arm", false)], "laptop");
         assert_eq!(lines.len(), 1);

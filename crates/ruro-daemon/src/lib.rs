@@ -160,6 +160,15 @@ pub(crate) struct State {
     /// The daemon whose graph this one runs part of; `None` when the graph
     /// was deployed here (or nothing runs).
     pub origin: Mutex<Option<String>>,
+    /// What this daemon sent the peers running parts of its graph
+    /// (`Ctl::DeployGroups` payload), to send again to one that comes back
+    /// without it.
+    pub forwarded: Mutex<Option<String>>,
+    /// Peers of the graph that do not answer.
+    pub unreachable: Mutex<BTreeSet<String>>,
+    /// Held while the graph is deployed or stopped, so that a peer is not
+    /// given its part again meanwhile.
+    pub graph_ops: Mutex<()>,
     /// Set when the daemon trusts update keys.
     pub updates: Option<update::Updates>,
     /// An installed update, waiting for the reply to its request to go out.
@@ -299,6 +308,9 @@ impl Daemon {
             heartbeats: Mutex::new(HashMap::new()),
             deployed: Mutex::new(None),
             origin: Mutex::new(None),
+            forwarded: Mutex::new(None),
+            unreachable: Mutex::new(BTreeSet::new()),
+            graph_ops: Mutex::new(()),
             updates,
             restart: Mutex::new(None),
             restart_ready: AtomicBool::new(false),
@@ -372,6 +384,7 @@ impl Daemon {
                     std::thread::sleep(Duration::from_millis(100));
                     if last.elapsed() >= estop::RESEND_INTERVAL {
                         estop::resend(&resend_state);
+                        watch_peers(&resend_state);
                         last = Instant::now();
                     }
                 }
@@ -573,6 +586,7 @@ fn status(st: &State, started: Instant) -> DaemonStatus {
         target: TARGET.into(),
         update: st.update_note.clone(),
         estop_by: st.estop_latch.lock().origins(),
+        unreachable: st.unreachable.lock().iter().cloned().collect(),
     }
 }
 
@@ -594,6 +608,9 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
                 .filter_map(|c| c.machine.clone())
                 .collect();
             keep.insert(req.origin.clone());
+            let _ops = st.graph_ops.lock();
+            *st.forwarded.lock() = None;
+            st.unreachable.lock().clear();
             session::stop_playback(st);
             st.sup.lock().stop_all();
             // Before the peers stop: a recording collects their parts.
@@ -693,6 +710,9 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
 /// Stops the running graph, here and on the peers running parts of it,
 /// with any replay and recording. Returns what the recording wrote.
 fn stop_graph(st: &Arc<State>) -> Result<Option<String>> {
+    let _ops = st.graph_ops.lock();
+    *st.forwarded.lock() = None;
+    st.unreachable.lock().clear();
     session::stop_playback(st);
     st.sup.lock().stop_all();
     *st.origin.lock() = None;
@@ -701,6 +721,51 @@ fn stop_graph(st: &Arc<State>) -> Result<Option<String>> {
     let peers = std::mem::take(&mut *st.peers.lock());
     stop_peers(st, peers, &BTreeSet::new());
     recorded
+}
+
+/// Checks on the peers running parts of this daemon's graph: notes those
+/// that do not answer, and gives one that answers without a graph (it was
+/// restarted, or the machine rebooted) its part again, with the e-stop
+/// first if it is engaged. A peer running another graph is left alone.
+fn watch_peers(st: &Arc<State>) {
+    let Some(forward) = st.forwarded.lock().clone() else {
+        return;
+    };
+    let peers = st.peers.lock().clone();
+    for m in peers {
+        let reply = ruro_proto::request(
+            &st.session,
+            &Keys::new(&m),
+            Ctl::Graph,
+            "",
+            Duration::from_secs(2),
+        );
+        let Ok(graph) = reply else {
+            if st.unreachable.lock().insert(m.clone()) {
+                tracing::warn!("`{m}`, which runs part of the graph, does not answer");
+            }
+            continue;
+        };
+        if st.unreachable.lock().remove(&m) {
+            tracing::info!("`{m}` answers again");
+        }
+        if !graph.trim().is_empty() {
+            continue;
+        }
+        let _ops = st.graph_ops.lock();
+        // Still the same graph, and still a machine of it?
+        if st.forwarded.lock().as_deref() != Some(forward.as_str()) || !st.peers.lock().contains(&m)
+        {
+            return;
+        }
+        tracing::warn!("`{m}` runs nothing: deploying its part of the graph again");
+        let one = BTreeSet::from([m.clone()]);
+        let sent = estop::forward_on_deploy(st, &one)
+            .and_then(|()| st.peer_request(&m, Ctl::DeployGroups, &forward));
+        if let Err(e) = sent {
+            tracing::warn!("deploying the part of `{m}` again: {e:#}");
+        }
+    }
 }
 
 /// Validates `yaml`, sends the groups of other machines to their daemons and
@@ -713,6 +778,9 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
     }
     let machines = peer_machines(st, &graph);
 
+    let _ops = st.graph_ops.lock();
+    *st.forwarded.lock() = None;
+    st.unreachable.lock().clear();
     session::stop_playback(st);
     st.sup.lock().stop_all();
     session::finish_recording(st, false)?;
@@ -733,6 +801,9 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
     }
     let n = st.sup.lock().deploy(graph)?;
     *st.deployed.lock() = Some(yaml.to_owned());
+    if !machines.is_empty() {
+        *st.forwarded.lock() = Some(forward);
+    }
     Ok(if machines.is_empty() {
         format!("deployed {n} group(s)")
     } else {

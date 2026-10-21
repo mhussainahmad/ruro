@@ -1503,6 +1503,7 @@ fn daemon_status(name: &str, graph: Option<&str>) -> DaemonStatus {
         target: "x86_64-unknown-linux-gnu".into(),
         update: None,
         estop_by: Vec::new(),
+        unreachable: Vec::new(),
     }
 }
 
@@ -1547,6 +1548,7 @@ fn camera_status(recording: Option<&str>, playback: Option<PlaybackStatus>) -> D
         target: "x86_64-unknown-linux-gnu".into(),
         update: None,
         estop_by: Vec::new(),
+        unreachable: Vec::new(),
     }
 }
 

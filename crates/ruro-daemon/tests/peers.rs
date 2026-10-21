@@ -697,3 +697,96 @@ fn a_host_that_fails_to_start_says_why() {
     let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_emergency_stop_does_not_wait_for_other_requests() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-quick-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let port = free_port();
+    let tag = std::process::id();
+    let (name, gone) = (format!("quick{tag}"), format!("quickghost{tag}"));
+    let d = daemon(&name, port, Vec::new(), &host);
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{port}")).unwrap();
+    let keys = Keys::new(&name);
+    // A machine that takes requests and never answers them.
+    let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keep = held.clone();
+    let _ghost = session
+        .declare_queryable(format!("ruro/{gone}/ctl/*"))
+        .callback(move |q| keep.lock().unwrap().push(q))
+        .wait()
+        .unwrap();
+
+    // A deploy to it keeps the daemon busy until the request times out.
+    let graph = format!(
+        "name: slow\ngroups:\n  far: {{ machine: {gone} }}\nnodes:\n  a: {{ type: t/x, group: far, rate: 1 }}\n"
+    );
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let started = Instant::now();
+            let r = ruro_proto::request(
+                &session,
+                &keys,
+                Ctl::Deploy,
+                &graph,
+                Duration::from_secs(30),
+            );
+            assert!(
+                r.is_err() && started.elapsed() > Duration::from_secs(2),
+                "{r:?}"
+            );
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let start = Instant::now();
+        let reply = ruro_proto::request(
+            &session,
+            &keys,
+            Ctl::Estop,
+            "engage",
+            Duration::from_secs(30),
+        );
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "the stop waited {:?} for the deploy",
+            start.elapsed()
+        );
+        assert_eq!(reply.unwrap(), "e-stop engaged");
+    });
+
+    // Requests sent back to back without waiting for replies apply in
+    // order: the last one, an engage, wins, and what the daemon publishes
+    // agrees with its latch.
+    let flags = session.declare_subscriber(keys.estop()).wait().unwrap();
+    let pending: Vec<_> = (0..40)
+        .flat_map(|_| ["release", "engage"])
+        .map(|op| {
+            session
+                .get(keys.ctl(Ctl::Estop))
+                .payload(op)
+                .timeout(Duration::from_secs(10))
+                .wait()
+                .unwrap()
+        })
+        .collect();
+    for replies in pending {
+        let _ = replies.recv();
+    }
+    wait_status(&session, &name, |s| s.estopped);
+    // The flag is republished twice a second; the next ones must say engaged.
+    let start = Instant::now();
+    let mut seen = 0;
+    while seen < 3 {
+        let sample = flags.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+        let flag =
+            <ruro_msg::Flag as ruro_msg::Message>::decode(&sample.payload().to_bytes()).unwrap();
+        if start.elapsed() > Duration::from_millis(100) {
+            assert!(flag.0, "published released while the daemon is engaged");
+            seen += 1;
+        }
+    }
+
+    drop(d);
+    let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -130,6 +130,10 @@ Limits to be aware of:
   daemon, there only. `ruro status` and the studio show which machines are stopped.
 - **A machine that cannot be reached is reported, not waited for.** The others still stop,
   and the command fails naming the machine.
+- **It does not wait for other requests.** A daemon handles e-stop requests on their own,
+  in the order they arrive, also while it is busy with a deploy or an update. A stop passed
+  on to another machine carries a sequence number, so one overtaken on the network by a
+  later stop from the same machine is ignored.
 
 ## Hung processes
 

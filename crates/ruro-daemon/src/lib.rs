@@ -306,17 +306,67 @@ impl Daemon {
             estop::handle(&state, "engage")?;
         }
 
-        let queryable = session
-            .declare_queryable(format!("ruro/{}/ctl/*", config.name))
+        // One queryable per operation rather than one for `ctl/*`: a query
+        // is answered only once every queryable it matches has finished
+        // with it, and the e-stop must not wait for this loop.
+        let (ctl_tx, queries) = std::sync::mpsc::channel();
+        let mut queryables = Vec::new();
+        for op in Ctl::ALL.into_iter().filter(|op| *op != Ctl::Estop) {
+            let tx = ctl_tx.clone();
+            queryables.push(
+                session
+                    .declare_queryable(keys.ctl(op))
+                    .callback(move |q| {
+                        let _ = tx.send(q);
+                    })
+                    .wait()
+                    .map_err(|e| anyhow!("{e}"))?,
+            );
+        }
+        // The e-stop has a queryable and a thread of its own: it never
+        // waits behind a deploy or an update. Requests apply in the order
+        // they arrive; passing them on to peers, which may take a while,
+        // happens alongside.
+        let estop_queryable = session
+            .declare_queryable(keys.ctl(Ctl::Estop))
             .wait()
             .map_err(|e| anyhow!("{e}"))?;
+        let estop_state = state.clone();
+        std::thread::Builder::new()
+            .name("ruro-estop".into())
+            .spawn(move || {
+                let st = estop_state;
+                while let Ok(query) = estop_queryable.recv() {
+                    let text = query
+                        .payload()
+                        .map(|p| String::from_utf8_lossy(&p.to_bytes()).into_owned())
+                        .unwrap_or_default();
+                    let key = format!("ruro/{}/ctl/estop", st.name);
+                    let reply = move |r: Result<String>| {
+                        let r: CtlReply = r.map_err(|e| format!("{e:#}"));
+                        if let Err(e) = &r {
+                            tracing::warn!("estop: {e}");
+                        }
+                        let _ = query.reply(key, ruro_proto::reply_bytes(&r)).wait();
+                    };
+                    match estop::begin(&st, &text) {
+                        Ok((done, Some(rest))) => {
+                            let st = st.clone();
+                            std::thread::spawn(move || reply(rest.finish(&st, done)));
+                        }
+                        Ok((done, None)) => reply(Ok(done)),
+                        Err(e) => reply(Err(e)),
+                    }
+                }
+            })?;
         let stop = Arc::new(AtomicBool::new(false));
 
         let ctl_state = state.clone();
         std::thread::Builder::new()
             .name("ruro-ctl".into())
             .spawn(move || {
-                while let Ok(query) = queryable.recv() {
+                let _queryables = queryables;
+                while let Ok(query) = queries.recv() {
                     let op = query
                         .key_expr()
                         .as_str()
@@ -328,26 +378,6 @@ impl Daemon {
                         .payload()
                         .map(|p| p.to_bytes().into_owned())
                         .unwrap_or_default();
-                    if op == Ctl::Estop.as_str() {
-                        // Never behind a deploy or an update, nor behind
-                        // another daemon's stop that this one is passing on.
-                        let st = ctl_state.clone();
-                        std::thread::spawn(move || {
-                            let reply: CtlReply =
-                                estop::handle(&st, &String::from_utf8_lossy(&payload))
-                                    .map_err(|e| format!("{e:#}"));
-                            if let Err(e) = &reply {
-                                tracing::warn!("estop: {e}");
-                            }
-                            let _ = query
-                                .reply(
-                                    format!("ruro/{}/ctl/{op}", st.name),
-                                    ruro_proto::reply_bytes(&reply),
-                                )
-                                .wait();
-                        });
-                        continue;
-                    }
                     let bytes = if op == Ctl::RecordPart.as_str() {
                         // Binary chunks of a recording, not a text reply.
                         let reply: std::result::Result<Vec<u8>, String> =
@@ -616,7 +646,6 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             let cmd = serde_json::from_slice(payload).context("bad playback command")?;
             session::playback(st, cmd)
         }
-        "estop" => estop::handle(st, &text()),
         "upload" => {
             let chunk: ruro_proto::UploadChunk = ruro_proto::decode(payload)?;
             let dir = st.sup.lock().hosts_dir();

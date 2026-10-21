@@ -161,6 +161,27 @@ pub enum Ctl {
 }
 
 impl Ctl {
+    /// Every operation.
+    pub const ALL: [Ctl; 17] = [
+        Ctl::Deploy,
+        Ctl::Stop,
+        Ctl::Registry,
+        Ctl::Graph,
+        Ctl::Kill,
+        Ctl::Ping,
+        Ctl::Record,
+        Ctl::Playback,
+        Ctl::Estop,
+        Ctl::DeployGroups,
+        Ctl::Upload,
+        Ctl::Validate,
+        Ctl::Param,
+        Ctl::RecordPart,
+        Ctl::Clock,
+        Ctl::UpdateUpload,
+        Ctl::Update,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Ctl::Deploy => "deploy",

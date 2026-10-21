@@ -62,6 +62,11 @@ that skip in CI:
 - **`ros2 param`** (Jazzy) against a deployed graph with `ros2: { parameters: true }`:
   `node list`, `param list`, `get`, `describe`, `set` (the node's output changes, and an
   out-of-range value is refused), `dump`, and the change on `/parameter_events`.
+- **Multi-machine graphs** between two containers on their own network
+  (`scripts/multi-machine/run.sh`): TLS and token refusals, a graph spanning both, the
+  emergency stop from either side, 50 ms delay with 2% loss, a 20 s partition (the graph
+  and a stop engaged meanwhile catch up after it), and a daemon restart or kill (its part of
+  the graph comes back by itself).
 - **Gazebo Harmonic** through the ROS 2 bridge, headless in a container
   (`RURO_GAZEBO_CONTAINER`): lidar scans and odometry reach the graph, the graph runs on
   Gazebo's `/clock`, and velocity commands move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).
@@ -86,8 +91,9 @@ that skip in CI:
   `ros2/fibonacci-goal`, through a local Zenoh router only.
 - **`ros2/node`** behind a router that requires a token or TLS, composable-node loading, and
   `ruro ros2 import --eval` on complex Python launch files.
-- **Multi-machine graphs** have been tested with two daemons on one machine, not across a
-  network. Clock-offset correction for recordings is unit tested only.
+- **Multi-machine graphs** across a real network link between machines; they are tested
+  between two containers on their own network (`scripts/multi-machine/run.sh`). Clock-offset
+  correction for recordings is unit tested only.
 - **Daemon updates** under a real systemd and across a network.
 - **Real-time priority and memory locking** need privileges that CI does not have; their
   fallback (a warning) is what CI exercises.

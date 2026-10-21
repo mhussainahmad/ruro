@@ -1,0 +1,15 @@
+# A machine for the multi-machine test: Ubuntu 24.04 with iproute2 (for tc
+# netem and ip link), openssl (for the test certificates) and the ruro and
+# ruro-host binaries from the build context.
+#
+#   podman build -t ruro-mm -f scripts/multi-machine/Containerfile target/release
+#
+# Rootless podman without subuid ranges: add
+# `--build-arg APT_OPTS="-o APT::Sandbox::User=root"`.
+FROM docker.io/library/ubuntu:24.04
+ARG APT_OPTS=""
+RUN apt-get $APT_OPTS update \
+    && apt-get $APT_OPTS install -y --no-install-recommends \
+       iproute2 ca-certificates openssl procps \
+    && rm -rf /var/lib/apt/lists/*
+COPY ruro ruro-host /usr/local/bin/

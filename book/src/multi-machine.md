@@ -68,8 +68,12 @@ messages arrive in bursts, and an input keeps only its newest message by default
 on a lossy link many are dropped, which the DROPS column of `ruro status` shows. Give such
 wires a queue when every message counts, for example
 `- { from: lidar.out, to: planner.scan, depth: 32 }`. With 50 ms of delay and 2% loss
-between two containers, depth 1 delivered 70 to 84 of 100 messages a second, and depth 64
-more than 96.
+between two containers, depth 1 delivered 70 to 84 of 100 messages a second, depth 32 about
+94 and depth 64 more than 96.
+
+`scripts/multi-machine/run.sh` checks all of this between two containers on their own
+network: TLS and tokens, a graph spanning both, the emergency stop from either side, 50 ms
+of delay with 2% loss, a 20 s partition, and restarts of one daemon.
 
 The emergency stop spans machines too: engaged at any machine of the graph, it is passed on
 to every other machine of the graph (see [Emergency stop](runtime.md#emergency-stop)), and

@@ -14,6 +14,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+libc = { workspace = true }
 ruro-msg = { workspace = true }
 ruro-graph = { workspace = true }
 serde = { workspace = true }

@@ -280,22 +280,16 @@ impl Studio {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let secs = secs as libc::time_t;
-        // SAFETY: localtime_r writes only into the provided struct.
-        let tm = unsafe {
-            let mut tm: libc::tm = std::mem::zeroed();
-            libc::localtime_r(&secs, &mut tm);
-            tm
-        };
+        let t = ruro_proto::local_time(secs as i64);
         format!(
             "{}-{:04}{:02}{:02}-{:02}{:02}{:02}.mcap",
             self.running_graph().unwrap_or(&self.doc.name),
-            tm.tm_year + 1900,
-            tm.tm_mon + 1,
-            tm.tm_mday,
-            tm.tm_hour,
-            tm.tm_min,
-            tm.tm_sec
+            t.year,
+            t.month,
+            t.day,
+            t.hour,
+            t.minute,
+            t.second
         )
     }
 

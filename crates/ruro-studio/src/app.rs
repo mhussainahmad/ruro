@@ -39,6 +39,9 @@ pub const FLEET_STALE: Duration = Duration::from_secs(5);
 
 pub struct Options {
     pub endpoint: String,
+    /// The endpoint was given (`--connect`); otherwise the one last chosen
+    /// with Connect to Daemon is used, if any.
+    pub endpoint_given: bool,
     pub daemon: Option<String>,
     /// TLS certificates and access token for reaching the daemon.
     pub security: ruro_proto::Security,
@@ -56,6 +59,7 @@ impl Options {
     pub fn offline() -> Self {
         Self {
             endpoint: String::new(),
+            endpoint_given: true,
             daemon: None,
             security: Default::default(),
             spawn_daemon: false,
@@ -107,8 +111,25 @@ pub struct Toast {
 
 /// Everything a user can do. Menus, shortcuts, the command palette and
 /// widgets all enqueue these; [`Studio::apply`] performs them after drawing.
+/// What the Connect to Daemon dialog holds while open.
+#[derive(Default)]
+pub struct ConnectForm {
+    pub endpoint: String,
+    /// CA certificate for `tls/` endpoints; empty for none.
+    pub tls_ca: String,
+    /// Access token; empty for none.
+    pub token: String,
+}
+
 #[derive(Clone, Debug)]
 pub enum Cmd {
+    // Connection.
+    ConnectDialog,
+    Connect {
+        endpoint: String,
+        tls_ca: Option<PathBuf>,
+        token: Option<String>,
+    },
     // Documents.
     NewGraph,
     NewFromTemplate(&'static str),
@@ -242,6 +263,11 @@ pub struct RecordDraft {
 pub struct Studio {
     pub(crate) link: Link,
     pub(crate) conn: Conn,
+    /// The endpoint and credentials the link uses, to connect again.
+    pub(crate) endpoint: String,
+    pub(crate) security: ruro_proto::Security,
+    pub(crate) spawn_daemon: bool,
+    pub(crate) connect_form: Option<ConnectForm>,
     pub(crate) registry: Registry,
     /// The document in the active tab.
     pub(crate) doc: Doc,
@@ -341,6 +367,24 @@ impl Studio {
             .unwrap_or_default();
         let theme = settings.theme;
         crate::theme::install(&cc.egui_ctx, theme);
+        let mut opts = opts;
+        // Without --connect, the daemon last chosen in the studio.
+        if !opts.endpoint_given
+            && let Some(saved) = &settings.endpoint
+        {
+            opts.endpoint = saved.clone();
+            if opts.security.ca.is_none() {
+                opts.security.ca = settings.tls_ca.clone();
+            }
+        }
+        // Off Linux there is no local daemon to start: ask where the robot is.
+        let ask_connect =
+            !opts.endpoint_given && settings.endpoint.is_none() && !cfg!(target_os = "linux");
+        let (endpoint, security, spawn_daemon) = (
+            opts.endpoint.clone(),
+            opts.security.clone(),
+            opts.spawn_daemon,
+        );
         let link = if opts.endpoint.is_empty() {
             Link::disabled()
         } else {
@@ -413,6 +457,10 @@ impl Studio {
             clipboard: None,
             paste_count: 0,
             confirm_close: None,
+            endpoint,
+            security,
+            spawn_daemon,
+            connect_form: None,
             settings,
             store: opts.store,
             recovery,
@@ -427,6 +475,9 @@ impl Studio {
             title: String::new(),
         };
         studio.shown.insert(studio.doc.uid);
+        if ask_connect {
+            studio.push(Cmd::ConnectDialog);
+        }
         if let Some(path) = opts.file {
             studio.open(&path);
         }
@@ -567,6 +618,23 @@ impl Studio {
             Cmd::NewFromTemplate(id) => self.new_from_template(id),
             Cmd::OpenDialog => self.open_dialog(dialogs::Purpose::Open),
             Cmd::QuickOpen => self.palette = Some(Palette::new(PaletteMode::Open)),
+            Cmd::ConnectDialog => {
+                self.connect_form = Some(ConnectForm {
+                    endpoint: self.endpoint.clone(),
+                    tls_ca: self
+                        .security
+                        .ca
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                    token: self.security.token.clone().unwrap_or_default(),
+                })
+            }
+            Cmd::Connect {
+                endpoint,
+                tls_ca,
+                token,
+            } => self.connect_to(ctx, endpoint, tls_ca, token),
             Cmd::Open(p) => self.open(&p),
             Cmd::Save => self.save(None),
             Cmd::SaveAsDialog => self.open_dialog(dialogs::Purpose::SaveAs),
@@ -670,6 +738,34 @@ impl Studio {
             Cmd::FitView => self.fit_pending = true,
             Cmd::SetTheme(kind) => self.set_theme(ctx, kind),
         }
+    }
+
+    /// Connects to another daemon, and remembers it for the next start.
+    fn connect_to(
+        &mut self,
+        ctx: &egui::Context,
+        endpoint: String,
+        tls_ca: Option<PathBuf>,
+        token: Option<String>,
+    ) {
+        self.security.ca = tls_ca.clone();
+        self.security.token = token;
+        self.endpoint = endpoint.clone();
+        // Dropping the old link ends its threads.
+        self.link = Link::start(
+            endpoint.clone(),
+            None,
+            self.security.clone(),
+            self.spawn_daemon,
+            ctx.clone(),
+        );
+        self.conn = Conn::Connecting;
+        self.status = None;
+        self.metrics.clear();
+        self.peers_sent = None;
+        self.want_running_graph = true;
+        self.settings.endpoint = Some(endpoint);
+        self.settings.tls_ca = tls_ca;
     }
 
     pub(crate) fn set_theme(&mut self, ctx: &egui::Context, kind: ThemeKind) {
@@ -926,6 +1022,7 @@ impl Studio {
         crate::palette::show(self, &ctx);
         shell::record_popover(self, &ctx);
         shell::close_confirmation(self, &ctx);
+        shell::connect_dialog(self, &ctx);
         shell::toasts(self, &ctx);
 
         for cmd in std::mem::take(&mut self.queue) {

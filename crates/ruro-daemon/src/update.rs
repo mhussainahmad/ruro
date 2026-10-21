@@ -27,7 +27,6 @@
 
 use std::ffi::OsString;
 use std::io::Read;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -127,9 +126,7 @@ fn target_path(st: &State, u: &Updates, role: UpdateRole) -> Result<PathBuf> {
         }
     };
     let dir = path.parent().context("the binary has no directory")?;
-    let c = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes())?;
-    // SAFETY: `c` is a valid NUL-terminated path.
-    if unsafe { libc::access(c.as_ptr(), libc::W_OK) } != 0 {
+    if !crate::os::dir_writable(dir) {
         bail!(
             "`{}` cannot replace {}: its directory is not writable by the daemon (see the book's Updates page)",
             st.name,
@@ -639,9 +636,7 @@ impl Handoff {
         if restart_by_exit() {
             return anyhow!("{note}");
         }
-        let e = Command::new(&config.executable)
-            .args(config.args.iter().skip(1))
-            .exec();
+        let e = crate::os::exec(Command::new(&config.executable).args(config.args.iter().skip(1)));
         anyhow!("{note}; starting the previous binary failed: {e}")
     }
 }
@@ -686,10 +681,11 @@ impl Restart {
             std::process::exit(EXIT_RESTART);
         }
         tracing::warn!("starting {} {}", self.exe.display(), self.handoff.to);
-        let e = Command::new(&self.exe)
-            .args(self.args.iter().skip(1))
-            .env_remove(VERSION_ENV)
-            .exec();
+        let e = crate::os::exec(
+            Command::new(&self.exe)
+                .args(self.args.iter().skip(1))
+                .env_remove(VERSION_ENV),
+        );
         restore(&self.handoff.replaced);
         let _ = std::fs::remove_file(handoff_file(&self.exe, &self.name));
         anyhow!(

@@ -990,6 +990,7 @@ fn probe(endpoint: &str) -> ConnectFailure {
                 ConnectFailure::NoDaemon
             }
         }
+        #[cfg(unix)]
         "unixsock-stream" => match std::os::unix::net::UnixStream::connect(addr) {
             Ok(_) => ConnectFailure::Refused,
             Err(_) => ConnectFailure::NoDaemon,
@@ -1123,6 +1124,67 @@ pub fn reply_bytes(reply: &CtlReply) -> Vec<u8> {
     serde_json::to_vec(reply).expect("reply is serializable")
 }
 
+/// A calendar date and time of day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DateTime {
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
+    pub hour: u32,
+    pub minute: u32,
+    pub second: u32,
+}
+
+/// `secs` since the Unix epoch as local time. Where the C library cannot
+/// say what local time is (Windows), it is UTC.
+pub fn local_time(secs: i64) -> DateTime {
+    #[cfg(unix)]
+    {
+        let t = secs as libc::time_t;
+        // SAFETY: localtime_r writes only into the provided struct.
+        let tm = unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            libc::localtime_r(&t, &mut tm);
+            tm
+        };
+        DateTime {
+            year: tm.tm_year + 1900,
+            month: tm.tm_mon as u32 + 1,
+            day: tm.tm_mday as u32,
+            hour: tm.tm_hour as u32,
+            minute: tm.tm_min as u32,
+            second: tm.tm_sec as u32,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        utc_time(secs)
+    }
+}
+
+/// `secs` since the Unix epoch in UTC.
+pub fn utc_time(secs: i64) -> DateTime {
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Days to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = (yoe + era * 400 + i64::from(month <= 2)) as i32;
+    DateTime {
+        year,
+        month,
+        day,
+        hour: (rem / 3600) as u32,
+        minute: (rem / 60 % 60) as u32,
+        second: (rem % 60) as u32,
+    }
+}
+
 /// Hostname, used as the default daemon name.
 pub fn hostname() -> String {
     std::fs::read_to_string("/proc/sys/kernel/hostname")
@@ -1192,6 +1254,18 @@ mod tests {
         let seen: OldStatus = decode(&encode(&current)).unwrap();
         assert_eq!(seen.version, "0.2.0");
         assert!(seen.estopped);
+    }
+
+    #[test]
+    fn utc_dates() {
+        let t = utc_time(1_792_603_407);
+        assert_eq!((t.year, t.month, t.day), (2026, 10, 21));
+        assert_eq!((t.hour, t.minute, t.second), (17, 23, 27));
+        assert_eq!(utc_time(0).year, 1970);
+        assert_eq!(
+            (utc_time(951_782_400).month, utc_time(951_782_400).day),
+            (2, 29)
+        );
     }
 
     #[test]

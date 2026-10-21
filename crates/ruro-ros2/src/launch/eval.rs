@@ -201,6 +201,7 @@ pub fn eval_python(path: &Path, opts: &ImportOptions) -> Result<Imported> {
     };
     if exited.is_none() {
         // SIGINT lets ros2 launch stop the recorders.
+        #[cfg(unix)]
         // SAFETY: kill(2) on our own child's pid.
         unsafe {
             libc::kill(child.id() as i32, libc::SIGINT);

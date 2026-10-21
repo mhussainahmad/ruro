@@ -71,7 +71,6 @@ pub struct UpdateArgs {
 }
 
 pub fn keygen(args: KeygenArgs) -> Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     let with = |ext: &str| {
         let mut p = args.name.clone().into_os_string();
         p.push(ext);
@@ -84,10 +83,11 @@ pub fn keygen(args: KeygenArgs) -> Result<()> {
         }
     }
     let (key, text) = SecretKey::generate()?;
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options
         .open(&secret)
         .and_then(|mut f| f.write_all(text.as_bytes()))
         .with_context(|| format!("writing {}", secret.display()))?;

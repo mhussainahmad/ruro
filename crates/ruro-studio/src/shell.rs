@@ -241,6 +241,10 @@ fn menus(s: &mut Studio, ui: &mut Ui) {
             });
         }
         ui.separator();
+        if item(ui, true, "Connect to Daemon…", "") {
+            s.push(Cmd::ConnectDialog);
+        }
+        ui.separator();
         if item(ui, true, "Save", "Ctrl+S") {
             s.push(Cmd::Save);
         }
@@ -1040,7 +1044,12 @@ pub fn status_bar(s: &mut Studio, ui: &mut Ui) {
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    s.push(Cmd::Activity(Activity::Fleet));
+                    // Offline, the way out is another daemon.
+                    if matches!(s.conn, Conn::Offline(_)) {
+                        s.push(Cmd::ConnectDialog);
+                    } else {
+                        s.push(Cmd::Activity(Activity::Fleet));
+                    }
                 }
 
                 // Graph state.
@@ -1457,6 +1466,95 @@ fn scrubber(s: &mut Studio, ui: &mut Ui, width: f32, pb: &PlaybackStatus) -> Opt
     });
     resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     seek
+}
+
+/// Connect to Daemon: where the robot's daemon is, and how to reach it.
+pub fn connect_dialog(s: &mut Studio, ctx: &egui::Context) {
+    let Some(form) = s.connect_form.as_mut() else {
+        return;
+    };
+    let mut choice = None;
+    let label = |ui: &mut Ui, text: &str| {
+        ui.label(RichText::new(text).color(TEXT_DIM()));
+    };
+    let modal = egui::Modal::new(Id::new("connect-daemon"))
+        .frame(popover_frame().inner_margin(Margin::same(20)))
+        .backdrop_color(shadow(110))
+        .show(ctx, |ui| {
+            ui.set_width(440.0);
+            ui.horizontal(|ui| {
+                widgets::icon(ui, icons::RADIO_TOWER, 18.0, ACCENT());
+                ui.label(
+                    RichText::new("Connect to Daemon")
+                        .font(font_semibold(15.0))
+                        .color(TEXT_STRONG()),
+                );
+            });
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(
+                    "The ruro daemon on your robot (or any Linux computer). Start it there with \
+                     `ruro daemon --listen tls/0.0.0.0:7447`; see the Security page of the book.",
+                )
+                .color(TEXT_DIM()),
+            );
+            ui.add_space(12.0);
+            label(ui, "Endpoint");
+            let endpoint = widgets::text_field(ui, &mut form.endpoint, "tls/robot.local:7447");
+            if endpoint.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                choice = Some(true);
+            }
+            ui.add_space(8.0);
+            label(ui, "CA certificate (for tls/ endpoints)");
+            widgets::text_field(ui, &mut form.tls_ca, "path to ca.pem");
+            ui.add_space(8.0);
+            label(ui, "Token (if the daemon requires one)");
+            ui.add(
+                egui::TextEdit::singleline(&mut form.token)
+                    .password(true)
+                    .desired_width(f32::INFINITY)
+                    .background_color(FIELD())
+                    .margin(vec2(6.0, 3.0)),
+            );
+            ui.add_space(16.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let ready = !form.endpoint.trim().is_empty();
+                    if ui
+                        .add_enabled_ui(ready, |ui| {
+                            widgets::button(ui, None, "Connect", ButtonKind::Primary)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        choice = Some(true);
+                    }
+                    if widgets::button(ui, None, "Cancel", ButtonKind::Secondary).clicked() {
+                        choice = Some(false);
+                    }
+                });
+            });
+        });
+    if modal.should_close() && choice.is_none() {
+        choice = Some(false);
+    }
+    match choice {
+        Some(true) if !form.endpoint.trim().is_empty() => {
+            let form = s.connect_form.take().expect("open");
+            let tls_ca = Some(form.tls_ca.trim())
+                .filter(|p| !p.is_empty())
+                .map(std::path::PathBuf::from);
+            let token = Some(form.token.trim().to_owned()).filter(|t| !t.is_empty());
+            s.push(Cmd::Connect {
+                endpoint: form.endpoint.trim().to_owned(),
+                tls_ca,
+                token,
+            });
+        }
+        Some(false) => s.connect_form = None,
+        _ => {}
+    }
 }
 
 /// Asks whether to save a document before closing it.

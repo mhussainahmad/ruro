@@ -341,16 +341,7 @@ fn output(s: &mut Studio, ui: &mut Ui) {
 }
 
 fn clock(ts_ns: u64) -> String {
-    let secs = (ts_ns / 1_000_000_000) as libc::time_t;
+    let t = ruro_proto::local_time((ts_ns / 1_000_000_000) as i64);
     let millis = (ts_ns / 1_000_000) % 1000;
-    // SAFETY: localtime_r writes only into the provided struct.
-    let tm = unsafe {
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&secs, &mut tm);
-        tm
-    };
-    format!(
-        "{:02}:{:02}:{:02}.{millis:03}",
-        tm.tm_hour, tm.tm_min, tm.tm_sec
-    )
+    format!("{:02}:{:02}:{:02}.{millis:03}", t.hour, t.minute, t.second)
 }

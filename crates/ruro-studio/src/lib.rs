@@ -48,8 +48,10 @@ struct Cli {
     /// Graphs to open.
     files: Vec<PathBuf>,
     /// Daemon endpoint. Point it at a robot, e.g. tcp/192.168.1.20:7447.
-    #[arg(long, default_value = ruro_proto::DEFAULT_ENDPOINT, env = "RURO_CONNECT")]
-    connect: String,
+    /// Default: the daemon last chosen with Connect to Daemon, else
+    /// tcp/127.0.0.1:7447.
+    #[arg(long, env = "RURO_CONNECT")]
+    connect: Option<String>,
     /// Daemon name (discovered automatically if omitted).
     #[arg(long, env = "RURO_DAEMON")]
     daemon: Option<String>,
@@ -104,7 +106,10 @@ pub fn run() -> eframe::Result<()> {
     };
     let mut files = cli.files.into_iter();
     let opts = app::Options {
-        endpoint: cli.connect,
+        endpoint_given: cli.connect.is_some(),
+        endpoint: cli
+            .connect
+            .unwrap_or_else(|| ruro_proto::DEFAULT_ENDPOINT.to_owned()),
         daemon: cli.daemon,
         security: ruro_proto::Security {
             cert: cli.tls_cert,

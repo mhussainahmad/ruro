@@ -30,6 +30,11 @@ pub struct Settings {
     pub open_files: Vec<PathBuf>,
     /// Collapsed sidebar and inspector sections.
     pub collapsed: Vec<String>,
+    /// The daemon last connected to with Connect to Daemon, used when no
+    /// `--connect` is given.
+    pub endpoint: Option<String>,
+    /// The CA certificate given with it, for `tls/` endpoints.
+    pub tls_ca: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -45,6 +50,8 @@ impl Default for Settings {
             recent: Vec::new(),
             open_files: Vec::new(),
             collapsed: Vec::new(),
+            endpoint: None,
+            tls_ca: None,
         }
     }
 }
@@ -85,8 +92,25 @@ pub struct Store {
 
 impl Store {
     /// The XDG locations for the current user.
+    /// The usual places on this system: `%APPDATA%` and `%LOCALAPPDATA%` on
+    /// Windows, `~/Library/Application Support` on macOS, the XDG
+    /// directories elsewhere.
     pub fn xdg() -> Option<Self> {
+        if cfg!(windows) {
+            let dir = |var: &str| std::env::var_os(var).map(|d| PathBuf::from(d).join("ruro"));
+            return Some(Self {
+                config_dir: dir("APPDATA")?,
+                state_dir: dir("LOCALAPPDATA").or_else(|| dir("APPDATA"))?,
+            });
+        }
         let home = std::env::var_os("HOME").map(PathBuf::from);
+        if cfg!(target_os = "macos") {
+            let dir = home?.join("Library/Application Support/ruro");
+            return Some(Self {
+                config_dir: dir.clone(),
+                state_dir: dir,
+            });
+        }
         let dir = |var: &str, fallback: &str| {
             std::env::var_os(var)
                 .map(PathBuf::from)

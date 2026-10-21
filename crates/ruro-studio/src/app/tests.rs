@@ -2007,6 +2007,7 @@ fn studio_drives_a_real_daemon() {
     let shots = std::env::var_os("RURO_SCREENSHOTS").map(PathBuf::from);
     let mut opts = Some(Options {
         endpoint,
+        endpoint_given: true,
         daemon: Some(name.clone()),
         security,
         spawn_daemon: false,
@@ -2154,4 +2155,36 @@ fn studio_drives_a_real_daemon() {
     drop(h);
     drop(daemon);
     let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
+}
+
+#[test]
+fn connect_to_another_daemon() {
+    let mut h = harness(None);
+    h.state_mut().push(Cmd::ConnectDialog);
+    h.run_steps(3);
+    assert!(h.state().connect_form.is_some());
+    h.get_by_label("Connect to Daemon");
+    // Cancel leaves everything as it was.
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    assert!(h.state().connect_form.is_none());
+
+    h.state_mut().push(Cmd::ConnectDialog);
+    h.run_steps(2);
+    let form = h.state_mut().connect_form.as_mut().unwrap();
+    form.endpoint = " tls/127.0.0.1:1 ".into();
+    form.tls_ca = "/etc/ruro/ca.pem".into();
+    form.token = "secret".into();
+    h.get_by_label("Connect").click();
+    h.run_steps(3);
+    let s = h.state();
+    assert!(s.connect_form.is_none());
+    assert_eq!(s.endpoint, "tls/127.0.0.1:1");
+    assert_eq!(s.security.token.as_deref(), Some("secret"));
+    // Remembered for the next start (but not the token).
+    assert_eq!(s.settings.endpoint.as_deref(), Some("tls/127.0.0.1:1"));
+    assert_eq!(
+        s.settings.tls_ca.as_deref(),
+        Some(std::path::Path::new("/etc/ruro/ca.pem"))
+    );
 }

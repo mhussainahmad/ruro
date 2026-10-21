@@ -279,12 +279,17 @@ fn main() {
             .map(String::as_str)
             .or_else(|| payload.downcast_ref::<&str>().copied())
             .unwrap_or_default();
-        if message.starts_with("failed printing to stdout") && message.contains("Broken pipe") {
+        if message.starts_with("failed printing to stdout")
+            && (message.contains("Broken pipe") || message.contains("pipe is being closed"))
+        {
             // SAFETY: ends the process as the default SIGPIPE action would.
+            #[cfg(unix)]
             unsafe {
                 libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                 libc::raise(libc::SIGPIPE);
             }
+            #[cfg(not(unix))]
+            std::process::exit(0);
         }
         default_hook(info);
     }));
@@ -833,8 +838,7 @@ pub fn ctrl_c_flag() -> Result<Arc<AtomicBool>> {
 }
 
 fn exec(exe: &PathBuf, args: &[String]) -> std::io::Error {
-    use std::os::unix::process::CommandExt;
-    std::process::Command::new(exe).args(args).exec()
+    ruro_daemon::os::exec(std::process::Command::new(exe).args(args))
 }
 
 #[cfg(test)]

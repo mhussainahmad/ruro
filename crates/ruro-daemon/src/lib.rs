@@ -6,7 +6,11 @@
 //! It also latches the emergency stop, coordinates recording and replay, and
 //! forwards the groups of multi-machine graphs to the daemons that run them.
 
+// On Windows only the parts clients use are built into anything that runs.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 mod estop;
+pub mod os;
 mod session;
 pub mod sign;
 mod supervisor;
@@ -234,6 +238,17 @@ pub struct Daemon {
 
 impl Daemon {
     /// Starts the daemon on background threads.
+    /// Starts the daemon. It needs Linux or macOS: its hosts reach it over
+    /// a Unix socket.
+    #[cfg(not(unix))]
+    pub fn start(config: Config) -> Result<Self> {
+        bail!(
+            "`{}`: the ruro daemon runs on Linux and macOS; from here, connect to one with --connect",
+            config.name
+        )
+    }
+
+    #[cfg(unix)]
     pub fn start(config: Config) -> Result<Self> {
         let dir = runtime_dir(&config.name);
         let created = !dir.exists();
@@ -251,6 +266,7 @@ impl Daemon {
         })
     }
 
+    #[cfg(unix)]
     fn start_in(config: Config, dir: &Path) -> Result<Self> {
         let registry = load_registry(&config.host)?;
         let updates = update::Updates::from_config(&config)?;
@@ -556,6 +572,7 @@ impl Drop for Daemon {
 }
 
 /// Writes the `user:password` file Zenoh checks tokens against.
+#[cfg(unix)]
 fn write_dictionary(dir: &Path, token: &str) -> Result<PathBuf> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;

@@ -2,7 +2,10 @@
 
 use std::collections::VecDeque;
 use std::io::{BufRead, Write};
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+#[cfg(target_os = "linux")]
+use std::os::unix::process::CommandExt;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::sync::Arc;
@@ -317,6 +320,7 @@ impl Supervisor {
         }
         // SAFETY: prctl is async-signal-safe. The child is killed if the daemon dies,
         // so a crashed daemon never leaves orphaned robots running.
+        #[cfg(target_os = "linux")]
         unsafe {
             cmd.pre_exec(|| {
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
@@ -483,9 +487,14 @@ impl Supervisor {
     /// Stops every group: SIGTERM, then SIGKILL after a grace period.
     pub fn stop_all(&mut self) {
         for g in &mut self.groups {
-            if let Some(child) = &g.child {
+            if let Some(child) = &mut g.child {
                 // SAFETY: plain signal delivery to our own child.
-                unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(child.id() as i32, libc::SIGTERM)
+                };
+                #[cfg(not(unix))]
+                let _ = child.kill();
             }
         }
         let deadline = Instant::now() + STOP_GRACE;
@@ -559,7 +568,11 @@ fn group_policy(graph: &Graph, nodes: &[String]) -> RestartPolicy {
 }
 
 fn describe_exit(status: ExitStatus) -> String {
-    match (status.code(), status.signal()) {
+    #[cfg(unix)]
+    let signal = status.signal();
+    #[cfg(not(unix))]
+    let signal: Option<i32> = None;
+    match (status.code(), signal) {
         (Some(code), _) => format!("exit code {code}"),
         (None, Some(sig)) => format!("killed by signal {sig}"),
         _ => "unknown exit".into(),

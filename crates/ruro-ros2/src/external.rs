@@ -326,7 +326,6 @@ pub fn find_executable(
     package: &str,
     executable: &str,
 ) -> Option<std::path::PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
     ament_prefix_path
         .split(':')
         .filter(|p| !p.is_empty())
@@ -336,9 +335,18 @@ pub fn find_executable(
                 .join(package)
                 .join(executable)
         })
-        .find(|p| {
-            std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        })
+        .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && executable_mode(&m)))
+}
+
+#[cfg(unix)]
+fn executable_mode(m: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    m.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn executable_mode(_: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// Finds `share/<package>` in the prefixes of `ament_prefix_path`.

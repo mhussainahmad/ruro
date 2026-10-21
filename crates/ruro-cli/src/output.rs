@@ -108,20 +108,11 @@ fn log_line_styled(l: &LogLine, on: bool) -> String {
     )
 }
 
-/// Local wall-clock time `HH:MM:SS.mmm`.
+/// Local wall-clock time `HH:MM:SS.mmm` (UTC on Windows).
 pub fn clock(ts_ns: u64) -> String {
-    let secs = (ts_ns / 1_000_000_000) as libc::time_t;
+    let t = ruro_proto::local_time((ts_ns / 1_000_000_000) as i64);
     let millis = (ts_ns / 1_000_000) % 1000;
-    // SAFETY: localtime_r writes only into the provided struct.
-    let tm = unsafe {
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&secs, &mut tm);
-        tm
-    };
-    format!(
-        "{:02}:{:02}:{:02}.{millis:03}",
-        tm.tm_hour, tm.tm_min, tm.tm_sec
-    )
+    format!("{:02}:{:02}:{:02}.{millis:03}", t.hour, t.minute, t.second)
 }
 
 /// Where to release the stop latched at daemon `at` by `by`: a stop is

@@ -1,7 +1,6 @@
 //! Connection to a daemon, run on a background thread so the UI never blocks.
 
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -245,8 +244,11 @@ fn run(
                     emit.emit(Event::Offline(format!("{e:#}")));
                     announced_offline = true;
                 }
-                if let Some(name) = drain_while_offline(&commands, &emit) {
-                    daemon = Some(name);
+                match drain_while_offline(&commands, &emit) {
+                    // The studio connected elsewhere, or closed.
+                    Err(()) => return,
+                    Ok(Some(name)) => daemon = Some(name),
+                    Ok(None) => {}
                 }
                 continue;
             }
@@ -256,8 +258,10 @@ fn run(
             Err(e) => {
                 emit.emit(Event::Offline(format!("{e:#}")));
                 announced_offline = true;
-                if let Some(name) = drain_while_offline(&commands, &emit) {
-                    daemon = Some(name);
+                match drain_while_offline(&commands, &emit) {
+                    Err(()) => return,
+                    Ok(Some(name)) => daemon = Some(name),
+                    Ok(None) => {}
                 }
                 continue;
             }
@@ -491,10 +495,17 @@ fn handle(
 }
 
 /// Answers commands while offline. Returns a daemon the user switched to, if any.
-fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) -> Option<String> {
+/// Answers commands while offline, for a second. `Err` once the studio has
+/// dropped the link.
+fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) -> Result<Option<String>, ()> {
     let until = Instant::now() + Duration::from_secs(1);
     let mut switch = None;
-    while let Ok(cmd) = commands.recv_deadline(until) {
+    loop {
+        let cmd = match commands.recv_deadline(until) {
+            Ok(cmd) => cmd,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => break,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return Err(()),
+        };
         let op = match cmd {
             Command::Deploy(_) => "deploy",
             Command::Stop => "stop",
@@ -513,7 +524,7 @@ fn drain_while_offline(commands: &Receiver<Command>, emit: &Emitter) -> Option<S
             result: Err("not connected to a daemon".into()),
         });
     }
-    switch
+    Ok(switch)
 }
 
 /// Reply operation of a record request: an empty path stops recording.
@@ -529,13 +540,22 @@ fn is_local(endpoint: &str) -> bool {
     endpoint.contains("127.0.0.1") || endpoint.contains("localhost") || endpoint.contains("[::1]")
 }
 
+/// Starts `ruro daemon` next to this executable, so the studio works out of
+/// the box. Only on Linux, where the daemon runs; elsewhere the studio
+/// connects to a robot's daemon.
+#[cfg(not(target_os = "linux"))]
+fn start_local_daemon(_endpoint: &str, _token: Option<&str>) -> Option<std::process::Child> {
+    None
+}
+
 /// Starts `ruro daemon` next to this executable, so the studio works out of the box.
+#[cfg(target_os = "linux")]
 fn start_local_daemon(endpoint: &str, token: Option<&str>) -> Option<std::process::Child> {
     let exe = std::env::current_exe().ok()?.with_file_name("ruro");
     let exe = if exe.exists() {
         exe
     } else {
-        PathBuf::from("ruro")
+        std::path::PathBuf::from("ruro")
     };
     let listen = endpoint.replace("localhost", "127.0.0.1");
     let mut cmd = std::process::Command::new(&exe);

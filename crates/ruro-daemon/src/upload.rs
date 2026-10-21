@@ -7,7 +7,6 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -95,7 +94,7 @@ pub fn store(part: &Path, target: &Path, label: &str, chunk: &UploadChunk) -> Re
             chunk.sha256
         );
     }
-    std::fs::set_permissions(part, std::fs::Permissions::from_mode(0o755))?;
+    crate::os::make_executable(part)?;
     std::fs::rename(part, target)?;
     Ok(format!(
         "stored {label} ({} bytes, sha256 {sum})",
@@ -143,8 +142,12 @@ mod tests {
         assert!(last.contains("stored host `my-host`"), "{last}");
         let stored = hosts.join("my-host");
         assert_eq!(std::fs::read(&stored).unwrap(), data);
-        let mode = std::fs::metadata(&stored).unwrap().permissions().mode();
-        assert_eq!(mode & 0o111, 0o111, "executable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&stored).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "executable");
+        }
     }
 
     #[test]

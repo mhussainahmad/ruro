@@ -102,6 +102,13 @@ fn commands(s: &Studio) -> Vec<Item> {
             )
         },
         item(
+            icons::RADIO_TOWER,
+            "Daemon: Connect…",
+            "robot remote endpoint",
+            "",
+            Cmd::ConnectDialog,
+        ),
+        item(
             icons::FILE_PLUS,
             "File: New Graph",
             "",

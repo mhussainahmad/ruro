@@ -167,6 +167,15 @@ impl Runner {
         self.estop_handled = estopped;
     }
 
+    /// Answers pending parameter changes of a failed node with an error.
+    pub fn refuse_params(&mut self) {
+        while let Ok(change) = self.params.try_recv() {
+            if let Some(reply) = change.reply {
+                let _ = reply.send(Err(format!("{} has failed", self.id)));
+            }
+        }
+    }
+
     /// True (once) if an input received data since the last call.
     pub fn take_data(&mut self) -> bool {
         let g = self.waker.generation();
@@ -267,8 +276,10 @@ pub fn run_threaded(mut r: Runner, stop: Arc<AtomicBool>, rt: Option<Realtime>) 
             (None, _) => on_input(&mut r, &stop),
         }
     }
-    // A failed node parks until shutdown so its thread is joined normally.
+    // A failed node parks until shutdown so its thread is joined normally,
+    // refusing parameter changes rather than leaving them unanswered.
     while !stop.load(Ordering::Relaxed) {
+        r.refuse_params();
         r.waker.wait_control(Some(Instant::now() + IDLE_WAIT));
         r.waker.take_control();
     }
@@ -426,7 +437,15 @@ pub fn run_deterministic(
                         }
                         (None, Some(t))
                     }
-                    _ => continue,
+                    _ => {
+                        // Simulated time stands still: parameter changes
+                        // and the e-stop still apply.
+                        for r in runners.iter_mut() {
+                            r.waker.take_control();
+                            r.poll_control();
+                        }
+                        continue;
+                    }
                 }
             }
         };

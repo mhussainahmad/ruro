@@ -55,16 +55,13 @@ pub struct ParamServers {
     _endpoints: Vec<Arc<Endpoint>>,
     stop: Arc<AtomicBool>,
     events: Option<JoinHandle<()>>,
-    worker: Option<JoinHandle<()>>,
+    workers: Vec<JoinHandle<()>>,
 }
 
 impl Drop for ParamServers {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        for t in [self.events.take(), self.worker.take()]
-            .into_iter()
-            .flatten()
-        {
+        for t in self.events.take().into_iter().chain(self.workers.drain(..)) {
             let _ = t.join();
         }
     }
@@ -89,25 +86,32 @@ pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServ
     let mut services = Vec::new();
     let mut endpoints = Vec::new();
     let mut events: HashMap<String, Publisher<msg::ParameterEvent>> = HashMap::new();
-    // Sets wait for their node: one worker answers them in turn, never
-    // Zenoh's callback, and never a thread per request.
-    let (jobs, queue) = crossbeam_channel::bounded::<Job>(QUEUED_SETS);
     let stop = Arc::new(AtomicBool::new(false));
-    let done = stop.clone();
-    let worker = std::thread::Builder::new()
-        .name("ros2-param-sets".into())
-        .spawn(move || {
-            while !done.load(Ordering::Relaxed) {
-                if let Ok(job) = queue.recv_timeout(Duration::from_millis(200)) {
-                    job();
-                }
-            }
-        })?;
+    let mut workers = Vec::new();
     // Subscribed before the first event goes out, so no change is missed.
     let updates = exec.param_updates();
     for id in exec.node_ids().map(str::to_owned).collect::<Vec<_>>() {
         let endpoint = endpoint(settings, &ros_node_name(&id))?;
         let base = format!("/{}", ros_node_name(&id));
+        // Sets wait for their node: a worker per node answers them in turn,
+        // never Zenoh's callback, never a thread per request, and a node
+        // that is slow to apply holds up only its own sets.
+        let (jobs, queue) = crossbeam_channel::bounded::<Job>(QUEUED_SETS);
+        let done = stop.clone();
+        workers.push(
+            std::thread::Builder::new()
+                .name("ros2-param-sets".into())
+                .spawn(move || {
+                    while !done.load(Ordering::Relaxed) {
+                        match queue.recv_timeout(Duration::from_millis(200)) {
+                            Ok(job) => job(),
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                            // The services are gone (also when attaching failed).
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                        }
+                    }
+                })?,
+        );
         let node = Node {
             exec: exec.clone(),
             id: id.clone(),
@@ -221,7 +225,7 @@ pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServ
         _endpoints: endpoints,
         stop,
         events: Some(events),
-        worker: Some(worker),
+        workers,
     })
 }
 

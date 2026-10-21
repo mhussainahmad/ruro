@@ -179,13 +179,12 @@ fn run(args: RunArgs) -> Result<()> {
         exec.start_recording(path)?;
     }
     let control = control::attach(&session, &keys, &exec)?;
-    // A ROS 2 network that cannot be reached must not stop the robot.
-    let ros2 = match graph.ros2.as_ref().filter(|r| r.parameters) {
-        Some(r) => ros2_params::attach(&exec, r)
-            .inspect_err(|e| tracing::warn!("no ROS 2 parameter services: {e:#}"))
-            .ok(),
-        None => None,
-    };
+    // A ROS 2 network that cannot be reached must not stop the robot: the
+    // parameter services are tried again until it can.
+    let ros2_settings = graph.ros2.clone().filter(|r| r.parameters);
+    let mut ros2 = None;
+    let mut ros2_tried: Option<std::time::Instant> = None;
+    let mut ros2_warned = false;
     tracing::info!(
         "group `{group}` running {} node(s){}",
         exec.node_ids().count(),
@@ -195,6 +194,25 @@ fn run(args: RunArgs) -> Result<()> {
     let metrics_key = keys.metrics(group);
     let mut tick = 0u32;
     while !stop.load(Ordering::Relaxed) {
+        if let Some(r) = &ros2_settings
+            && ros2.is_none()
+            && ros2_tried.is_none_or(|t| t.elapsed() >= Duration::from_secs(5))
+        {
+            ros2_tried = Some(std::time::Instant::now());
+            match ros2_params::attach(&exec, r) {
+                Ok(s) => {
+                    if ros2_warned {
+                        tracing::info!("ROS 2 parameter services are up");
+                    }
+                    ros2 = Some(s);
+                }
+                Err(e) if !ros2_warned => {
+                    tracing::warn!("no ROS 2 parameter services yet (trying again): {e:#}");
+                    ros2_warned = true;
+                }
+                Err(_) => {}
+            }
+        }
         std::thread::sleep(Duration::from_millis(50));
         tick += 1;
         if tick.is_multiple_of(10) {

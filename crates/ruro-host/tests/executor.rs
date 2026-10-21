@@ -203,3 +203,18 @@ fn unknown_node_type_fails_to_start() {
         .unwrap();
     assert!(format!("{err:#}").contains("unknown node type"));
 }
+
+#[test]
+fn parameters_apply_while_simulated_time_stands_still() {
+    // A deterministic group on a simulated clock that has not started (or
+    // is paused) does not step, but still takes parameter changes.
+    let graph = Graph::from_yaml(
+        "name: paused\nclock: sim\ngroups:\n  main: { realtime: { deterministic: true, rate: 100 } }\nnodes:\n  gain: { type: std/gain }\n  clock: { type: ros2/sub-clock, group: sim }\n",
+    )
+    .unwrap();
+    ruro_nodes_ros2::link();
+    let exec = Executor::start(&graph, "main", Remote::Disabled).unwrap();
+    exec.apply_param("gain", "k", serde_json::json!(2.0), Duration::from_secs(2))
+        .unwrap();
+    exec.stop();
+}

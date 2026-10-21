@@ -138,6 +138,18 @@ pub fn diff(base: &Graph, current: &Graph) -> GraphDiff {
             clock_name(current.clock)
         ));
     }
+    if base.ros2 != current.ros2 {
+        let params = |g: &Graph| g.ros2.as_ref().is_some_and(|r| r.parameters);
+        d.graph.push(if params(base) != params(current) {
+            format!(
+                "ROS 2 parameters {} → {}",
+                if params(base) { "on" } else { "off" },
+                if params(current) { "on" } else { "off" }
+            )
+        } else {
+            "ROS 2 settings changed".into()
+        });
+    }
     if base.overlays != current.overlays {
         d.graph.push("overlays changed".into());
     }
@@ -218,6 +230,13 @@ pub struct Marks {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn ros2_settings_are_compared() {
+        let base = Graph::from_yaml("name: g\n").unwrap();
+        let on = Graph::from_yaml("name: g\nros2: { parameters: true }\n").unwrap();
+        assert_eq!(diff(&base, &on).graph, ["ROS 2 parameters off → on"]);
+    }
     use super::*;
 
     #[test]

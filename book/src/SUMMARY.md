@@ -39,6 +39,7 @@
 - [Architecture](architecture.md)
 - [Performance](performance.md)
 - [Project status](status.md)
+- [Roadmap](roadmap.md)
 
 ---
 

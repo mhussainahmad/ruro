@@ -134,6 +134,9 @@ Limits to be aware of:
   in the order they arrive, also while it is busy with a deploy or an update. A stop passed
   on to another machine carries a sequence number, so one overtaken on the network by a
   later stop from the same machine is ignored.
+- **A machine that missed a stop catches up.** Every two seconds each daemon passes on
+  again the last stop or release of each machine it relays for, so one that was cut off or
+  restarting follows within seconds of being back.
 
 ## Hung processes
 

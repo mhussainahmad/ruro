@@ -143,7 +143,7 @@ pub(crate) struct State {
     pub host: PathBuf,
     pub registry: Mutex<Registry>,
     /// Whether the emergency stop is engaged, by anyone.
-    pub estop: AtomicBool,
+    pub estop: Arc<AtomicBool>,
     pub estop_latch: Mutex<estop::Latch>,
     pub recording: Mutex<Option<RecordSession>>,
     /// This daemon's part of a peer's recording, until the peer fetches it:
@@ -275,12 +275,14 @@ impl Daemon {
             .wait()
             .map_err(|e| anyhow!("cannot listen on {}: {e}", config.listen))?;
         let keys = Keys::new(&config.name);
-        let sup = Supervisor::new(
+        let mut sup = Supervisor::new(
             config.name.clone(),
             config.host.clone(),
             local,
             config.security.token.clone(),
         )?;
+        let estop = Arc::new(AtomicBool::new(false));
+        sup.host_state.estopped = estop.clone();
         let state = Arc::new(State {
             name: config.name.clone(),
             keys: keys.clone(),
@@ -288,7 +290,7 @@ impl Daemon {
             sup: Mutex::new(sup),
             host: config.host.clone(),
             registry: Mutex::new(registry),
-            estop: AtomicBool::new(false),
+            estop,
             estop_latch: Mutex::new(estop::Latch::default()),
             recording: Mutex::new(None),
             record_part: Mutex::new(None),
@@ -360,6 +362,20 @@ impl Daemon {
                 }
             })?;
         let stop = Arc::new(AtomicBool::new(false));
+        // Stops passed on again, for machines that missed them.
+        let (resend_state, resend_stop) = (state.clone(), stop.clone());
+        std::thread::Builder::new()
+            .name("ruro-estop-resend".into())
+            .spawn(move || {
+                let mut last = Instant::now();
+                while !resend_stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(100));
+                    if last.elapsed() >= estop::RESEND_INTERVAL {
+                        estop::resend(&resend_state);
+                        last = Instant::now();
+                    }
+                }
+            })?;
 
         let ctl_state = state.clone();
         std::thread::Builder::new()
@@ -500,7 +516,11 @@ impl Daemon {
             return None;
         }
         self.state.restart_ready.store(false, Ordering::Relaxed);
-        self.state.restart.lock().take()
+        // The e-stop as it is now, not as it was when the update was
+        // installed: requests were still served since.
+        let mut restart = self.state.restart.lock().take()?;
+        restart.set_estop(self.state.estop.load(Ordering::Relaxed));
+        Some(restart)
     }
 
     /// Stops the deployed graph and the daemon.
@@ -577,7 +597,8 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             st.sup.lock().stop_all();
             // Before the peers stop: a recording collects their parts.
             session::finish_recording(st, false)?;
-            stop_peers(st, std::mem::take(&mut *st.peers.lock()), &keep);
+            let peers = std::mem::take(&mut *st.peers.lock());
+            stop_peers(st, peers, &keep);
             let n = st.sup.lock().deploy(graph)?;
             *st.deployed.lock() = Some(req.graph);
             *st.origin.lock() = Some(req.origin);
@@ -668,7 +689,8 @@ fn stop_graph(st: &Arc<State>) -> Result<Option<String>> {
     *st.origin.lock() = None;
     // Peers stop even if the recording could not be finished.
     let recorded = session::finish_recording(st, false);
-    stop_peers(st, std::mem::take(&mut *st.peers.lock()), &BTreeSet::new());
+    let peers = std::mem::take(&mut *st.peers.lock());
+    stop_peers(st, peers, &BTreeSet::new());
     recorded
 }
 
@@ -685,17 +707,20 @@ fn deploy(st: &Arc<State>, yaml: &str) -> Result<String> {
     session::stop_playback(st);
     st.sup.lock().stop_all();
     session::finish_recording(st, false)?;
-    stop_peers(st, std::mem::take(&mut *st.peers.lock()), &machines);
+    let peers = std::mem::take(&mut *st.peers.lock());
+    stop_peers(st, peers, &machines);
     *st.origin.lock() = None;
     let forward = serde_json::to_string(&ruro_proto::GroupsDeploy {
         origin: st.name.clone(),
         graph: graph.to_yaml()?,
     })?;
-    // A peer's hosts start stopped when the stop is engaged here.
+    // The machines join the graph before the stop is checked: a stop
+    // engaged from here on is passed on to them, and one engaged before is
+    // passed on now, so their hosts start stopped.
+    st.peers.lock().extend(machines.iter().cloned());
     estop::forward_on_deploy(st, &machines)?;
     for m in &machines {
         st.peer_request(m, Ctl::DeployGroups, &forward)?;
-        st.peers.lock().insert(m.clone());
     }
     let n = st.sup.lock().deploy(graph)?;
     *st.deployed.lock() = Some(yaml.to_owned());

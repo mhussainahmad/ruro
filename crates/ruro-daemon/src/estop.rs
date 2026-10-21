@@ -48,16 +48,70 @@ const RELEASE_FROM: &str = "release-from ";
 const ENGAGE_UP: &str = "engage-up ";
 const RELEASE_UP: &str = "release-up ";
 
+/// The number of a request, as passed on: `<epoch>.<n>`. Each start of a
+/// daemon picks a new epoch and counts from 1 in it, so numbers never
+/// depend on the clock. A receiver orders requests of one origin within an
+/// epoch, and takes the first request of a new epoch as the latest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Seq {
+    epoch: u64,
+    n: u64,
+}
+
+impl std::fmt::Display for Seq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:x}.{}", self.epoch, self.n)
+    }
+}
+
+impl std::str::FromStr for Seq {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let (e, n) = s.split_once('.').context("expected `<epoch>.<n>`")?;
+        Ok(Self {
+            epoch: u64::from_str_radix(e, 16)?,
+            n: n.parse()?,
+        })
+    }
+}
+
 /// The stops latched at one daemon.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Latch {
     /// Daemons whose stop is latched here.
     origins: BTreeSet<String>,
     /// Peers this daemon forwarded its own stop to and that have not
     /// confirmed its release yet.
     sent: BTreeSet<String>,
-    /// The sequence number of the last request applied, per origin.
-    seen: BTreeMap<String, u64>,
+    /// This daemon's epoch and the last number it gave a request.
+    epoch: u64,
+    counter: u64,
+    /// The number of the last request applied, per origin.
+    seen: BTreeMap<String, Seq>,
+    /// The last request (engage or not) of each origin this daemon passes
+    /// on to others: its own, and those relayed to it. Passed on again
+    /// from time to time, for machines that missed it.
+    last: BTreeMap<String, (bool, Seq)>,
+}
+
+impl Default for Latch {
+    fn default() -> Self {
+        // Different on every start; the clock and the process id are only
+        // a source of variety here, not of order.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as u64);
+        let epoch = now ^ (u64::from(std::process::id()) << 32) | 1;
+        Self {
+            origins: BTreeSet::new(),
+            sent: BTreeSet::new(),
+            epoch,
+            counter: 0,
+            seen: BTreeMap::new(),
+            last: BTreeMap::new(),
+        }
+    }
 }
 
 impl Latch {
@@ -65,23 +119,27 @@ impl Latch {
         !self.origins.is_empty()
     }
 
-    /// A sequence number for a request of this daemon's own, above any
-    /// before it, also across restarts (it starts from the wall clock).
-    fn next_seq(&mut self, me: &str) -> u64 {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos() as u64);
-        let seq = self.seen.get(me).map_or(now, |&last| now.max(last + 1));
+    /// A number for a request of this daemon's own, above any before it.
+    fn next_seq(&mut self, me: &str) -> Seq {
+        self.counter += 1;
+        let seq = Seq {
+            epoch: self.epoch,
+            n: self.counter,
+        };
         self.seen.insert(me.to_owned(), seq);
         seq
     }
 
-    /// Records `seq` for `origin`; false if a later request of that origin
-    /// was applied already. Requests without a number (from older daemons)
-    /// always apply.
-    fn fresh(&mut self, origin: &str, seq: Option<u64>) -> bool {
+    /// Records `seq` for `origin`; false if it is not newer than the last
+    /// request of that origin applied here (in the same epoch). Requests
+    /// without a number (from older daemons) always apply.
+    fn fresh(&mut self, origin: &str, seq: Option<Seq>) -> bool {
         let Some(seq) = seq else { return true };
-        if self.seen.get(origin).is_some_and(|&last| last >= seq) {
+        if self
+            .seen
+            .get(origin)
+            .is_some_and(|last| last.epoch == seq.epoch && last.n >= seq.n)
+        {
             return false;
         }
         self.seen.insert(origin.to_owned(), seq);
@@ -100,14 +158,14 @@ enum Request {
     Forwarded {
         engage: bool,
         origin: String,
-        seq: Option<u64>,
+        seq: Option<Seq>,
     },
     /// From a peer running part of this daemon's graph, where a client
     /// engaged or released its own stop.
     Relayed {
         engage: bool,
         origin: String,
-        seq: Option<u64>,
+        seq: Option<Seq>,
     },
 }
 
@@ -206,7 +264,6 @@ fn apply(latch: &mut Latch, me: &str, req: &Request) -> (bool, Vec<String>) {
 /// Sets the stop on this daemon's hosts.
 fn set(st: &State, engaged: bool) {
     let was = st.estop.swap(engaged, Ordering::Relaxed);
-    st.sup.lock().host_state.estopped = engaged;
     st.publish_estop();
     if was != engaged {
         tracing::warn!(
@@ -228,7 +285,7 @@ pub fn handle(st: &Arc<State>, text: &str) -> Result<String> {
 pub struct Forwarding {
     engage: bool,
     origin: String,
-    seq: u64,
+    seq: Seq,
     targets: BTreeSet<String>,
     /// The daemon whose graph this one runs part of, for a stop of this
     /// daemon's own.
@@ -254,7 +311,8 @@ pub fn begin(st: &Arc<State>, text: &str) -> Result<(String, Option<Forwarding>)
                 };
                 return Ok((format!("e-stop stays {state}: request out of date"), None));
             }
-            (origin.clone(), seq.unwrap_or(0))
+            let seq = seq.unwrap_or_else(|| latch.next_seq(&st.name));
+            (origin.clone(), seq)
         }
     };
     let (engaged, origins) = apply(&mut latch, &st.name, &req);
@@ -273,6 +331,7 @@ pub fn begin(st: &Arc<State>, text: &str) -> Result<(String, Option<Forwarding>)
     if matches!(req, Request::Forwarded { .. }) {
         return Ok((done, None));
     }
+    latch.last.insert(origin.clone(), (req.engage(), seq));
 
     // The machines running the rest of the graph follow, without passing
     // it further; a release also reaches machines that left the graph.
@@ -368,7 +427,9 @@ pub fn forward_on_deploy(st: &State, machines: &BTreeSet<String>) -> Result<()> 
     let seq = {
         let mut latch = st.estop_latch.lock();
         latch.sent.extend(machines.iter().cloned());
-        latch.next_seq(&st.name)
+        let seq = latch.next_seq(&st.name);
+        latch.last.insert(st.name.clone(), (true, seq));
+        seq
     };
     let op = format!("{ENGAGE_FROM}{} {seq}", st.name);
     for (p, r) in forward(st, machines, &op, FORWARD_TIMEOUT) {
@@ -376,6 +437,48 @@ pub fn forward_on_deploy(st: &State, machines: &BTreeSet<String>) -> Result<()> 
     }
     Ok(())
 }
+
+/// Passes on again the last request of every origin this daemon passes
+/// on, to the machines of its graph: one that missed it (it was cut off,
+/// or restarted) catches up. Ones that have it already ignore it, by its
+/// number. Called every [`RESEND_INTERVAL`].
+pub fn resend(st: &State) {
+    let (pending, peers, sent, up) = {
+        let latch = st.estop_latch.lock();
+        (
+            latch.last.clone(),
+            st.peers.lock().clone(),
+            latch.sent.clone(),
+            st.origin.lock().clone(),
+        )
+    };
+    for (origin, (engage, seq)) in pending {
+        let (from, upward) = if engage {
+            (ENGAGE_FROM, ENGAGE_UP)
+        } else {
+            (RELEASE_FROM, RELEASE_UP)
+        };
+        let mut targets: BTreeSet<String> = if engage {
+            peers.clone()
+        } else {
+            peers.union(&sent).cloned().collect()
+        };
+        targets.remove(&origin);
+        let _ = forward(
+            st,
+            &targets,
+            &format!("{from}{origin} {seq}"),
+            FORWARD_TIMEOUT,
+        );
+        if let Some(up) = up.clone().filter(|_| origin == st.name) {
+            let op = format!("{upward}{origin} {seq}");
+            let _ = forward(st, &BTreeSet::from([up]), &op, RELAY_TIMEOUT);
+        }
+    }
+}
+
+/// How often [`resend`] runs.
+pub const RESEND_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Sends `op` to every peer at once, and briefly: a peer that does not
 /// answer must not hold the stop back from the others, nor outlast the
@@ -440,13 +543,19 @@ mod tests {
     #[test]
     fn out_of_date_requests_of_an_origin_are_ignored() {
         let mut l = Latch::default();
-        assert!(l.fresh("laptop", Some(5)));
-        assert!(!l.fresh("laptop", Some(4)), "sent earlier, arrived later");
-        assert!(!l.fresh("laptop", Some(5)));
-        assert!(l.fresh("console", Some(1)), "origins are numbered apart");
+        let seq = |epoch, n| Some(Seq { epoch, n });
+        assert!(l.fresh("laptop", seq(7, 5)));
+        assert!(!l.fresh("laptop", seq(7, 4)), "sent earlier, arrived later");
+        assert!(!l.fresh("laptop", seq(7, 5)), "passed on again");
+        assert!(l.fresh("console", seq(9, 1)), "origins are numbered apart");
+        // The laptop restarted, whatever its clock says now.
+        assert!(l.fresh("laptop", seq(3, 1)));
         assert!(l.fresh("laptop", None), "older daemons send no number");
         let (a, b) = (l.next_seq("me"), l.next_seq("me"));
-        assert!(b > a);
+        assert_eq!((a.epoch, a.n + 1), (b.epoch, b.n));
+        let other = Latch::default().next_seq("me");
+        assert_ne!(a.epoch, other.epoch, "each start has its own epoch");
+        assert_eq!("2a.5".parse::<Seq>().unwrap(), Seq { epoch: 42, n: 5 });
     }
 
     #[test]
@@ -461,11 +570,11 @@ mod tests {
             }
         );
         assert_eq!(
-            Request::parse("engage-up arm 7").unwrap(),
+            Request::parse("engage-up arm a.7").unwrap(),
             Request::Relayed {
                 engage: true,
                 origin: "arm".into(),
-                seq: Some(7),
+                seq: Some(Seq { epoch: 10, n: 7 }),
             }
         );
         assert!(Request::parse("maybe").is_err());

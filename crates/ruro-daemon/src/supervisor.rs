@@ -6,6 +6,7 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -145,7 +146,9 @@ struct Group {
 /// State a restarted host must pick up.
 #[derive(Default)]
 pub struct HostState {
-    pub estopped: bool,
+    /// The daemon's e-stop flag itself, so the stop never waits for the
+    /// supervisor's lock.
+    pub estopped: Arc<AtomicBool>,
     /// Directory receiving recording segments, while recording.
     pub record_dir: Option<PathBuf>,
     /// Nodes whose outputs are being replayed.
@@ -289,7 +292,7 @@ impl Supervisor {
         if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
             cmd.env("RURO_LOG_COLOR", "1");
         }
-        if self.host_state.estopped {
+        if self.host_state.estopped.load(Ordering::Relaxed) {
             cmd.arg("--estopped");
         }
         if let Some(dir) = &self.host_state.record_dir {

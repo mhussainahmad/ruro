@@ -790,3 +790,55 @@ fn the_emergency_stop_does_not_wait_for_other_requests() {
     let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&name));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_machine_that_missed_the_stop_catches_up() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-missed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let (robot_port, laptop_port) = (free_port(), free_port());
+    let tag = std::process::id();
+    let (robot, laptop) = (format!("mrobot{tag}"), format!("mlaptop{tag}"));
+    let robot_daemon = daemon(&robot, robot_port, Vec::new(), &host);
+    let laptop_daemon = daemon(
+        &laptop,
+        laptop_port,
+        vec![format!("tcp/127.0.0.1:{robot_port}")],
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{laptop_port}")).unwrap();
+    let request = |op, payload: &str| {
+        ruro_proto::request(
+            &session,
+            &Keys::new(&laptop),
+            op,
+            payload,
+            Duration::from_secs(10),
+        )
+    };
+    let graph = format!(
+        "name: span\ngroups:\n  far: {{ machine: {robot} }}\nnodes:\n  a: {{ type: t/x, group: far, rate: 1 }}\n  b: {{ type: t/x, rate: 1 }}\n"
+    );
+    request(Ctl::Deploy, &graph).unwrap();
+
+    // The robot is away (cut off, or restarting) when the stop is engaged.
+    drop(robot_daemon);
+    let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(&robot));
+    assert!(
+        request(Ctl::Estop, "engage").is_err(),
+        "the robot did not get it"
+    );
+    let _robot_back = daemon(&robot, robot_port, Vec::new(), &host);
+    // It gets the stop once it is back, without anyone asking again.
+    wait_status(&session, &robot, |s| s.estopped);
+
+    // And a release it misses reaches it the same way.
+    request(Ctl::Estop, "release").unwrap();
+    wait_status(&session, &robot, |s| !s.estopped);
+
+    drop(laptop_daemon);
+    for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

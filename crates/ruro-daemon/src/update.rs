@@ -659,6 +659,11 @@ pub struct Restart {
 }
 
 impl Restart {
+    /// Whether the new daemon starts with the e-stop engaged.
+    pub fn set_estop(&mut self, engaged: bool) {
+        self.handoff.estop = engaged;
+    }
+
     /// The version being started.
     pub fn version(&self) -> &str {
         &self.handoff.to

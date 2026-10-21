@@ -66,9 +66,9 @@ Generic structs are not supported.
 
 Parameters set in the graph file override the default, and are checked against the type and
 range when the graph is validated. When a parameter is changed at run time (from the studio
-or `ruro param`), the new value is written to the field before the next step. Run-time
-changes are converted to the field's type but not checked against `min` and `max`, so
-clamp values your node cannot handle.
+or `ruro param`), it is checked against the type and range in the same way, and a valid
+value is written to the field before the next step. Values outside `min` and `max` are
+refused, not clamped.
 
 ## The `Node` trait
 

@@ -7,7 +7,7 @@ the order it will be done. An item is ticked only when a test proves it, and
 
 ## Small gaps
 
-- [ ] `ruro param` checks values against the node's declared range and type.
+- [x] `ruro param` checks values against the node's declared range and type.
 - [ ] Python nodes get the emergency stop like Rust nodes.
 - [ ] An emergency stop engaged on a peer daemon reaches the daemon that deployed the graph.
 

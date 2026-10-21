@@ -247,8 +247,9 @@ ruro param <NODE> <NAME> <VALUE>
 
 Changes a parameter of a running node. `VALUE` is parsed as JSON when possible (`12`, `0.5`,
 `true`, `"text"`), otherwise it is sent as a string. The change is not written back to the
-graph file. The value is not checked against the parameter's range, and an unknown node or
-parameter is only reported in the graph's logs.
+graph file. The value is checked against the parameter's type and range, and the command
+fails, with a suggestion for a misspelt name, if the node or parameter does not exist. It
+returns once the node has applied the value.
 
 ### ruro kill
 

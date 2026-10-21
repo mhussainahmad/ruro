@@ -365,3 +365,59 @@ fn peers_are_updated_before_the_daemon_they_are_reached_through() {
     let fleet = text(&laptop.cli(&["fleet"]));
     assert!(fleet.contains(&robot.name), "{fleet}");
 }
+
+#[test]
+fn an_update_that_dies_while_on_probation_is_rolled_back() {
+    let mut f = Fleet::new("probation");
+    let probation = [("RURO_UPDATE_PROBATION", "30")];
+    f.start(Some(OLD), &probation);
+    let new = f.signed(Path::new(RURO), "new", None);
+    let out = f.cli(&["update", new.to_str().unwrap(), "--timeout", "20"]);
+    assert!(out.status.success(), "{}", text(&out));
+    f.wait_status(|s| s.version == VERSION);
+    assert!(f.path("bin/ruro.prev").exists());
+
+    // It passed its trial and started, then dies (a crash, the OOM killer)
+    // before its probation ends, and is started again (by systemd, or by
+    // hand): the previous binary is put back and started instead.
+    let mut daemon = f.daemon.take().unwrap();
+    daemon.kill().unwrap();
+    daemon.wait().unwrap();
+    f.start(None, &probation);
+    let st = f.wait_status(|s| {
+        s.update
+            .as_deref()
+            .is_some_and(|u| u.contains("rolled back"))
+    });
+    let note = st.update.unwrap();
+    assert!(
+        note.starts_with(&format!(
+            "rolled back to {OLD}: {VERSION} stopped within 30 s"
+        )),
+        "{note}"
+    );
+    assert!(
+        !f.path("bin/ruro.prev").exists(),
+        "the previous binary is back"
+    );
+}
+
+#[test]
+fn an_update_that_outlives_its_probation_is_kept() {
+    let mut f = Fleet::new("kept");
+    let probation = [("RURO_UPDATE_PROBATION", "1")];
+    f.start(Some(OLD), &probation);
+    let new = f.signed(Path::new(RURO), "new", None);
+    let out = f.cli(&["update", new.to_str().unwrap(), "--timeout", "20"]);
+    assert!(out.status.success(), "{}", text(&out));
+    f.wait_status(|s| s.version == VERSION);
+    std::thread::sleep(Duration::from_secs(3));
+
+    let mut daemon = f.daemon.take().unwrap();
+    daemon.kill().unwrap();
+    daemon.wait().unwrap();
+    f.start(None, &probation);
+    let st = f.wait_status(|_| true);
+    assert_eq!(st.update, None, "no rollback: {st:?}");
+    assert!(f.path("bin/ruro.prev").exists(), "the update stays");
+}

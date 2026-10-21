@@ -83,6 +83,7 @@ and `soak` take it too. An unknown overlay name is an error.
 ```text
 ruro daemon [--name <NAME>] [--listen <ENDPOINT>] [--host <HOST>] [--peer <ENDPOINT>]...
             [--heartbeat-timeout <SECONDS>] [--update-keys <FILE>]
+            [--update-probation <SECONDS>]
 ```
 
 | Option | Default | Meaning |
@@ -93,6 +94,7 @@ ruro daemon [--name <NAME>] [--listen <ENDPOINT>] [--host <HOST>] [--peer <ENDPO
 | `--peer <ENDPOINT>` | | Another daemon to connect to, e.g. `tcp/robot2:7447`. Repeatable. See [Multi-machine graphs](../multi-machine.md). |
 | `--heartbeat-timeout <SECONDS>` | 5 | Seconds without metrics after which a host is restarted (at least 0.5). |
 | `--update-keys <FILE>` | `RURO_UPDATE_KEYS` | Public keys whose signed binaries `ruro update` may install. Without it, updates are refused. |
+| `--update-probation <SECONDS>` | `RURO_UPDATE_PROBATION` | How long an updated daemon must run before the update is kept (default 120); one that stops sooner without being asked to is rolled back at its next start. |
 
 Runs until <kbd>Ctrl</kbd>+<kbd>C</kbd> or `SIGTERM`, then stops the running graph. After
 `ruro update` has installed a new binary it executes it in place, or with `RURO_RESTART=exit`

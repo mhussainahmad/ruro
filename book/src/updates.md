@@ -152,10 +152,17 @@ package no longer changes the daemon that runs; update it with `ruro update`.
   and starts them (under systemd: exits, and systemd starts the previous binary). The daemon
   reports `rolled back to 0.1.0: 0.2.0 did not start (...)` in its status, and `ruro update`
   fails with it.
+- Once started, the new daemon is on probation for `--update-probation` seconds (default
+  120, or `RURO_UPDATE_PROBATION`). If it stops in that time without being asked to (it
+  crashes, or the kernel kills it) and is started again, it puts the previous binaries back
+  and starts them, which report `rolled back to 0.1.0: 0.2.0 stopped within 120 s of
+  starting`. Under systemd (`Restart=on-failure`) that happens on its own; a daemon run by
+  hand is rolled back when you next start it. A daemon stopped on purpose (SIGTERM, Ctrl-C,
+  a reboot) keeps the update, and so does one that outlives its probation.
 - To go back by hand, rename `ruro.prev` over `ruro` and restart the daemon, or install the
   older build with `ruro update --allow-downgrade`.
 
-Not covered: a new daemon that starts, passes the trial and the restart, and fails later.
+Not covered: a new daemon that hangs rather than exits, or that fails after its probation.
 The previous binary is still there as `ruro.prev`.
 
 ## Limitations

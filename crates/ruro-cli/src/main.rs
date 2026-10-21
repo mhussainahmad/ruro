@@ -121,6 +121,11 @@ enum Cmd {
         /// refused.
         #[arg(long, env = "RURO_UPDATE_KEYS")]
         update_keys: Option<PathBuf>,
+        /// Seconds an updated daemon must run before the update is kept. A
+        /// daemon that stops sooner, other than when asked to, is rolled
+        /// back when it is next started.
+        #[arg(long, env = "RURO_UPDATE_PROBATION", default_value_t = 120.0)]
+        update_probation: f64,
     },
     /// Update daemons over the network to a signed `ruro` (and host)
     /// binary. Refused while a graph runs, unless the e-stop is engaged.
@@ -317,6 +322,7 @@ fn run(cli: Cli) -> Result<()> {
             peers,
             heartbeat_timeout,
             update_keys,
+            update_probation,
         } => {
             let mut config = ruro_daemon::Config::new();
             config.listen = listen;
@@ -324,6 +330,7 @@ fn run(cli: Cli) -> Result<()> {
             config.security = security.clone();
             config.heartbeat_timeout = Duration::from_secs_f64(heartbeat_timeout.max(0.5));
             config.update_keys = update_keys;
+            config.update_probation = Duration::from_secs_f64(update_probation.max(0.0));
             if let Some(n) = name {
                 config.name = n;
             }
@@ -499,6 +506,13 @@ fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
         return trial.run(config);
     }
     let handoff = Handoff::take(&config.executable, &config.name);
+    let probation = config.update_probation;
+    // An update that stopped while on probation goes back to the previous
+    // binary.
+    if let Some(h) = handoff.as_ref().filter(|h| h.died_on_probation()) {
+        let what = format!("stopped within {} s of starting", probation.as_secs());
+        return Err(h.clone().roll_back(&config, &what));
+    }
     if let Some(h) = &handoff {
         h.configure(&mut config);
     }
@@ -507,7 +521,9 @@ fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
         Ok(d) => d,
         // An update that does not start goes back to the previous binary.
         Err(e) => match handoff {
-            Some(h) if h.is_pending() => return Err(h.roll_back(&config, e)),
+            Some(h) if h.is_pending() => {
+                return Err(h.roll_back(&config, &format!("did not start ({e:#})")));
+            }
             // The report of a rollback waits for a start that succeeds.
             Some(h) => {
                 if let Err(e) = h.save(&config.executable, &config.name) {
@@ -518,8 +534,24 @@ fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
             None => return Err(e),
         },
     };
+    // Started: the update is on probation.
+    let mut on_probation = None;
+    if let Some(h) = handoff.filter(|h| h.is_pending()) {
+        match h.start_probation(&config) {
+            Ok(()) => on_probation = Some(std::time::Instant::now()),
+            Err(e) => tracing::warn!("the update is kept without probation: {e:#}"),
+        }
+    }
     loop {
+        if on_probation.is_some_and(|t| t.elapsed() >= probation) {
+            Handoff::accept(&config.executable, &config.name);
+            on_probation = None;
+        }
         if stop.load(Ordering::Relaxed) {
+            // Asked to stop: the update stays.
+            if on_probation.is_some() {
+                Handoff::accept(&config.executable, &config.name);
+            }
             daemon.shutdown();
             return Ok(());
         }

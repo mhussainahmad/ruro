@@ -301,6 +301,7 @@ pub(crate) fn update(st: &Arc<State>, req: &UpdateRequest) -> Result<String> {
             estop,
             replaced,
             note: None,
+            started: false,
         },
     });
     let mut reply = format!(
@@ -548,6 +549,11 @@ pub struct Handoff {
     replaced: Vec<(PathBuf, PathBuf)>,
     /// Set once the update was rolled back: why.
     note: Option<String>,
+    /// The updated daemon started and is on probation: if it stops before
+    /// the probation ends, other than when asked to, the next start finds
+    /// this still set and rolls the update back.
+    #[serde(default)]
+    started: bool,
 }
 
 /// `.ruro.handoff-<name>.json` next to the daemon's executable `exe`.
@@ -581,7 +587,31 @@ impl Handoff {
     /// Whether this is an update that has not been started yet (rather than
     /// the report of one that was rolled back).
     pub fn is_pending(&self) -> bool {
-        self.note.is_none()
+        self.note.is_none() && !self.started
+    }
+
+    /// Whether the updated daemon started and then stopped while on
+    /// probation, without being asked to.
+    pub fn died_on_probation(&self) -> bool {
+        self.note.is_none() && self.started
+    }
+
+    /// Puts the updated daemon, which has started, on probation until
+    /// [`Handoff::accept`].
+    pub fn start_probation(mut self, config: &Config) -> Result<()> {
+        self.started = true;
+        self.save(&config.executable, &config.name)
+    }
+
+    /// Ends the probation of the daemon called `name` run from `exe`: the
+    /// update stays.
+    pub fn accept(exe: &Path, name: &str) {
+        let path = handoff_file(exe, name);
+        if let Err(e) = std::fs::remove_file(&path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("{}: {e}", path.display());
+        }
     }
 
     /// Carries the outcome and the e-stop into the daemon's configuration.
@@ -593,16 +623,13 @@ impl Handoff {
         config.estopped |= self.estop;
     }
 
-    /// After the updated daemon failed to start: puts the previous binaries
-    /// back and starts them in place of this process. Returns the error to
-    /// exit with: under a service manager, which then starts the previous
-    /// binary, or if executing it failed.
-    pub fn roll_back(mut self, config: &Config, err: anyhow::Error) -> anyhow::Error {
+    /// After the updated daemon failed (`what`: "did not start (...)"):
+    /// puts the previous binaries back and starts them in place of this
+    /// process. Returns the error to exit with: under a service manager,
+    /// which then starts the previous binary, or if executing it failed.
+    pub fn roll_back(mut self, config: &Config, what: &str) -> anyhow::Error {
         restore(&self.replaced);
-        let note = format!(
-            "rolled back to {}: {} did not start ({err:#})",
-            self.from, self.to
-        );
+        let note = format!("rolled back to {}: {} {what}", self.from, self.to);
         tracing::error!("{note}");
         self.replaced.clear();
         self.note = Some(note.clone());

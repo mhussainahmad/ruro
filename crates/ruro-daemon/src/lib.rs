@@ -64,6 +64,10 @@ pub struct Config {
     pub args: Vec<std::ffi::OsString>,
     /// Shown in the daemon's status: how its last update went.
     pub update_note: Option<String>,
+    /// How long an updated daemon must run before its update is kept: if
+    /// it stops sooner (other than when asked to), its next start rolls
+    /// the update back.
+    pub update_probation: Duration,
     /// Start with the emergency stop engaged (as if engaged here).
     pub estopped: bool,
 }
@@ -81,6 +85,7 @@ impl Config {
             executable: std::env::current_exe().unwrap_or_default(),
             args: std::env::args_os().collect(),
             update_note: None,
+            update_probation: Duration::from_secs(120),
             estopped: false,
         }
     }

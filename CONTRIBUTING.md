@@ -128,3 +128,20 @@ additional terms or conditions.
 
 Everyone participating in this project is expected to follow the
 [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Releasing
+
+Maintainers only. Every step below that publishes something cannot be undone.
+
+1. Set the version in `[workspace.package]` and `[workspace.dependencies]` of `Cargo.toml`,
+   and in `crates/ruro-py/pyproject.toml`. Move `[Unreleased]` in `CHANGELOG.md` to the new
+   version with today's date.
+2. Check that every crate packages: `cargo publish --workspace --dry-run`.
+3. Tag and push: `git tag v<version> && git push origin v<version>`. The release workflow
+   (`.github/workflows/release.yml`) builds `ruro`, `ruro-host` and `ruro-studio` for x86_64
+   and `ruro` and `ruro-host` for aarch64 on Ubuntu 22.04, the Debian package, and their
+   `SHA256SUMS`, and attaches them to a **draft** release. Check it and publish it.
+4. Publish the crates: `cargo publish --workspace` (cargo publishes them in dependency
+   order).
+5. Publish the Python package: build the wheels with maturin from `crates/ruro-py` and upload
+   them to PyPI.

@@ -3,7 +3,8 @@
 ruro runs on Linux. It is developed on x86-64; 64-bit ARM binaries of the headless tools are
 cross-compiled in CI (see [Cross-compiling for ARM](deployment.md#cross-compiling-for-arm)).
 There are no prebuilt releases yet: build from source, or build one of the packages below
-from a checkout.
+from a checkout. Releases will attach `ruro` and `ruro-host` for x86-64 and 64-bit ARM, the
+studio for x86-64, and the Debian package, with their SHA-256 sums.
 
 | Method | Contents | Best for |
 |---|---|---|

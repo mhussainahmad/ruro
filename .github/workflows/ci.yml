@@ -124,6 +124,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.gcc }}
       - name: Build CLI and host
         run: cargo build --release --locked --target ${{ matrix.target }} -p ruro-cli -p ruro-host
+      # The tests run under user-mode emulation. Binaries the tests start
+      # themselves (daemons, hosts) go through binfmt, which does not pass
+      # -L, hence QEMU_LD_PREFIX. Skipped: one test reads /proc/<pid>/exe,
+      # which is qemu under emulation. The Python crates need a libpython for
+      # the target, and the studio is not built for it.
+      - name: Emulator
+        run: >
+          sudo apt-get install -y --no-install-recommends qemu-user qemu-user-binfmt
+          && test -e /proc/sys/fs/binfmt_misc/qemu-aarch64
+      - name: Test under emulation
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+          QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
+        run: >
+          cargo test --locked --target ${{ matrix.target }}
+          --workspace --exclude ruro-py --exclude ruro-host-py --exclude ruro-studio
+          -- --skip uploaded_host_binaries_run_groups
       - uses: actions/upload-artifact@v4
         with:
           name: ruro-${{ matrix.target }}

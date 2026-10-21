@@ -250,9 +250,11 @@ wires:
     request(&s, &d.keys, Ctl::Record, "").unwrap();
 
     // The second recording holds live values before the replay started and
-    // then exactly the gain outputs of the first run.
+    // then the gain of every recorded source value, in order. (Not the gain
+    // outputs of the first run: its groups stopped recording a few messages
+    // apart, more so on a slow machine.)
     let gain_second = values(&second, "gain.output");
-    let expected = &gain_first[..gain_first.len() - 1];
+    let expected = &halves[..halves.len() - 1];
     let found = gain_second.windows(expected.len()).any(|w| w == expected);
     assert!(
         found,
@@ -570,20 +572,25 @@ fn recording_and_replay_cover_every_machine() {
     wait_status(&s, &d1.keys, TIMEOUT, |st| st.playback.is_none());
     std::thread::sleep(Duration::from_millis(300));
     request(&s, &d1.keys, Ctl::Record, "").unwrap();
+    // What the replayed source values make the gains compute (not the gain
+    // outputs of the first run, whose groups stopped recording a few
+    // messages apart).
+    let src_first = values(&first, "src.value");
+    let halves: Vec<f64> = src_first.iter().map(|v| v * 0.5).collect();
     let contains = |run: &[f64], first: &[f64]| {
         let expected = &first[1..first.len() - 1];
         run.windows(expected.len()).any(|w| w == expected)
     };
     let gain_second = values(&second, "gain.output");
     assert!(
-        contains(&gain_second, &gain_first),
+        contains(&gain_second, &halves),
         "replayed gain outputs differ: first run {} values, second run {}",
         gain_first.len(),
         gain_second.len()
     );
     let twice_second = values(&second, "twice.output");
     assert!(
-        contains(&twice_second, &twice_first),
+        contains(&twice_second, &src_first),
         "the gain on the peer was not fed: first run {} values, second run {}",
         twice_first.len(),
         twice_second.len()

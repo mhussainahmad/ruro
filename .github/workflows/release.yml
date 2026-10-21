@@ -1,0 +1,102 @@
+name: Release
+
+# Pushing a tag `v<version>` builds the binaries and the Debian package and
+# attaches them, with their SHA-256 sums, to a draft GitHub release. Check the
+# draft and publish it by hand; crates are published separately (see
+# book/src/contributing.md).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  binaries:
+    name: binaries (${{ matrix.target }})
+    # The oldest supported Ubuntu, so the binaries' glibc requirement stays low.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            bins: ruro ruro-host ruro-studio
+            packages: -p ruro-cli -p ruro-host -p ruro-studio
+          # Robot computers (Raspberry Pi 4/5, Jetson). The studio is not
+          # built for them.
+          - target: aarch64-unknown-linux-gnu
+            bins: ruro ruro-host
+            packages: -p ruro-cli -p ruro-host
+            gcc: gcc-aarch64-linux-gnu libc6-dev-arm64-cross binutils-aarch64-linux-gnu
+            strip: aarch64-linux-gnu-strip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cross toolchain
+        if: matrix.gcc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.gcc }}
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.packages }}
+      - name: Archive
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || version="$(git rev-parse --short HEAD)"
+          name="ruro-$version-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          for bin in ${{ matrix.bins }}; do
+            install -m755 "target/${{ matrix.target }}/release/$bin" "dist/$name/$bin"
+            ${{ matrix.strip || 'strip' }} --strip-unneeded "dist/$name/$bin"
+          done
+          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp -r examples packaging/systemd "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          rm -rf "dist/${name:?}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  deb:
+    name: debian package
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Packaging tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev
+      - name: Build .deb
+        run: scripts/package-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: target/package/*.deb
+          if-no-files-found: error
+
+  release:
+    needs: [binaries, deb]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --draft --verify-tag --title "ruro ${GITHUB_REF_NAME#v}"
+          --notes "See CHANGELOG.md. Verify downloads against SHA256SUMS."

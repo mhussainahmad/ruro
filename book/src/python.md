@@ -155,4 +155,5 @@ group.
 With `reload=True` on a node, or `RURO_PY_RELOAD=1` for all of them, the host checks the
 node's module file at most every half second. When it changes, the module is re-imported and
 the node is replaced by a new instance with the same ports and parameters (`stop` is called
-on the old one and `start` on the new one).
+on the old one and `start` on the new one). A node reloaded while the emergency stop is
+engaged does not get `on_estop` again; its steps see `ctx.estopped`.

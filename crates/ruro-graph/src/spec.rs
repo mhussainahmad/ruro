@@ -116,6 +116,16 @@ impl Ros2Settings {
     fn default_router() -> String {
         "tcp/127.0.0.1:7447".into()
     }
+
+    /// The ROS node a ruro node appears as: `ruro_` and its id, with
+    /// characters ROS does not allow in node names replaced by `_`.
+    pub fn node_name(id: &str) -> String {
+        let id: String = id
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        format!("ruro_{id}")
+    }
 }
 
 impl Default for Ros2Settings {

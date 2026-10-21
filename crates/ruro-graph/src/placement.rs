@@ -103,6 +103,18 @@ pub fn runtime_issues(graph: &Graph, registry: &Registry) -> Vec<Issue> {
             ));
         }
     }
+    // Two nodes must not be one ROS node.
+    if graph.ros2.as_ref().is_some_and(|r| r.parameters) {
+        let mut seen: std::collections::BTreeMap<String, &str> = Default::default();
+        for id in graph.nodes.keys() {
+            let ros = crate::Ros2Settings::node_name(id);
+            if let Some(other) = seen.insert(ros.clone(), id) {
+                push(format!(
+                    "nodes `{other}` and `{id}` would both be the ROS node `/{ros}`; rename one"
+                ));
+            }
+        }
+    }
     let groups = graph.groups();
     for (name, config) in &graph.groups {
         let Some(rt) = &config.realtime else { continue };
@@ -139,6 +151,21 @@ mod tests {
             kind: kind.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn two_nodes_cannot_be_one_ros_node() {
+        let reg = Registry::new([desc("t/x")]);
+        let g = Graph::from_yaml(
+            "name: x\nros2: { parameters: true }\nnodes:\n  a-b: { type: t/x }\n  a_b: { type: t/x }\n",
+        )
+        .unwrap();
+        let issues = runtime_issues(&g, &reg);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].to_string().contains("`/ruro_a_b`"), "{issues:?}");
+        let off = Graph::from_yaml("name: x\nnodes:\n  a-b: { type: t/x }\n  a_b: { type: t/x }\n")
+            .unwrap();
+        assert!(runtime_issues(&off, &reg).is_empty());
     }
 
     #[test]

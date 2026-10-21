@@ -45,7 +45,9 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::spec::{ClockSource, Graph, GraphError, GroupConfig, NodeInstance, RestartPolicy, Wire};
+use crate::spec::{
+    ClockSource, Graph, GraphError, GroupConfig, NodeInstance, RestartPolicy, Ros2Settings, Wire,
+};
 
 /// A named variant of a graph: a patch applied on top of it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -53,6 +55,9 @@ pub struct Overlay {
     /// Replaces the graph's clock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<ClockSource>,
+    /// Replaces the graph's `ros2` section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ros2: Option<Ros2Settings>,
     /// Group settings to set, or `null` to remove a group's settings.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub groups: IndexMap<String, Option<GroupConfig>>,
@@ -162,6 +167,16 @@ impl Overlay {
                 if clock.is_wall() { "wall" } else { "sim" }
             ));
         }
+        if let Some(r) = &self.ros2 {
+            let mut line = format!(
+                "ros2 parameters {}",
+                if r.parameters { "on" } else { "off" }
+            );
+            if let Some(d) = r.domain_id {
+                line.push_str(&format!(", domain {d}"));
+            }
+            out.push(line);
+        }
         for (group, patch) in &self.groups {
             match patch {
                 None => out.push(format!("group {group}: settings removed")),
@@ -220,6 +235,9 @@ impl Overlay {
     pub fn apply(&self, name: &str, g: &mut Graph) -> Result<(), GraphError> {
         if let Some(clock) = self.clock {
             g.clock = clock;
+        }
+        if let Some(r) = &self.ros2 {
+            g.ros2 = Some(r.clone());
         }
         for (group, patch) in &self.groups {
             match patch {
@@ -460,6 +478,19 @@ overlays:
         );
         let b = g.with_overlays(&["slow", "real"]).unwrap();
         assert_eq!(b.nodes["arm"].rate, Some(10.0));
+    }
+
+    #[test]
+    fn ros2_settings_can_be_set() {
+        let g = with("ros", "{ ros2: { parameters: true, domain_id: 4 } }");
+        let r = g.with_overlays(&["ros"]).unwrap().ros2.unwrap();
+        assert!(r.parameters);
+        assert_eq!(r.domain_id, Some(4));
+        assert!(g.with_overlays::<&str>(&[]).unwrap().ros2.is_none());
+        assert_eq!(
+            g.overlays["ros"].summary(),
+            ["ros2 parameters on, domain 4"]
+        );
     }
 
     #[test]

@@ -43,18 +43,28 @@ const USE_SIM_TIME: &str = "use_sim_time";
 /// How long a set waits for its node, as for `ruro param`.
 const APPLY_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Sets waiting for the worker; more are refused (the client times out).
+const QUEUED_SETS: usize = 64;
+
+/// A set request, answered by the worker.
+type Job = Box<dyn FnOnce() + Send>;
+
 /// The services of every node of a group. Dropping it withdraws them.
 pub struct ParamServers {
     _services: Vec<RawService>,
     _endpoints: Vec<Arc<Endpoint>>,
     stop: Arc<AtomicBool>,
     events: Option<JoinHandle<()>>,
+    worker: Option<JoinHandle<()>>,
 }
 
 impl Drop for ParamServers {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.events.take() {
+        for t in [self.events.take(), self.worker.take()]
+            .into_iter()
+            .flatten()
+        {
             let _ = t.join();
         }
     }
@@ -71,11 +81,7 @@ fn events_qos() -> Qos {
 
 /// The ROS node name of a ruro node, as the bridge nodes name theirs.
 pub fn ros_node_name(id: &str) -> String {
-    let id: String = id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    format!("ruro_{id}")
+    Ros2Settings::node_name(id)
 }
 
 /// Offers the parameter services of every node of `exec`'s group.
@@ -83,6 +89,20 @@ pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServ
     let mut services = Vec::new();
     let mut endpoints = Vec::new();
     let mut events: HashMap<String, Publisher<msg::ParameterEvent>> = HashMap::new();
+    // Sets wait for their node: one worker answers them in turn, never
+    // Zenoh's callback, and never a thread per request.
+    let (jobs, queue) = crossbeam_channel::bounded::<Job>(QUEUED_SETS);
+    let stop = Arc::new(AtomicBool::new(false));
+    let done = stop.clone();
+    let worker = std::thread::Builder::new()
+        .name("ros2-param-sets".into())
+        .spawn(move || {
+            while !done.load(Ordering::Relaxed) {
+                if let Ok(job) = queue.recv_timeout(Duration::from_millis(200)) {
+                    job();
+                }
+            }
+        })?;
     // Subscribed before the first event goes out, so no change is missed.
     let updates = exec.param_updates();
     for id in exec.node_ids().map(str::to_owned).collect::<Vec<_>>() {
@@ -119,27 +139,27 @@ pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServ
             qos,
             move |req| n.describe(&req.names),
         )?);
-        // Sets wait for the node: answered from a thread of their own, not
-        // from Zenoh's callback.
-        let n = node.clone();
+        let (n, queue) = (node.clone(), jobs.clone());
         services.push(endpoint.service_deferred::<srv::SetParameters>(
             &format!("{base}/set_parameters"),
             qos,
             move |pending| {
                 let n = n.clone();
-                spawn(pending, move |req| srv::SetParameters_Response {
+                queued(&queue, pending, move |req| srv::SetParameters_Response {
                     results: req.parameters.iter().map(|p| n.set(p)).collect(),
                 });
             },
         )?);
-        let n = node;
+        let (n, queue) = (node, jobs.clone());
         services.push(endpoint.service_deferred::<srv::SetParametersAtomically>(
             &format!("{base}/set_parameters_atomically"),
             qos,
             move |pending| {
                 let n = n.clone();
-                spawn(pending, move |req| srv::SetParametersAtomically_Response {
-                    result: n.set_all(&req.parameters),
+                queued(&queue, pending, move |req| {
+                    srv::SetParametersAtomically_Response {
+                        result: n.set_all(&req.parameters),
+                    }
                 });
             },
         )?);
@@ -169,7 +189,6 @@ pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServ
         events.insert(id, publisher);
         endpoints.push(endpoint);
     }
-    let stop = Arc::new(AtomicBool::new(false));
     let (exec, done) = (exec.clone(), stop.clone());
     let events = std::thread::Builder::new()
         .name("ros2-param-events".into())
@@ -202,20 +221,25 @@ pub fn attach(exec: &Arc<Executor>, settings: &Ros2Settings) -> Result<ParamServ
         _endpoints: endpoints,
         stop,
         events: Some(events),
+        worker: Some(worker),
     })
 }
 
-/// Answers `pending` from a new thread.
-fn spawn<S: RosService>(
+/// Has the worker answer `pending`, unless too many sets are waiting.
+fn queued<S: RosService>(
+    queue: &crossbeam_channel::Sender<Job>,
     pending: PendingRequest<S>,
     answer: impl FnOnce(&S::Request) -> S::Response + Send + 'static,
 ) where
     S::Request: Send + 'static,
 {
-    std::thread::spawn(move || {
+    let job: Job = Box::new(move || {
         let response = answer(&pending.request);
         let _ = pending.respond(&response);
     });
+    if queue.try_send(job).is_err() {
+        tracing::warn!("ROS 2 parameter sets: {QUEUED_SETS} waiting already, one dropped");
+    }
 }
 
 /// The ROS node for `name`, shared with bridge nodes of the same settings.

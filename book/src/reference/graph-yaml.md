@@ -178,6 +178,7 @@ overlays:
 | Field | Meaning |
 |---|---|
 | `clock` | Replaces the graph's `clock`. |
+| `ros2` | Replaces the graph's `ros2` section. |
 | `groups` | Per group: the fields given (`machine`, `host`, `realtime` as a whole) replace the group's settings; `null` removes the group's settings. |
 | `nodes` | Per node: `null` removes the node, an entry for a node that does not exist adds it, any other entry patches the node. |
 | `wires.remove` | Wires to remove, matched by their two ports (`depth` is ignored). |

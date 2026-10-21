@@ -71,8 +71,8 @@ that skip in CI:
   not against IP cameras.
 - **MuJoCo** (`sim/mujoco`) against MuJoCo 3.15.0.
 - **RealSense** (`hw/realsense`) with librealsense 2.56.3 on a D455 and two D455Fs: every
-  output from each camera, 60 fps, and all three at once. See
-  [Hardware drivers](hardware.md#intel-realsense).
+  output from each camera, 60 fps, and all three at once, five runs in a row with no USB
+  errors in the kernel log. See [Hardware drivers](hardware.md#intel-realsense).
 - **LeRobot datasets** with the Hugging Face `datasets` library when `RURO_LEROBOT_PYTHON`
   is set; not yet loaded by LeRobot itself.
 

@@ -113,12 +113,15 @@ Limits to be aware of:
 
 - **It is a software stop.** It is no substitute for a hardware emergency stop, and the
   hardware drivers have not yet been tested on the physical devices.
-- **It travels down a graph, not up.** A stop engaged at a daemon is passed on to the
-  daemons running the rest of its graph on [other machines](multi-machine.md), and
-  releasing it there releases it on them. A stop engaged directly on one of those machines
-  stays on that machine: `ruro status` and the studio show which machines of the graph are
-  stopped. Each stop is latched under the daemon it was engaged at, and a release lifts
-  only that daemon's own stop; `--release --all` lifts every stop latched at a daemon.
+- **It stops the whole graph, wherever it is engaged.** A stop engaged at a daemon is
+  passed on to the daemons running the rest of its graph on
+  [other machines](multi-machine.md). A stop engaged directly on one of those machines
+  goes back to the daemon that deployed the graph, which passes it on to the others. Each
+  stop is latched under the daemon it was engaged at, and a release lifts only that
+  daemon's own stop, on every machine; `--release --all` lifts every stop latched at one
+  daemon, there only. `ruro status` and the studio show which machines are stopped.
+- **A machine that cannot be reached is reported, not waited for.** The others still stop,
+  and the command fails naming the machine.
 
 ## Hung processes
 

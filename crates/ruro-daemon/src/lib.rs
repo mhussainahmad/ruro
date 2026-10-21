@@ -323,6 +323,26 @@ impl Daemon {
                         .payload()
                         .map(|p| p.to_bytes().into_owned())
                         .unwrap_or_default();
+                    if op == Ctl::Estop.as_str() {
+                        // Never behind a deploy or an update, nor behind
+                        // another daemon's stop that this one is passing on.
+                        let st = ctl_state.clone();
+                        std::thread::spawn(move || {
+                            let reply: CtlReply =
+                                estop::handle(&st, &String::from_utf8_lossy(&payload))
+                                    .map_err(|e| format!("{e:#}"));
+                            if let Err(e) = &reply {
+                                tracing::warn!("estop: {e}");
+                            }
+                            let _ = query
+                                .reply(
+                                    format!("ruro/{}/ctl/{op}", st.name),
+                                    ruro_proto::reply_bytes(&reply),
+                                )
+                                .wait();
+                        });
+                        continue;
+                    }
                     let bytes = if op == Ctl::RecordPart.as_str() {
                         // Binary chunks of a recording, not a text reply.
                         let reply: std::result::Result<Vec<u8>, String> =

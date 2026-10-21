@@ -99,17 +99,23 @@ fn the_emergency_stop_reaches_every_machine_of_the_graph() {
     request(Ctl::Estop, "engage");
     wait_status(&session, &robot, |s| s.estopped);
 
-    // Engaged at the robot too: releasing from the laptop leaves it engaged.
+    // Engaged at the robot too: releasing from the laptop leaves it engaged,
+    // on both, since the robot's stop went back to the laptop.
     request_to(&robot, Ctl::Estop, "engage");
-    request(Ctl::Estop, "release");
+    let reply = request(Ctl::Estop, "release");
+    assert!(
+        reply.contains("stays engaged") && reply.contains(&robot),
+        "{reply}"
+    );
     std::thread::sleep(Duration::from_millis(600));
     wait_status(&session, &robot, |s| s.estopped);
-    wait_status(&session, &laptop, |s| !s.estopped);
+    wait_status(&session, &laptop, |s| s.estopped);
     request_to(&robot, Ctl::Estop, "release");
     wait_status(&session, &robot, |s| !s.estopped);
+    wait_status(&session, &laptop, |s| !s.estopped);
 
     // The robot now deploys a graph that spans the laptop: the laptop's own
-    // graph is gone, and stops travel one way without bouncing back.
+    // graph is gone, and each stop reaches the other machine once.
     let graph = format!(
         "name: back\ngroups:\n  near: {{ machine: {laptop} }}\nnodes:\n  a: {{ type: t/x, group: near, rate: 1 }}\n  b: {{ type: t/x, rate: 1 }}\n"
     );
@@ -123,7 +129,11 @@ fn the_emergency_stop_reaches_every_machine_of_the_graph() {
         "{:?}",
         start.elapsed()
     );
+    std::thread::sleep(Duration::from_millis(600));
     wait_status(&session, &laptop, |s| s.estopped);
+    wait_status(&session, &robot, |s| s.estopped);
+    request(Ctl::Estop, "release");
+    wait_status(&session, &laptop, |s| !s.estopped);
     wait_status(&session, &robot, |s| !s.estopped);
 
     request_to(&robot, Ctl::Stop, "");
@@ -461,6 +471,89 @@ fn releases_lift_the_stops_of_their_own_origin_wherever_they_went() {
     request_to(&laptop, Ctl::Stop, "");
     drop(laptop_daemon);
     for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_stop_engaged_on_any_machine_stops_the_whole_graph() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-anywhere-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let ports = [free_port(), free_port(), free_port()];
+    let tag = std::process::id();
+    let (arm, base, laptop) = (
+        format!("warm{tag}"),
+        format!("wbase{tag}"),
+        format!("wlaptop{tag}"),
+    );
+    let arm_daemon = daemon(&arm, ports[0], Vec::new(), &host);
+    let base_daemon = daemon(&base, ports[1], Vec::new(), &host);
+    let laptop_daemon = daemon(
+        &laptop,
+        ports[2],
+        ports[..2]
+            .iter()
+            .map(|p| format!("tcp/127.0.0.1:{p}"))
+            .collect(),
+        &host,
+    );
+    let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{}", ports[2])).unwrap();
+    let request_to = |daemon: &str, op, payload: &str| {
+        ruro_proto::request(
+            &session,
+            &Keys::new(daemon),
+            op,
+            payload,
+            Duration::from_secs(10),
+        )
+        .unwrap()
+    };
+    let graph = format!(
+        "name: three\ngroups:\n  a: {{ machine: {arm} }}\n  b: {{ machine: {base} }}\nnodes:\n  x: {{ type: t/x, group: a, rate: 1 }}\n  y: {{ type: t/x, group: b, rate: 1 }}\n  z: {{ type: t/x, rate: 1 }}\n"
+    );
+    request_to(&laptop, Ctl::Deploy, &graph);
+
+    // Engaged on the base, the stop reaches the laptop that deployed the
+    // graph and, through it, the arm.
+    let reply = request_to(&base, Ctl::Estop, "engage");
+    assert!(reply.starts_with("e-stop engaged"), "{reply}");
+    for d in [&arm, &base, &laptop] {
+        wait_status(&session, d, |s| s.estopped);
+    }
+    // Only the base's own release lifts it.
+    let reply = request_to(&laptop, Ctl::Estop, "release");
+    assert!(
+        reply.contains("stays engaged") && reply.contains(&base),
+        "{reply}"
+    );
+    std::thread::sleep(Duration::from_millis(600));
+    wait_status(&session, &arm, |s| s.estopped);
+    request_to(&base, Ctl::Estop, "release");
+    for d in [&arm, &base, &laptop] {
+        wait_status(&session, d, |s| !s.estopped);
+    }
+
+    // The base and the laptop engaging at the same time do not hold each
+    // other up.
+    let start = Instant::now();
+    std::thread::scope(|s| {
+        s.spawn(|| request_to(&base, Ctl::Estop, "engage"));
+        s.spawn(|| request_to(&laptop, Ctl::Estop, "engage"));
+    });
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        start.elapsed()
+    );
+    for d in [&arm, &base, &laptop] {
+        wait_status(&session, d, |s| s.estopped);
+    }
+
+    request_to(&laptop, Ctl::Stop, "");
+    drop((arm_daemon, base_daemon, laptop_daemon));
+    for name in [&arm, &base, &laptop] {
         let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
     }
     let _ = std::fs::remove_dir_all(&dir);

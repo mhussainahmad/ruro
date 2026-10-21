@@ -275,9 +275,10 @@ Streams new log lines from every process of the running graph until
 ruro estop [--release [--all]]
 ```
 
-Engages the emergency stop on the daemon and the machines running the rest of its graph.
-`--release` releases the stop engaged at this daemon, there and on those machines; with
-`--all` it also lifts stops that other daemons engaged here. See
+Engages the emergency stop on the daemon and every other machine of its graph, also when
+the daemon only runs part of a graph deployed elsewhere. `--release` releases the stop
+engaged at this daemon, there and on those machines; with `--all` it also lifts stops that
+other daemons engaged here. See
 [Emergency stop](../runtime.md#emergency-stop).
 
 ### ruro record

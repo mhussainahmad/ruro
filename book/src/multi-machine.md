@@ -58,12 +58,11 @@ part can take longer than the CLI's 10 s request timeout to collect.
 
 `ruro kill`, `ruro echo` and `ruro param` reach the machine that runs the group or node.
 
-The emergency stop spans machines too: engaged at the daemon you deployed to, it is passed
-on to every machine of the graph (see [Emergency stop](runtime.md#emergency-stop)). A stop
-engaged directly on a robot stays there, and `ruro status` lists every machine of the graph
-whose stop is engaged. The
-studio shows the live metrics of nodes on every machine of the graph, and watches and tunes
-them on the daemon that runs them.
+The emergency stop spans machines too: engaged at any machine of the graph, it is passed on
+to every other machine of the graph (see [Emergency stop](runtime.md#emergency-stop)), and
+`ruro status` lists every machine whose stop is engaged. The studio shows the live metrics
+of nodes on every machine of the graph, and watches and tunes them on the daemon that runs
+them.
 
 ## Custom host binaries
 

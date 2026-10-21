@@ -11,9 +11,12 @@
 //!   Stops engaged at other daemons stay latched.
 //! - `release-all` lifts every stop latched at this daemon, whatever its
 //!   origin, and forwards the release of the daemon's own stop.
-//! - Forwarded requests are not forwarded further. A stop engaged directly
-//!   on a peer therefore does not reach the daemon that deployed the graph;
-//!   `ruro status` and `ruro fleet` show the e-stop of every machine instead.
+//! - A stop engaged or released directly on a peer goes back to the daemon
+//!   that deployed the graph (`engage-up`/`release-up`), which latches it
+//!   under the peer's name and forwards it to its other peers. A stop
+//!   engaged on any machine of a graph therefore stops all of them, and
+//!   only a release where it was engaged (or `release-all`) lifts it.
+//! - Forwarded requests are not forwarded further, so stops do not loop.
 //! - A graph deployed from a daemon that is stopped (by any origin) comes up
 //!   stopped on its peers, under that daemon's origin: releasing there lifts
 //!   it.
@@ -31,8 +34,14 @@ use crate::State;
 /// How long a peer gets to confirm a forwarded e-stop request.
 const FORWARD_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// How long a peer waits for the daemon that deployed its graph, which
+/// forwards the stop to its other peers first.
+const RELAY_TIMEOUT: Duration = Duration::from_secs(5);
+
 const ENGAGE_FROM: &str = "engage-from ";
 const RELEASE_FROM: &str = "release-from ";
+const ENGAGE_UP: &str = "engage-up ";
+const RELEASE_UP: &str = "release-up ";
 
 /// The stops latched at one daemon.
 #[derive(Debug, Default)]
@@ -62,6 +71,12 @@ enum Request {
         engage: bool,
         origin: String,
     },
+    /// From a peer running part of this daemon's graph, where a client
+    /// engaged or released its own stop.
+    Relayed {
+        engage: bool,
+        origin: String,
+    },
 }
 
 impl Request {
@@ -72,19 +87,25 @@ impl Request {
             "release" => Self::Release { all: false },
             "release-all" => Self::Release { all: true },
             _ => {
-                let (engage, origin) = if let Some(o) = text.strip_prefix(ENGAGE_FROM) {
-                    (true, o)
+                let (engage, relayed, origin) = if let Some(o) = text.strip_prefix(ENGAGE_FROM) {
+                    (true, false, o)
                 } else if let Some(o) = text.strip_prefix(RELEASE_FROM) {
-                    (false, o)
+                    (false, false, o)
+                } else if let Some(o) = text.strip_prefix(ENGAGE_UP) {
+                    (true, true, o)
+                } else if let Some(o) = text.strip_prefix(RELEASE_UP) {
+                    (false, true, o)
                 } else {
                     bail!("expected `engage`, `release` or `release-all`, got `{text}`");
                 };
                 if !ruro_graph::is_valid_ident(origin) {
                     bail!("invalid daemon name `{origin}`");
                 }
-                Self::Forwarded {
-                    engage,
-                    origin: origin.to_owned(),
+                let origin = origin.to_owned();
+                if relayed {
+                    Self::Relayed { engage, origin }
+                } else {
+                    Self::Forwarded { engage, origin }
                 }
             }
         })
@@ -94,7 +115,7 @@ impl Request {
         match self {
             Self::Engage => true,
             Self::Release { .. } => false,
-            Self::Forwarded { engage, .. } => *engage,
+            Self::Forwarded { engage, .. } | Self::Relayed { engage, .. } => *engage,
         }
     }
 }
@@ -113,10 +134,18 @@ fn apply(latch: &mut Latch, me: &str, req: &Request) -> (bool, Vec<String>) {
         Request::Forwarded {
             engage: true,
             origin,
+        }
+        | Request::Relayed {
+            engage: true,
+            origin,
         } => {
             latch.origins.insert(origin.clone());
         }
         Request::Forwarded {
+            engage: false,
+            origin,
+        }
+        | Request::Relayed {
             engage: false,
             origin,
         } => {
@@ -155,29 +184,47 @@ pub fn handle(st: &Arc<State>, text: &str) -> Result<String> {
     } else {
         "e-stop released".to_owned()
     };
-    if matches!(req, Request::Forwarded { .. }) {
-        return Ok(done);
-    }
+    // Whose stop this is, as the other machines latch it.
+    let origin = match &req {
+        Request::Forwarded { .. } => return Ok(done),
+        Request::Relayed { origin, .. } => origin.clone(),
+        Request::Engage | Request::Release { .. } => st.name.clone(),
+    };
 
     // The machines running the rest of the graph follow, without passing
     // it further; a release also reaches machines that left the graph.
     let targets: BTreeSet<String> = {
         let peers = st.peers.lock().clone();
         let mut latch = st.estop_latch.lock();
-        if req.engage() {
+        let mut targets = if !req.engage() {
+            peers.union(&latch.sent).cloned().collect()
+        } else if origin == st.name {
             latch.sent.extend(peers.iter().cloned());
             peers
         } else {
-            peers.union(&latch.sent).cloned().collect()
-        }
+            peers
+        };
+        targets.remove(&origin);
+        targets
     };
     let op = if req.engage() {
-        format!("{ENGAGE_FROM}{}", st.name)
+        format!("{ENGAGE_FROM}{origin}")
     } else {
-        format!("{RELEASE_FROM}{}", st.name)
+        format!("{RELEASE_FROM}{origin}")
     };
-    let results = forward(st, &targets, &op);
-    if !req.engage() {
+    let mut results = forward(st, &targets, &op, FORWARD_TIMEOUT);
+    // A stop of this daemon's own, while it runs part of another daemon's
+    // graph, goes back to that daemon, which passes it on.
+    let up = st.origin.lock().clone();
+    if let Some(up) = up.filter(|_| origin == st.name) {
+        let op = if req.engage() {
+            format!("{ENGAGE_UP}{origin}")
+        } else {
+            format!("{RELEASE_UP}{origin}")
+        };
+        results.extend(forward(st, &BTreeSet::from([up]), &op, RELAY_TIMEOUT));
+    }
+    if origin == st.name && !req.engage() {
         let mut latch = st.estop_latch.lock();
         for (p, r) in &results {
             if r.is_ok() {
@@ -187,7 +234,8 @@ pub fn handle(st: &Arc<State>, text: &str) -> Result<String> {
     }
     // Machines of the graph must follow; one that has left it and cannot
     // be reached is only noted (and tried again on the next release).
-    let current = st.peers.lock().clone();
+    let mut current = st.peers.lock().clone();
+    current.extend(st.origin.lock().clone());
     let (mut failed, mut gone) = (Vec::new(), Vec::new());
     for (p, r) in &results {
         if let Err(e) = r {
@@ -226,7 +274,7 @@ pub fn forward_on_deploy(st: &State, machines: &BTreeSet<String>) -> Result<()> 
     }
     st.estop_latch.lock().sent.extend(machines.iter().cloned());
     let op = format!("{ENGAGE_FROM}{}", st.name);
-    for (p, r) in forward(st, machines, &op) {
+    for (p, r) in forward(st, machines, &op, FORWARD_TIMEOUT) {
         r.map_err(|e| anyhow!("engaging the e-stop on `{p}`: {e:#}"))?;
     }
     Ok(())
@@ -235,14 +283,18 @@ pub fn forward_on_deploy(st: &State, machines: &BTreeSet<String>) -> Result<()> 
 /// Sends `op` to every peer at once, and briefly: a peer that does not
 /// answer must not hold the stop back from the others, nor outlast the
 /// client.
-fn forward(st: &State, peers: &BTreeSet<String>, op: &str) -> Vec<(String, Result<String>)> {
+fn forward(
+    st: &State,
+    peers: &BTreeSet<String>,
+    op: &str,
+    timeout: Duration,
+) -> Vec<(String, Result<String>)> {
     std::thread::scope(|s| {
         let pending: Vec<_> = peers
             .iter()
             .map(|p| {
-                let ask = || {
-                    ruro_proto::request(&st.session, &Keys::new(p), Ctl::Estop, op, FORWARD_TIMEOUT)
-                };
+                let ask =
+                    || ruro_proto::request(&st.session, &Keys::new(p), Ctl::Estop, op, timeout);
                 (p.clone(), s.spawn(ask))
             })
             .collect();
@@ -296,6 +348,13 @@ mod tests {
             Request::Forwarded {
                 engage: false,
                 origin: "robot-1".into()
+            }
+        );
+        assert_eq!(
+            Request::parse("engage-up arm").unwrap(),
+            Request::Relayed {
+                engage: true,
+                origin: "arm".into()
             }
         );
         assert!(Request::parse("maybe").is_err());

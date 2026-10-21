@@ -116,11 +116,13 @@ fn want(
     interfaces: &str,
     domain_id: i64,
     qos: &str,
+    durability: &str,
     depth: i64,
     router: &str,
     token: &str,
 ) -> Result<Want> {
-    let mut settings = Settings::new(ctx.id(), topic, domain_id, qos, router, token)?;
+    let mut settings = Settings::new(ctx.id(), topic, domain_id, qos, router, token)?
+        .with_durability(durability, depth)?;
     settings.qos.depth = usize::try_from(depth).context("parameter `depth`")?;
     let hash = hash.trim().to_owned();
     if !hash.is_empty() && !hash.starts_with("RIHS01_") {
@@ -216,6 +218,9 @@ pub struct AnySub {
     /// `reliable` or `best_effort`.
     #[param(default = "reliable")]
     qos: String,
+    /// `volatile` or `transient_local` (latched, e.g. `/map` or `/tf_static`).
+    #[param(default = "volatile")]
+    durability: String,
     /// Keep-last history depth announced to ROS 2.
     #[param(default = 10, min = 1, max = 10000)]
     depth: i64,
@@ -238,6 +243,7 @@ impl AnySub {
             &self.interfaces,
             self.domain_id,
             &self.qos,
+            &self.durability,
             self.depth,
             &self.router,
             &self.token,
@@ -352,6 +358,9 @@ pub struct AnyPub {
     /// `reliable` or `best_effort`.
     #[param(default = "reliable")]
     qos: String,
+    /// `volatile` or `transient_local` (latched, e.g. `/map` or `/tf_static`).
+    #[param(default = "volatile")]
+    durability: String,
     /// Keep-last history depth announced to ROS 2.
     #[param(default = 10, min = 1, max = 10000)]
     depth: i64,
@@ -380,6 +389,7 @@ impl AnyPub {
             &self.interfaces,
             self.domain_id,
             &self.qos,
+            &self.durability,
             self.depth,
             &self.router,
             &self.token,

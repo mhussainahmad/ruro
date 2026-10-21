@@ -343,3 +343,42 @@ fn every_installed_interface_parses_and_hashes_like_rosidl() {
     eprintln!("{} type hashes and {idl} .idl types checked", hashed.len());
     assert!(hashed.len() > 350 && idl > 200, "{} {idl}", hashed.len());
 }
+
+#[test]
+fn a_latched_ros_topic_reaches_a_late_generic_subscriber() {
+    let Some(script) = container() else { return };
+    ruro_nodes_ros2::link();
+    let (_router, endpoint) = router();
+    // Published once, latched, before ruro subscribes: what map servers do
+    // with /map. `ros2 topic pub` keeps the node (and its cache) alive.
+    let (mut publisher, _out) = ros(
+        &script,
+        &endpoint,
+        &PathBuf::from(interfaces()),
+        "timeout 60 ros2 topic pub --once -w 0 --keep-alive 60 --qos-durability transient_local \
+         --qos-depth 1 /latched_label std_msgs/msg/String \"{data: latched}\"",
+    );
+    std::thread::sleep(Duration::from_secs(8));
+    let mut sub = Harness::new(
+        "ros2/sub",
+        json!({
+            "topic": "/latched_label", "type": "std_msgs/msg/String", "router": endpoint,
+            "domain_id": 0, "durability": "transient_local", "depth": 1
+        }),
+    )
+    .unwrap();
+    sub.step().unwrap();
+    let got = first(&mut sub, Instant::now() + Duration::from_secs(30));
+    let _ = publisher.kill();
+    let _ = publisher.wait();
+    let text = ruro_ros2::dynamic::decode(
+        &ruro_ros2::search::TypeLibrary::bundled()
+            .resolve_str("std_msgs/msg/String")
+            .unwrap(),
+        &got.cdr,
+    )
+    .unwrap()
+    .value;
+    let data = text.get("data").unwrap().to_json();
+    assert_eq!(data, "latched");
+}

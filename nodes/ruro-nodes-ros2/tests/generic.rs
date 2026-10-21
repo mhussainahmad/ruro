@@ -266,3 +266,36 @@ fn generic_kinds_are_registered() {
         }
     }
 }
+
+#[test]
+fn transient_local_latches_for_late_subscribers() {
+    ruro_nodes_ros2::link();
+    let (_router, endpoint) = router();
+    let latched = |extra: serde_json::Value| {
+        let mut p = json!({
+            "topic": "/latched", "type": "std_msgs/msg/String", "router": endpoint,
+            "domain_id": 12, "durability": "transient_local", "depth": 1
+        });
+        p.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        p
+    };
+    // std_msgs/String "hi".
+    let msg = Ros2Any {
+        type_name: "std_msgs/msg/String".into(),
+        type_hash: String::new(),
+        cdr: vec![0, 1, 0, 0, 3, 0, 0, 0, b'h', b'i', 0],
+    };
+    let mut publ = Harness::new("ros2/pub", latched(json!({}))).unwrap();
+    publ.push("input", msg.clone()).unwrap();
+    publ.step().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Started after the only message was sent, like a map server's /map
+    // reaching a late subscriber.
+    let mut sub = Harness::new("ros2/sub", latched(json!({}))).unwrap();
+    sub.step().unwrap();
+    let got = wait_for::<Ros2Any>(&mut sub, "out", || {});
+    assert_eq!(got[0].cdr, msg.cdr);
+}

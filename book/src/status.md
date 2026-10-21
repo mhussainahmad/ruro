@@ -56,6 +56,8 @@ that skip in CI:
   (byte-identical with what crossed the router), type hashes of all 380 message and 310
   `.idl` types installed there, and demo nodes run from their launch file through
   `ros2/node`. See [ROS 2 bridge](ros2.md).
+- **Latching with the generic bridge:** a message `ros2 topic pub` published once with
+  transient-local durability reaches a `ros2/sub` started afterwards.
 - **`ros2 param`** (Jazzy) against a deployed graph with `ros2: { parameters: true }`:
   `node list`, `param list`, `get`, `describe`, `set` (the node's output changes, and an
   out-of-range value is refused), `dump`, and the change on `/parameter_events`.
@@ -93,8 +95,7 @@ that skip in CI:
 ## Known gaps
 
 - ROS 2: deadline, lifespan and liveliness are announced but not enforced (as in
-  rmw_zenoh); the generic bridges are always volatile; a ruro ROS node offers no type
-  description service.
+  rmw_zenoh); a ruro ROS node offers no type description service.
 - GPU buffers work between processes on one machine only, and ONNX Runtime does not take
   them yet (its CUDA provider is not wired up). Python nodes cannot receive them.
 - H.265 RTSP streams are refused.

@@ -135,7 +135,7 @@ topic, so nothing is converted and nothing is lost.
 | `type` | `std_msgs/msg/String` (sub), empty (pub) | ROS type, e.g. `sensor_msgs/msg/CompressedImage`. An empty type on `ros2/pub` takes the type of the first input. |
 | `type_hash` | empty | RIHS01 hash. Empty: computed from the type's definition; a subscriber without a definition takes the hash the topic's publishers announce. |
 | `interfaces` | empty | Directories with interface definitions, separated by `:` (see below). |
-| `qos`, `depth` | `reliable`, 10 | Reliability and keep-last depth (durability is volatile). |
+| `qos`, `durability`, `depth` | `reliable`, `volatile`, 10 | Reliability, durability (`transient_local` latches, e.g. `/map`) and keep-last depth. |
 | `domain_id`, `router`, `token` | | As for the typed bridges. |
 
 `ros2/pub` drops (with a warning) input of another type than the one it publishes, and
@@ -438,7 +438,6 @@ against a machine running ROS 2 with rmw_zenoh check the same things by hand.
   (`GoalDriver`). `ruro ros2 call` covers bundled and `--package` service types only.
 - Service and action calls from nodes go through the node's step, adding up to 20 ms
   (servers) or 50 ms (callers) of latency per request.
-- `ros2/sub` and `ros2/pub` (any type) are volatile only.
 - ROS nodes must use rmw_zenoh, also when ruro runs them with `ros2/node`.
 - Type hashes follow REP 2011 (RIHS01), as used by Jazzy and later. Distributions without
   type hashes (Humble) are not supported.

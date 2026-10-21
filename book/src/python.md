@@ -37,14 +37,16 @@ registers the class as a node type:
   value, or to `ruro.param(default, min=..., max=..., doc=...)`.
 - `rate` is the default timer rate; without one, the node runs when an input receives data.
 - The class must define `step(self, ctx)`. Optional hooks: `start(self, ctx)`,
-  `stop(self, ctx)` and `on_param(self, name, value)`. There is no emergency-stop hook for
-  Python nodes yet.
+  `stop(self, ctx)`, `on_param(self, name, value)` and `on_estop(self, ctx)`. `on_estop`
+  runs once when the emergency stop engages; a node driving actuators should command a safe
+  state there and keep doing so while `ctx.estopped` is true. An exception in it is logged
+  and the node keeps stepping. In tests, `harness.set_estop(True)` engages the stop.
 - The class docstring becomes the node's description in the studio.
 
 Inputs (`self.inputs.<name>`) can be iterated (oldest first) and have `recv()`, `latest()`
 and `drain()`. Outputs (`self.outputs.<name>`) have `send(msg)`. Parameters are attributes
-of `self.params`. `ctx` has `id`, `dt`, `time`, `steps` and logging methods `debug`, `info`,
-`warn` and `error`, which go to the graph's logs.
+of `self.params`. `ctx` has `id`, `dt`, `time`, `steps`, `estopped` and logging methods
+`debug`, `info`, `warn` and `error`, which go to the graph's logs.
 
 ## Messages
 

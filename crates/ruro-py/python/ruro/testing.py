@@ -48,6 +48,10 @@ class Harness:
         """Removes and returns everything ``output`` has sent so far."""
         return list(self._inner.take(output))
 
+    def set_estop(self, engaged: bool) -> None:
+        """Engages or releases the emergency stop; engaging runs ``on_estop`` once."""
+        self._inner.set_estop(engaged)
+
     def set_param(self, name: str, value: Any) -> None:
         """Changes a parameter as the control plane would while a graph runs."""
         self._inner.set_param(name, value)

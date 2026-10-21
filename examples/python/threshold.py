@@ -17,11 +17,15 @@ import ruro
     params={"limit": ruro.param(0.5, min=-10, max=10, doc="Values above this are high.")},
 )
 class Threshold:
-    """Flags samples above a limit."""
+    """Flags samples above a limit; reports low while the emergency stop is engaged."""
+
+    def on_estop(self, ctx):
+        ctx.warn("emergency stop: holding the flag low")
 
     def step(self, ctx):
         for sample in self.inputs.value:
-            self.outputs.high.send(ruro.Flag(sample.value > self.params.limit))
+            high = sample.value > self.params.limit and not ctx.estopped
+            self.outputs.high.send(ruro.Flag(high))
 
 
 @ruro.node(

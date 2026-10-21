@@ -19,9 +19,10 @@ declared in the decorator; ruro attaches them to every instance as
             for sample in self.inputs.value:
                 self.outputs.high.send(ruro.Flag(sample.value > self.params.limit))
 
-Optional hooks: ``start(self, ctx)``, ``stop(self, ctx)`` and
+Optional hooks: ``start(self, ctx)``, ``stop(self, ctx)``,
 ``on_param(self, name, value)`` (called after a parameter changes while the
-graph runs).
+graph runs) and ``on_estop(self, ctx)`` (called once when the emergency stop
+engages; ``ctx.estopped`` stays true until it is released).
 """
 
 from __future__ import annotations

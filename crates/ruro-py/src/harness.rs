@@ -65,6 +65,12 @@ impl PyHarness {
         Ok(list)
     }
 
+    /// Engages or releases the emergency stop, as a host would: engaging
+    /// runs the node's `on_estop` once.
+    fn set_estop(&mut self, engaged: bool) {
+        self.inner.set_estop(engaged)
+    }
+
     /// Changes a parameter as the control plane would while a graph runs.
     fn set_param(&mut self, name: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let v = py_to_value(value)?

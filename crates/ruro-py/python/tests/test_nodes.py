@@ -165,3 +165,48 @@ def test_ports_and_ctx_are_introspectable():
         "empty": 0,
         "ctx": ("test", 0, True),
     }
+
+
+@ruro.node(kind="test/motor", outputs={"cmd": ruro.Scalar}, rate=50)
+class Motor:
+    def __init__(self):
+        self.stops = 0
+
+    def on_estop(self, ctx):
+        self.stops += 1
+        self.outputs.cmd.send(ruro.Scalar(0.0))
+
+    def step(self, ctx):
+        speed = 0.0 if ctx.estopped else 1.0
+        self.outputs.cmd.send(ruro.Scalar(speed))
+
+
+def test_emergency_stop_reaches_python_nodes():
+    h = harness(Motor)
+    h.step()
+    assert [s.value for s in h.take("cmd")] == [1.0]
+    h.set_estop(True)
+    # on_estop runs once, right away; steps then see ctx.estopped.
+    assert [s.value for s in h.take("cmd")] == [0.0]
+    h.step()
+    h.set_estop(True)
+    assert [s.value for s in h.take("cmd")] == [0.0]
+    h.set_estop(False)
+    h.step()
+    assert [s.value for s in h.take("cmd")] == [1.0]
+
+
+def test_errors_in_on_estop_do_not_stop_the_node():
+    @ruro.node(kind="test/bad-estop", outputs={"out": ruro.Scalar})
+    class BadEstop:
+        def on_estop(self, ctx):
+            raise ValueError("no brakes")
+
+        def step(self, ctx):
+            self.outputs.out.send(ruro.Scalar(1.0))
+
+    h = harness(BadEstop)
+    h.step()
+    h.set_estop(True)
+    h.step()
+    assert len(h.take("out")) == 2

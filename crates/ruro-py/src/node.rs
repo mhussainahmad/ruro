@@ -49,6 +49,7 @@ pub struct PyCtx {
     dt: f64,
     time: f64,
     steps: u64,
+    estopped: bool,
 }
 
 impl PyCtx {
@@ -58,6 +59,7 @@ impl PyCtx {
             dt: ctx.dt().as_secs_f64(),
             time: ctx.time().as_secs_f64(),
             steps: ctx.steps(),
+            estopped: ctx.estopped(),
         }
     }
 }
@@ -86,6 +88,12 @@ impl PyCtx {
     #[getter]
     fn steps(&self) -> u64 {
         self.steps
+    }
+
+    /// True while the emergency stop is engaged.
+    #[getter]
+    fn estopped(&self) -> bool {
+        self.estopped
     }
 
     /// Logs at debug level; shows up in `ruro logs` with the node id.
@@ -250,6 +258,16 @@ impl DynNode for PyNode {
         Python::attach(|py| {
             if let Err(e) = self.call_hook(py, "stop", ctx) {
                 tracing::warn!("{}: stop failed: {e:#}", self.kind);
+            }
+        })
+    }
+
+    fn on_estop(&mut self, ctx: &mut Ctx) {
+        // Like a failed step, an error here is logged and the node keeps
+        // stepping, where it sees `ctx.estopped`.
+        Python::attach(|py| {
+            if let Err(e) = self.call_hook(py, "on_estop", ctx) {
+                tracing::error!("{}: on_estop failed: {e:#}", self.kind);
             }
         })
     }

@@ -89,8 +89,8 @@ that skip in CI:
 
 ## Known gaps
 
-- Python nodes have no e-stop hook. A stop engaged directly on a peer machine does not
-  travel back to the daemon that deployed the graph.
+- An emergency stop engaged directly on a peer machine does not travel back to the daemon
+  that deployed the graph.
 - ROS 2: deadline, lifespan and liveliness are announced but not enforced (as in
   rmw_zenoh); the generic bridges are always volatile; a ruro ROS node offers no parameter
   or type-description services; simulated time cannot follow a ROS `/clock`.

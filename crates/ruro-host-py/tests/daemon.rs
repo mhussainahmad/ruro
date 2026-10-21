@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ruro_proto::{Ctl, Keys, Preview, TapFrame};
+use ruro_proto::{Ctl, Keys, LogLine, Preview, TapFrame};
 use zenoh::Wait;
 
 fn free_port() -> u16 {
@@ -116,6 +116,40 @@ fn rust_and_python_nodes_share_a_graph() {
     if numpy {
         let m = values(&means.lock().unwrap());
         assert!(m.iter().all(|x| (0.0..=255.0).contains(x)), "{m:?}");
+    }
+
+    // The emergency stop reaches the Python node: its hook runs, and its
+    // steps see `ctx.estopped` until the stop is released.
+    let logs = session.declare_subscriber(keys.all_logs()).wait().unwrap();
+    let estop = |cmd: &str| {
+        ruro_proto::request(&session, &keys, Ctl::Estop, cmd, Duration::from_secs(10)).unwrap()
+    };
+    estop("engage");
+    let start = Instant::now();
+    loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "on_estop never ran"
+        );
+        if let Ok(Some(sample)) = logs.recv_timeout(Duration::from_millis(200)) {
+            let line: LogLine = ruro_proto::decode(&sample.payload().to_bytes()).unwrap();
+            if line.message.contains("holding the flag low") {
+                break;
+            }
+        }
+    }
+    frames.lock().unwrap().clear();
+    std::thread::sleep(Duration::from_millis(1500));
+    let v = values(&frames.lock().unwrap());
+    assert!(!v.is_empty() && v.iter().all(|x| *x == 0.0), "{v:?}");
+    estop("release");
+    let start = Instant::now();
+    while !values(&frames.lock().unwrap()).contains(&1.0) {
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "never high after release"
+        );
+        std::thread::sleep(Duration::from_millis(50));
     }
 
     let _ = ruro_proto::request(&session, &keys, Ctl::Stop, "", Duration::from_secs(10));

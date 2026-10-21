@@ -842,3 +842,38 @@ fn a_machine_that_missed_the_stop_catches_up() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn clients_find_the_daemon_they_connected_to() {
+    let dir = std::env::temp_dir().join(format!("ruro-daemon-find-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = fake_host(&dir);
+    let (robot_port, laptop_port) = (free_port(), free_port());
+    let tag = std::process::id();
+    let (robot, laptop) = (format!("frobot{tag}"), format!("flaptop{tag}"));
+    let _robot = daemon(&robot, robot_port, Vec::new(), &host);
+    let _laptop = daemon(
+        &laptop,
+        laptop_port,
+        vec![format!("tcp/127.0.0.1:{robot_port}")],
+        &host,
+    );
+    // Both answer pings through the mesh; a client means the one it
+    // connected to, every time.
+    for (port, name) in [(robot_port, &robot), (laptop_port, &laptop)] {
+        let session = ruro_proto::connect(&format!("tcp/127.0.0.1:{port}")).unwrap();
+        wait_status(
+            &session,
+            if *name == robot { &laptop } else { &robot },
+            |_| true,
+        );
+        for _ in 0..10 {
+            let keys = ruro_proto::discover(&session, None, Duration::from_secs(5)).unwrap();
+            assert_eq!(keys.daemon(), name.as_str());
+        }
+    }
+    for name in [&robot, &laptop] {
+        let _ = std::fs::remove_dir_all(ruro_daemon::runtime_dir(name));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

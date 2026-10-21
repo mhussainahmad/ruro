@@ -649,7 +649,15 @@ fn handle(st: &Arc<State>, op: &str, payload: &[u8]) -> Result<String> {
             Some(_) => st.deployed.lock().clone().unwrap_or_default(),
             None => String::new(),
         }),
-        "ping" => Ok(st.name.clone()),
+        "ping" => {
+            // A client looking for the daemon it connected to names it.
+            if let Some(zid) = text().strip_prefix(ruro_proto::PING_ZID)
+                && zid.trim() != st.session.zid().to_string()
+            {
+                bail!("not this daemon");
+            }
+            Ok(st.name.clone())
+        }
         "clock" => Ok(ruro_msg::now_ns().to_string()),
         "kill" => {
             let group = text().trim().to_owned();

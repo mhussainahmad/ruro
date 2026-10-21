@@ -7,7 +7,7 @@
 //! High-rate data (metrics, taps, logs) is postcard-encoded. Control requests
 //! carry text (YAML graphs, JSON values) so they stay debuggable.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -545,7 +545,7 @@ impl DataFrame {
             0 => payload.to_vec(),
             FLAG_LZ4 => lz4_flex::decompress_size_prepended(payload)
                 .map_err(|e| anyhow!("corrupt compressed frame: {e}"))?,
-            f => anyhow::bail!("unknown data frame flags {f:#x}"),
+            f => bail!("unknown data frame flags {f:#x}"),
         };
         Ok(Self {
             seq,
@@ -662,7 +662,7 @@ impl Security {
                 set(c, "transport/link/tls/connect_private_key", &key)?;
             }
             (None, None) => {}
-            _ => anyhow::bail!("a TLS certificate needs its private key and vice versa"),
+            _ => bail!("a TLS certificate needs its private key and vice versa"),
         }
         // A daemon given a CA accepts only clients with a certificate it signed.
         let mtls = if router {
@@ -780,9 +780,12 @@ pub fn request_key(
         .wait()
         .map_err(|e| anyhow!("request failed: {e}"))?;
     let reply = replies.recv().map_err(|_| anyhow!("no reply from {key}"))?;
-    let sample = reply
-        .result()
-        .map_err(|e| anyhow!("daemon error: {:?}", e.payload().to_bytes()))?;
+    let sample = reply.result().map_err(|e| {
+        anyhow!(
+            "daemon error: {}",
+            String::from_utf8_lossy(&e.payload().to_bytes())
+        )
+    })?;
     let body: CtlReply =
         serde_json::from_slice(&sample.payload().to_bytes()).context("malformed reply")?;
     body.map_err(|e| anyhow!(e))
@@ -952,37 +955,94 @@ pub fn request_raw(
         .wait()
         .map_err(|e| anyhow!("request failed: {e}"))?;
     let reply = replies.recv().map_err(|_| anyhow!("no reply from {key}"))?;
-    let sample = reply
-        .result()
-        .map_err(|e| anyhow!("daemon error: {:?}", e.payload().to_bytes()))?;
+    let sample = reply.result().map_err(|e| {
+        anyhow!(
+            "daemon error: {}",
+            String::from_utf8_lossy(&e.payload().to_bytes())
+        )
+    })?;
     let body: std::result::Result<Vec<u8>, String> = decode(&sample.payload().to_bytes())?;
     body.map_err(|e| anyhow!(e))
 }
 
 /// Finds the daemon behind a session. With `name` set, only checks that it answers.
+///
+/// Daemons that peer with each other all answer a ping, so without a name
+/// the ping carries the id of the router the session is connected to, and
+/// only the daemon that is that router answers: the one at the endpoint
+/// the client connected to. If none does (a plain Zenoh router in between,
+/// or daemons of an older version), any daemon that answers is taken, as
+/// long as only one does.
 pub fn discover(
     session: &zenoh::Session,
     name: Option<&str>,
     timeout: std::time::Duration,
 ) -> Result<Keys> {
     use zenoh::Wait;
-    let key = format!("ruro/{}/ctl/ping", name.unwrap_or("*"));
+    let ping = |key: String, payload: String| -> Result<Vec<String>> {
+        let replies = session
+            .get(key)
+            .payload(payload)
+            .timeout(timeout)
+            .wait()
+            .map_err(|e| anyhow!("discovery failed: {e}"))?;
+        let mut names = Vec::new();
+        while let Ok(reply) = replies.recv() {
+            let Ok(sample) = reply.result() else { continue };
+            if let Ok(Ok(name)) = serde_json::from_slice::<CtlReply>(&sample.payload().to_bytes()) {
+                // Answering a named ping is all a named daemon must do.
+                names.push(name);
+                break;
+            }
+        }
+        Ok(names)
+    };
+    if let Some(n) = name {
+        return match ping(format!("ruro/{n}/ctl/ping"), String::new())?.pop() {
+            Some(name) => Ok(Keys::new(&name)),
+            None => bail!("daemon `{n}` did not answer"),
+        };
+    }
+    let routers: Vec<String> = session
+        .info()
+        .routers_zid()
+        .wait()
+        .map(|z| z.to_string())
+        .collect();
+    for router in &routers {
+        if let Some(name) = ping("ruro/*/ctl/ping".into(), format!("{PING_ZID}{router}"))?.pop() {
+            return Ok(Keys::new(&name));
+        }
+    }
     let replies = session
-        .get(key)
+        .get("ruro/*/ctl/ping")
         .timeout(timeout)
         .wait()
         .map_err(|e| anyhow!("discovery failed: {e}"))?;
-    let reply = replies.recv().map_err(|_| match name {
-        Some(n) => anyhow!("daemon `{n}` did not answer"),
-        None => anyhow!("no daemon answered"),
-    })?;
-    let sample = reply
-        .result()
-        .map_err(|_| anyhow!("daemon returned an error to ping"))?;
-    let body: CtlReply =
-        serde_json::from_slice(&sample.payload().to_bytes()).context("malformed reply")?;
-    Ok(Keys::new(&body.map_err(|e| anyhow!(e))?))
+    let mut names = std::collections::BTreeSet::new();
+    while let Ok(reply) = replies.recv() {
+        if let Ok(sample) = reply.result()
+            && let Ok(Ok(name)) = serde_json::from_slice::<CtlReply>(&sample.payload().to_bytes())
+        {
+            names.insert(name);
+        }
+    }
+    match names.len() {
+        0 => bail!("no daemon answered"),
+        1 => Ok(Keys::new(names.first().expect("one name"))),
+        _ => {
+            let all: Vec<String> = names.iter().map(|n| format!("`{n}`")).collect();
+            bail!(
+                "several daemons answer ({}); choose one with --daemon",
+                all.join(", ")
+            )
+        }
+    }
 }
+
+/// A ping payload `zid <id>`: only the daemon whose session has that Zenoh
+/// id answers.
+pub const PING_ZID: &str = "zid ";
 
 /// Encodes a control reply.
 pub fn reply_bytes(reply: &CtlReply) -> Vec<u8> {

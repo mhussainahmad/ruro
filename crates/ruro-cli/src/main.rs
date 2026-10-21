@@ -267,14 +267,27 @@ fn main() {
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .compact()
         .init();
-    // Rust ignores SIGPIPE, so printing into a closed pipe (`ruro status |
-    // head`) panics. Commands that only print get the default: they end
-    // quietly. Commands that may run a daemon keep ignoring it, so a peer
-    // closing a connection cannot kill the daemon.
-    if !matches!(cli.cmd, Cmd::Daemon { .. } | Cmd::Run { .. } | Cmd::Soak(_)) {
-        // SAFETY: no other thread exists yet.
-        unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
-    }
+    // Rust ignores SIGPIPE, so a daemon or TLS connection that closes is an
+    // error rather than a silent death. Printing into a closed pipe
+    // (`ruro status | head`) then panics: end quietly instead, by SIGPIPE
+    // as other tools do.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        if message.starts_with("failed printing to stdout") && message.contains("Broken pipe") {
+            // SAFETY: ends the process as the default SIGPIPE action would.
+            unsafe {
+                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                libc::raise(libc::SIGPIPE);
+            }
+        }
+        default_hook(info);
+    }));
     if let Err(e) = run(cli) {
         eprintln!("error: {e:#}");
         std::process::exit(1);

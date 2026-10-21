@@ -1,9 +1,9 @@
 name: Release
 
-# Pushing a tag `v<version>` builds the binaries and the Debian package and
-# attaches them, with their SHA-256 sums, to a draft GitHub release. Check the
-# draft and publish it by hand; crates are published separately (see
-# book/src/contributing.md).
+# Pushing a tag `v<version>` builds the Linux binaries, the Debian package,
+# the AppImage, and the Windows and macOS packages (desktop.yml), and attaches
+# them, with their SHA-256 sums, to a draft GitHub release. Check the draft and
+# publish it by hand; crates are published separately (see CONTRIBUTING.md).
 
 on:
   push:
@@ -81,8 +81,26 @@ jobs:
           path: target/package/*.deb
           if-no-files-found: error
 
+  appimage:
+    name: appimage
+    # The binaries need the glibc of the build machine or newer.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build AppImage
+        run: scripts/package-appimage.sh --fetch-tool
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: target/package/*.AppImage
+          if-no-files-found: error
+
+  desktop:
+    uses: ./.github/workflows/desktop.yml
+
   release:
-    needs: [binaries, deb]
+    needs: [binaries, deb, appimage, desktop]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     steps:

@@ -1,0 +1,110 @@
+name: Desktop
+
+# The studio and the CLI for Windows and macOS. There they are clients: they
+# connect to a daemon on a Linux machine (a robot). The release workflow
+# calls this one to attach the packages to a release.
+
+on:
+  push:
+    branches: [main, 'ports/**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test (client crates)
+        run: cargo test --locked -p ruro-msg -p ruro-graph -p ruro-proto
+      - name: Build
+        run: cargo build --release --locked -p ruro-cli -p ruro-studio
+      - name: Smoke test
+        run: |
+          target\release\ruro.exe --version
+          target\release\ruro.exe daemon 2>&1 | Select-String "runs on Linux and macOS"
+          if (-not $?) { exit 1 }
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "ruro-windows-x86_64"
+          New-Item -ItemType Directory -Path "dist\$name" | Out-Null
+          Copy-Item target\release\ruro-studio.exe, target\release\ruro.exe "dist\$name\"
+          Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE "dist\$name\"
+          Compress-Archive -Path "dist\$name\*" -DestinationPath "dist\$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  macos:
+    name: macos (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test (client crates)
+        run: cargo test --locked -p ruro-msg -p ruro-graph -p ruro-proto
+      - name: Build
+        run: cargo build --release --locked -p ruro-cli -p ruro-studio
+      - name: Smoke test
+        run: target/release/ruro --version
+      - name: Package
+        run: |
+          version=$(target/release/ruro --version | awk '{print $2}')
+          app="dist/ruro studio.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp target/release/ruro-studio target/release/ruro "$app/Contents/MacOS/"
+          # The app icon, from the PNGs in packaging/icons.
+          set=dist/icon.iconset
+          mkdir -p "$set"
+          for s in 16 32 64 128 256 512; do
+            cp "packaging/icons/hicolor/${s}x${s}/apps/io.github.mhussainahmad.ruro.Studio.png" "$set/icon_${s}x${s}.png"
+          done
+          cp "$set/icon_32x32.png" "$set/icon_16x16@2x.png"
+          cp "$set/icon_64x64.png" "$set/icon_32x32@2x.png"
+          cp "$set/icon_256x256.png" "$set/icon_128x128@2x.png"
+          cp "$set/icon_512x512.png" "$set/icon_256x256@2x.png"
+          rm "$set/icon_64x64.png"
+          iconutil -c icns "$set" -o "$app/Contents/Resources/ruro.icns"
+          cat > "$app/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>ruro studio</string>
+            <key>CFBundleDisplayName</key><string>ruro studio</string>
+            <key>CFBundleIdentifier</key><string>io.github.mhussainahmad.ruro.Studio</string>
+            <key>CFBundleVersion</key><string>${version}</string>
+            <key>CFBundleShortVersionString</key><string>${version}</string>
+            <key>CFBundleExecutable</key><string>ruro-studio</string>
+            <key>CFBundleIconFile</key><string>ruro</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint "$app/Contents/Info.plist"
+          # Not signed with a Developer ID: an ad-hoc signature lets it run
+          # on Apple Silicon once the user allows it.
+          codesign --force --deep --sign - "$app"
+          hdiutil create -volname "ruro studio" -srcfolder "$app" -ov -format UDZO "dist/ruro-macos-arm64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: dist/*.dmg
+          if-no-files-found: error

@@ -17,7 +17,7 @@ authors.workspace = true
 ruro-graph = { workspace = true }
 ruro-proto = { workspace = true }
 ruro-msg = { workspace = true }
-ruro-record = { path = "../ruro-record" }
+ruro-record = { workspace = true }
 sha2 = "0.10"
 ring = "0.17"
 base64 = "0.22"

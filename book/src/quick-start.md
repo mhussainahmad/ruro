@@ -60,7 +60,7 @@ Watch `arm.position` and `target.value` in the studio, or tune the controller fr
 
 ## Writing a graph
 
-Graphs are YAML files. A minimal one:
+Graphs are YAML files. Save this one as `my-first-graph.yaml` in the current directory:
 
 ```yaml
 name: my-first-graph
@@ -74,8 +74,8 @@ wires:
 Check it against the available node types, then run it:
 
 ```sh
-ruro check my-first-graph.yaml
-ruro run my-first-graph.yaml
+./target/release/ruro check my-first-graph.yaml
+./target/release/ruro run my-first-graph.yaml
 ```
 
 `ruro nodes -v` lists every node type with its ports and parameters. The

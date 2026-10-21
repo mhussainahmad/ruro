@@ -20,7 +20,9 @@ ruro-nodes-ml = { workspace = true }
 
 [dev-dependencies]
 ruro-graph = { workspace = true }
-ruro-host = { workspace = true }
+# Path only: ruro-host depends on this crate, so the dev-dependency is left
+# out of the published package.
+ruro-host = { path = "../../crates/ruro-host" }
 ruro-proto = { workspace = true }
 ruro-msg = { workspace = true }
 parking_lot = { workspace = true }

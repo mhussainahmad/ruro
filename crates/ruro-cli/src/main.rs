@@ -243,17 +243,25 @@ enum Cmd {
 }
 
 fn main() {
+    let cli = Cli::parse();
+    // Zenoh warns about every endpoint it cannot reach, which for commands
+    // looking for a daemon that is not running is expected. A daemon keeps
+    // the warnings: there they mean a peer is down.
+    let filter = if matches!(cli.cmd, Cmd::Daemon { .. }) {
+        "info,zenoh=warn"
+    } else {
+        "info,zenoh=error"
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("RURO_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,zenoh=warn")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter)),
         )
         .with_target(false)
         .with_writer(std::io::stderr)
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .compact()
         .init();
-    let cli = Cli::parse();
     // Rust ignores SIGPIPE, so printing into a closed pipe (`ruro status |
     // head`) panics. Commands that only print get the default: they end
     // quietly. Commands that may run a daemon keep ignoring it, so a peer

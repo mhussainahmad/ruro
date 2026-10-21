@@ -91,11 +91,11 @@ fn report(path: &Path, graph: &Graph, findings: Findings) -> Result<()> {
     }
     let groups = graph.groups().len();
     println!(
-        "{}: ok ({} nodes, {} wires, {groups} process group{})",
+        "{}: ok ({}, {}, {})",
         path.display(),
-        graph.nodes.len(),
-        graph.wires.len(),
-        if groups == 1 { "" } else { "s" }
+        count(graph.nodes.len(), "node"),
+        count(graph.wires.len(), "wire"),
+        count(groups, "process group"),
     );
     Ok(())
 }
@@ -142,6 +142,11 @@ fn local_registry() -> Result<Registry> {
 fn remote_registry(session: &zenoh::Session, keys: &Keys) -> Result<Registry> {
     let body = ruro_proto::request(session, keys, Ctl::Registry, "", crate::TIMEOUT)?;
     Ok(serde_json::from_str(&body)?)
+}
+
+/// `1 node`, `2 nodes`.
+fn count(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
 }
 
 #[cfg(test)]

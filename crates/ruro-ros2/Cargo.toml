@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-include = ["src/**", "interfaces/**", "build.rs", "Cargo.toml", "tests/**"]
+include = ["src/**", "interfaces/**", "build.rs", "Cargo.toml", "tests/**", "examples/**"]
 
 [dependencies]
 anyhow = { workspace = true }

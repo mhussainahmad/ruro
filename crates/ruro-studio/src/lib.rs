@@ -85,7 +85,7 @@ pub fn run() -> eframe::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("RURO_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,zenoh=warn")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,zenoh=error")),
         )
         .with_target(false)
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
@@ -128,6 +128,17 @@ pub fn run() -> eframe::Result<()> {
             .with_maximized(true),
         ..Default::default()
     };
+    if cfg!(target_os = "linux")
+        && ["DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET"]
+            .iter()
+            .all(|v| std::env::var_os(v).is_none_or(|v| v.is_empty()))
+    {
+        eprintln!(
+            "ruro-studio: no display (neither DISPLAY nor WAYLAND_DISPLAY is set); \
+             use the `ruro` command line without one"
+        );
+        std::process::exit(2);
+    }
     eframe::run_native(
         "ruro studio",
         native,

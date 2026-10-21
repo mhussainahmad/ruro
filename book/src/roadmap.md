@@ -13,8 +13,8 @@ the order it will be done. An item is ticked only when a test proves it, and
 
 ## Installing
 
-- [ ] The quick start works from a fresh clone in a clean container.
-- [ ] Every crate passes `cargo publish --dry-run`, in dependency order.
+- [x] The quick start works from a fresh clone in a clean container.
+- [x] Every crate passes `cargo publish --dry-run`, in dependency order.
 - [ ] A release workflow builds `ruro` and `rurod` for Linux x86_64 and aarch64.
 - [ ] Cross-built aarch64 binaries pass the tests under emulation, in CI.
 

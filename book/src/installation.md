@@ -29,9 +29,17 @@ and `ruro-host` next to itself, then on `PATH`. Keep the binaries together.
 
 ## From source
 
-You need Rust 1.95 or newer (install it with [rustup](https://rustup.rs)) and a C compiler
-(`build-essential` on Debian and Ubuntu). No other development libraries are needed to
-build: the studio loads its windowing and OpenGL libraries at run time.
+You need Rust 1.95 or newer, a C compiler and git. No other development libraries are
+needed to build: the studio loads its windowing and OpenGL libraries at run time. On Debian
+and Ubuntu:
+
+```sh
+sudo apt install build-essential curl git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # Rust, from rustup.rs
+. "$HOME/.cargo/env"                                             # or open a new shell
+```
+
+Then:
 
 ```sh
 git clone https://github.com/mhussainahmad/ruro
@@ -39,7 +47,9 @@ cd ruro
 cargo build --release -p ruro-cli -p ruro-host -p ruro-studio
 ```
 
-The binaries are in `target/release/`. To build only the headless tools (for example on a
+The binaries are in `target/release/`. To have `ruro` on your `PATH`, install them with
+`cargo install --locked --path crates/ruro-cli` (and the same for `crates/ruro-host` and
+`crates/ruro-studio`), which puts them together in `~/.cargo/bin`. To build only the headless tools (for example on a
 robot without a display):
 
 ```sh

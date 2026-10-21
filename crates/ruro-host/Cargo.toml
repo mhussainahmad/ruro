@@ -23,7 +23,7 @@ ruro-node = { workspace = true }
 ruro-graph = { workspace = true }
 ruro-proto = { workspace = true }
 ruro-transport = { workspace = true }
-ruro-record = { path = "../ruro-record" }
+ruro-record = { workspace = true }
 ruro-nodes-std = { workspace = true }
 ruro-nodes-hw = { workspace = true }
 ruro-nodes-sim = { workspace = true }

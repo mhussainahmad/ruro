@@ -24,7 +24,7 @@ ruro-daemon = { workspace = true }
 ruro-schema = { workspace = true }
 ruro-pkg = { workspace = true }
 ruro-ros2 = { workspace = true }
-ruro-record = { path = "../ruro-record" }
+ruro-record = { workspace = true }
 parking_lot = { workspace = true }
 sha2 = { workspace = true }
 anyhow = { workspace = true }

@@ -21,5 +21,7 @@ libloading = { workspace = true, optional = true }
 
 [dev-dependencies]
 ruro-graph = { workspace = true }
-ruro-host = { workspace = true }
+# Path only: ruro-host depends on this crate, so the dev-dependency is left
+# out of the published package.
+ruro-host = { path = "../../crates/ruro-host" }
 parking_lot = { workspace = true }

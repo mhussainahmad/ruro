@@ -24,8 +24,22 @@ ruro --connect tls/robot:7447 --tls-ca ca.pem --token "$(cat token)" status
   runtime directory) and hands it to its hosts in their environment.
 - Giving the daemon `--tls-ca` as well makes it require client certificates signed by that
   CA (mutual TLS); clients then pass their own `--tls-cert` and `--tls-key`.
-- Peer daemons connect with the same options: start them with the same token (and, with
-  TLS peers, a CA that trusts the other daemon's certificate).
+- Peer daemons connect with the same options: start them with the same token. A daemon
+  that connects to a TLS peer needs `--tls-ca` to trust that peer's certificate, but a daemon
+  that has a certificate of its own *and* `--tls-ca` requires client certificates from
+  everyone (previous point). So between two daemons, give `--tls-cert`/`--tls-key` to the
+  one that listens on TLS and `--tls-ca` to the one that connects to it:
+
+  ```sh
+  # robot: listens on TLS
+  ruro daemon --listen tls/0.0.0.0:7447 --tls-cert robot.pem --tls-key robot-key.pem \
+      --token-file token
+  # laptop: connects to it
+  ruro daemon --peer tls/robot:7447 --tls-ca ca.pem --token-file token
+  ```
+
+  To use mutual TLS between daemons, give each a certificate and the CA, and give every
+  client a certificate too.
 - Hosts always talk to their daemon over a Unix socket in the daemon's runtime directory.
 
 `--token` is visible to other users in `ps`; prefer `--token-file <path>` (or

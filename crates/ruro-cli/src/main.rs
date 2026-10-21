@@ -706,7 +706,18 @@ fn daemon_of(c: &Client, node: &str) -> Result<Keys> {
             return Ok(Keys::new(&peer.name));
         }
     }
-    bail!("no node `{node}` in graph `{graph}`")
+    if status.unreachable.is_empty() {
+        bail!("no node `{node}` in graph `{graph}`")
+    }
+    let away: Vec<String> = status
+        .unreachable
+        .iter()
+        .map(|m| format!("`{m}`"))
+        .collect();
+    bail!(
+        "node `{node}` not found; it may run on {}, which does not answer",
+        away.join(", ")
+    )
 }
 
 fn runs_node(status: &DaemonStatus, node: &str) -> bool {

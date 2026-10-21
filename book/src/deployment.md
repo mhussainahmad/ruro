@@ -87,8 +87,8 @@ daemon's name defaults to its hostname; set it with `ruro daemon --name`.
 
 A daemon listening on `tcp/` accepts anyone who can reach it, without encryption. On any
 network you do not fully trust, use TLS and a token (see [Security](security.md)): the CLI
-then passes `--tls-ca` and `--token` (or `RURO_TLS_CA` and `RURO_TOKEN`). The studio does not
-support TLS or tokens yet: for studio use, keep the robot's daemon on
+then passes `--tls-ca` and `--token` (or `RURO_TLS_CA` and `RURO_TOKEN`), and so does the
+studio. Without TLS, keep the robot's daemon on
 `tcp/127.0.0.1:7447` without a token and reach it through an SSH tunnel.
 
 To run one graph across several computers of a robot, see

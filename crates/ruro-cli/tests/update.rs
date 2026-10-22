@@ -17,6 +17,10 @@ use zenoh::Wait;
 const RURO: &str = env!("CARGO_BIN_EXE_ruro");
 const OLD: &str = "0.0.1";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// How long a daemon gets to start, update or exit. Generous: under
+/// emulation (the aarch64 CI job) the tests' daemons take many times longer.
+const LONG: Duration = Duration::from_secs(60);
+const TIMEOUT: &str = "60";
 
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -116,7 +120,7 @@ impl Fleet {
     }
 
     fn wait_status(&self, done: impl Fn(&DaemonStatus) -> bool) -> DaemonStatus {
-        let deadline = Instant::now() + Duration::from_secs(20);
+        let deadline = Instant::now() + LONG;
         let mut last = None;
         while Instant::now() < deadline {
             let Ok(session) = ruro_proto::connect(&self.endpoint) else {
@@ -181,7 +185,7 @@ fn daemons_update_in_place_and_refuse_binaries_that_do_not_start() {
     assert!(f.cli(&["stop"]).status.success());
 
     // The same build, newer than what the daemon claims to run.
-    let out = f.cli(&["update", &new_bin, "--timeout", "20"]);
+    let out = f.cli(&["update", &new_bin, "--timeout", TIMEOUT]);
     assert!(out.status.success(), "{}", text(&out));
     assert!(
         text(&out).contains(&format!("runs {VERSION}")),
@@ -306,17 +310,18 @@ fn under_a_service_manager_the_daemon_exits_to_be_restarted() {
     let new = f.signed(Path::new(RURO), "new", None);
     let update = Command::new(RURO)
         .args(["--connect", &f.endpoint, "--daemon", &f.name])
-        .args(["update", new.to_str().unwrap(), "--timeout", "20"])
+        .args(["update", new.to_str().unwrap(), "--timeout", TIMEOUT])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
 
     // Acting as systemd: the daemon exits with 75 and is started again.
-    let mut daemon = f.daemon.take().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // (Left in `f` meanwhile, which kills it if the test fails.)
+    let deadline = Instant::now() + LONG;
     let status = loop {
-        if let Some(s) = daemon.try_wait().unwrap() {
+        if let Some(s) = f.daemon.as_mut().unwrap().try_wait().unwrap() {
+            f.daemon = None;
             break s;
         }
         assert!(Instant::now() < deadline, "the daemon did not exit");
@@ -356,7 +361,7 @@ fn peers_are_updated_before_the_daemon_they_are_reached_through() {
         new.to_str().unwrap(),
         "--peers",
         "--timeout",
-        "20",
+        TIMEOUT,
     ]);
     let t = text(&out);
     assert!(out.status.success(), "{t}");
@@ -378,7 +383,7 @@ fn an_update_that_dies_while_on_probation_is_rolled_back() {
     let probation = [("RURO_UPDATE_PROBATION", "30")];
     f.start(Some(OLD), &probation);
     let new = f.signed(Path::new(RURO), "new", None);
-    let out = f.cli(&["update", new.to_str().unwrap(), "--timeout", "20"]);
+    let out = f.cli(&["update", new.to_str().unwrap(), "--timeout", TIMEOUT]);
     assert!(out.status.success(), "{}", text(&out));
     f.wait_status(|s| s.version == VERSION);
     assert!(f.path("bin/ruro.prev").exists());
@@ -414,7 +419,7 @@ fn an_update_that_outlives_its_probation_is_kept() {
     let probation = [("RURO_UPDATE_PROBATION", "1")];
     f.start(Some(OLD), &probation);
     let new = f.signed(Path::new(RURO), "new", None);
-    let out = f.cli(&["update", new.to_str().unwrap(), "--timeout", "20"]);
+    let out = f.cli(&["update", new.to_str().unwrap(), "--timeout", TIMEOUT]);
     assert!(out.status.success(), "{}", text(&out));
     f.wait_status(|s| s.version == VERSION);
     std::thread::sleep(Duration::from_secs(3));

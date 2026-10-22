@@ -141,16 +141,20 @@ jobs:
         # Failing tests are also reported as annotations, which can be read
         # without access to the log.
         run: |
-          set -o pipefail
           # A hung test is named by libtest after 60 s; the timeout ends the
-          # run so that the name gets reported.
-          timeout 30m cargo test --locked --target ${{ matrix.target }} --no-fail-fast \
+          # run so that the name gets reported. The log goes to a file: a
+          # process left behind by a test would hold a pipe open.
+          status=0
+          timeout -k 30s 30m cargo test --locked --target ${{ matrix.target }} --no-fail-fast \
             --workspace --exclude ruro-py --exclude ruro-host-py --exclude ruro-studio \
-            -- --skip uploaded_host_binaries_run_groups 2>&1 | tee test.log || {
+            -- --skip uploaded_host_binaries_run_groups >test.log 2>&1 </dev/null || status=$?
+          cat test.log
+          ps -eo pid,ppid,etime,args | grep -E "ruro|qemu|deps/" | grep -v grep | sed 's/^/::warning::left running: /' || true
+          if [ "$status" != 0 ]; then
             grep -E -A2 "^test .* FAILED$|panicked at|has been running for over" test.log | grep -v "^--$" | head -60 | sed 's/^/::error::/'
             grep -E "^     Running " test.log | tail -1 | sed 's/^ */::error::last started: /'
             exit 1
-          }
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: ruro-${{ matrix.target }}

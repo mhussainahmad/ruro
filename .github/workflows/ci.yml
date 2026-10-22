@@ -141,10 +141,13 @@ jobs:
         # without access to the log.
         run: |
           set -o pipefail
-          cargo test --locked --target ${{ matrix.target }} --no-fail-fast \
+          # A hung test is named by libtest after 60 s; the timeout ends the
+          # run so that the name gets reported.
+          timeout 30m cargo test --locked --target ${{ matrix.target }} --no-fail-fast \
             --workspace --exclude ruro-py --exclude ruro-host-py --exclude ruro-studio \
             -- --skip uploaded_host_binaries_run_groups 2>&1 | tee test.log || {
-            grep -E -A2 "^test .* FAILED$|panicked at" test.log | grep -v "^--$" | head -60 | sed 's/^/::error::/'
+            grep -E -A2 "^test .* FAILED$|panicked at|has been running for over" test.log | grep -v "^--$" | head -60 | sed 's/^/::error::/'
+            grep -E "^     Running " test.log | tail -1 | sed 's/^ */::error::last started: /'
             exit 1
           }
       - uses: actions/upload-artifact@v4

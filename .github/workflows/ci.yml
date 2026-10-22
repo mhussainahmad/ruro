@@ -138,6 +138,9 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
           QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
+          # Emulated daemons and hosts are slow; fewer at once keeps the
+          # tests' timing assumptions within reach.
+          RUST_TEST_THREADS: 2
         # Failing tests are also reported as annotations, which can be read
         # without access to the log.
         run: |

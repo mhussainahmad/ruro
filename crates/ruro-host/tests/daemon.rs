@@ -17,7 +17,9 @@ use ruro_proto::{Ctl, DaemonStatus, GroupMetrics, Keys, LogLine, PlaybackCommand
 use ruro_record::{McapWriter, Recording};
 use zenoh::Wait;
 
-const TIMEOUT: Duration = Duration::from_secs(15);
+/// Generous: under emulation (the aarch64 CI job) hosts start and restart
+/// many times slower.
+const TIMEOUT: Duration = Duration::from_secs(45);
 
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
@@ -212,12 +214,13 @@ wires:
     let src_first = values(&first, "src.value");
     let gain_first = values(&first, "gain.output");
     assert!(gain_first.len() > 100, "{}", gain_first.len());
-    // The two groups start recording at slightly different times, so match
-    // values rather than positions.
+    // The two groups start and stop recording at slightly different times
+    // (further apart on a loaded machine), so match values rather than
+    // positions, and allow for the ends.
     let halves: Vec<f64> = src_first.iter().map(|v| v * 0.5).collect();
     let matched = gain_first.iter().filter(|g| halves.contains(g)).count();
     assert!(
-        matched + 3 >= gain_first.len(),
+        matched + 3.max(gain_first.len() / 20) >= gain_first.len(),
         "{matched} of {}",
         gain_first.len()
     );

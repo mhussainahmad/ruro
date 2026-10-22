@@ -151,8 +151,17 @@ jobs:
           cat test.log
           ps -eo pid,ppid,etime,args | grep -E "ruro|qemu|deps/" | grep -v grep | sed 's/^/::warning::left running: /' || true
           if [ "$status" != 0 ]; then
-            grep -E -A2 "^test .* FAILED$|panicked at|has been running for over" test.log | grep -v "^--$" | head -60 | sed 's/^/::error::/'
-            grep -E "^     Running " test.log | tail -1 | sed 's/^ */::error::last started: /'
+            # One annotation (lines joined by %0A): a step keeps only a few.
+            {
+              echo "cargo test exited with $status (124: timed out)"
+              echo "last started: $(grep -E '^ +Running ' test.log | tail -1)"
+              for t in $(sed -n 's/^test \(.*\) has been running for over 60 seconds$/\1/p' test.log); do
+                grep -qE "^test $t \.\.\. " test.log || echo "never finished: $t"
+              done
+              grep -E "^test .* FAILED$|^error: |^    \`" test.log
+              grep -E -A3 "panicked at" test.log | head -40
+            } | head -80 | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}' | sed 's/^/::error::/'
+            echo
             exit 1
           fi
       - uses: actions/upload-artifact@v4

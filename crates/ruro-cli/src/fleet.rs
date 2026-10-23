@@ -33,8 +33,30 @@ pub fn fleet(session: &zenoh::Session) -> Result<()> {
     let mut daemons: BTreeMap<String, DaemonStatus> = BTreeMap::new();
     // Latest metrics per (daemon, group).
     let mut metrics: BTreeMap<(String, String), GroupMetrics> = BTreeMap::new();
-    let deadline = Instant::now() + LISTEN;
-    while Instant::now() < deadline {
+    // Daemons answer status and metrics requests at once; the request ends
+    // when every reachable one has answered.
+    for key in [Keys::all_status().to_string(), "ruro/*/metrics/*".to_owned()] {
+        let Ok(replies) = session.get(key.as_str()).timeout(LISTEN).wait() else {
+            continue;
+        };
+        while let Ok(reply) = replies.recv() {
+            let Ok(s) = reply.result() else { continue };
+            let bytes = s.payload().to_bytes();
+            if key.ends_with("status") {
+                if let Ok(st) = ruro_proto::decode_status(&bytes) {
+                    daemons.insert(st.name.clone(), st);
+                }
+            } else if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&bytes) {
+                let daemon = s.key_expr().as_str().split('/').nth(1).unwrap_or_default();
+                metrics.insert((daemon.to_owned(), m.group.clone()), m);
+            }
+        }
+    }
+    // 0.1.0 daemons only publish; listen for them unless every daemon seen
+    // answered already.
+    let answered = !daemons.is_empty();
+    let deadline = Instant::now() + if answered { Duration::ZERO } else { LISTEN };
+    loop {
         while let Ok(Some(s)) = status_sub.try_recv() {
             if let Ok(st) = ruro_proto::decode_status(&s.payload().to_bytes()) {
                 daemons.insert(st.name.clone(), st);
@@ -45,6 +67,9 @@ pub fn fleet(session: &zenoh::Session) -> Result<()> {
             if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&s.payload().to_bytes()) {
                 metrics.insert((daemon.to_owned(), m.group.clone()), m);
             }
+        }
+        if Instant::now() >= deadline {
+            break;
         }
         std::thread::sleep(Duration::from_millis(20));
     }

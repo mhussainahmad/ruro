@@ -311,6 +311,18 @@ impl Client {
     }
 
     pub fn status(&self) -> Result<DaemonStatus> {
+        // Daemons answer a request at once; older ones only publish their
+        // status twice a second.
+        if let Ok(replies) = self
+            .session
+            .get(self.keys.status())
+            .timeout(Duration::from_millis(500))
+            .wait()
+            && let Ok(reply) = replies.recv()
+            && let Ok(sample) = reply.result()
+        {
+            return ruro_proto::decode_status(&sample.payload().to_bytes());
+        }
         let sub = self
             .session
             .declare_subscriber(self.keys.status())
@@ -736,51 +748,86 @@ fn runs_node(status: &DaemonStatus, node: &str) -> bool {
 }
 
 pub fn group_metrics(c: &Client, status: &DaemonStatus) -> Result<Vec<GroupMetrics>> {
+    let running: Vec<&str> = status
+        .groups
+        .iter()
+        .filter(|g| g.pid.is_some())
+        .map(|g| g.name.as_str())
+        .collect();
+    let mut metrics: Vec<GroupMetrics> = Vec::new();
+    let add = |metrics: &mut Vec<GroupMetrics>, bytes: &[u8]| {
+        if let Ok(m) = ruro_proto::decode::<GroupMetrics>(bytes)
+            && running.contains(&m.group.as_str())
+        {
+            metrics.retain(|x| x.group != m.group);
+            metrics.push(m);
+        }
+    };
     let metrics_sub = c
         .session
         .declare_subscriber(c.keys.all_metrics())
         .wait()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let expected = status.groups.iter().filter(|g| g.pid.is_some()).count();
-    let mut metrics: Vec<GroupMetrics> = Vec::new();
+    // Daemons answer with the groups' last metrics at once; with older ones
+    // the client waits for the next publication.
+    if let Ok(replies) = c
+        .session
+        .get(c.keys.all_metrics())
+        .timeout(Duration::from_millis(500))
+        .wait()
+    {
+        while let Ok(reply) = replies.recv() {
+            if let Ok(sample) = reply.result() {
+                add(&mut metrics, &sample.payload().to_bytes());
+            }
+        }
+    }
     let deadline = std::time::Instant::now() + Duration::from_millis(1200);
-    while metrics.len() < expected && std::time::Instant::now() < deadline {
-        if let Ok(Some(s)) = metrics_sub.recv_timeout(Duration::from_millis(100))
-            && let Ok(m) = ruro_proto::decode::<GroupMetrics>(&s.payload().to_bytes())
-        {
-            metrics.retain(|x| x.group != m.group);
-            metrics.push(m);
+    while metrics.len() < running.len() && std::time::Instant::now() < deadline {
+        if let Ok(Some(s)) = metrics_sub.recv_timeout(Duration::from_millis(100)) {
+            add(&mut metrics, &s.payload().to_bytes());
         }
     }
     Ok(metrics)
 }
 
 fn status(c: &Client) -> Result<()> {
-    // Daemons publish their status twice a second; listen while metrics
-    // are collected to find the other machines of the graph.
+    // The other machines of the graph: daemons answer a status request at
+    // once; 0.1.0 daemons only publish theirs, which the subscription
+    // catches while the request runs.
     let others = c
         .session
         .declare_subscriber(Keys::all_status())
         .wait()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let listening = std::time::Instant::now();
     let status = c.status()?;
     let metrics = group_metrics(c, &status)?;
     let mut peers: std::collections::BTreeMap<String, DaemonStatus> = Default::default();
-    loop {
-        while let Ok(Some(s)) = others.try_recv() {
-            if let Ok(peer) = ruro_proto::decode_status(&s.payload().to_bytes())
-                && peer.name != status.name
-                && peer.graph.is_some()
-                && peer.graph == status.graph
-            {
-                peers.insert(peer.name.clone(), peer);
+    let mut add = |bytes: &[u8]| {
+        if let Ok(peer) = ruro_proto::decode_status(bytes)
+            && peer.name != status.name
+            && peer.graph.is_some()
+            && peer.graph == status.graph
+        {
+            peers.insert(peer.name.clone(), peer);
+        }
+    };
+    if status.graph.is_some() {
+        if let Ok(replies) = c
+            .session
+            .get(Keys::all_status())
+            .timeout(Duration::from_millis(700))
+            .wait()
+        {
+            while let Ok(reply) = replies.recv() {
+                if let Ok(sample) = reply.result() {
+                    add(&sample.payload().to_bytes());
+                }
             }
         }
-        if status.graph.is_none() || listening.elapsed() >= Duration::from_millis(700) {
-            break;
+        while let Ok(Some(s)) = others.try_recv() {
+            add(&s.payload().to_bytes());
         }
-        std::thread::sleep(Duration::from_millis(20));
     }
     let peers: Vec<DaemonStatus> = peers.into_values().collect();
     output::print_status(&status, &metrics, &peers);

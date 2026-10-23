@@ -158,6 +158,9 @@ pub(crate) struct State {
     pub peers: Mutex<BTreeSet<String>>,
     /// Last metrics seen per group: `(pid, when)`.
     pub heartbeats: Mutex<HashMap<String, (u32, Instant)>>,
+    /// The last metrics each group published, as published, answered on
+    /// request.
+    pub metrics: Mutex<HashMap<String, Vec<u8>>>,
     /// The graph as deployed by the client (before flattening and machine
     /// assignment), returned by `Ctl::Graph`.
     pub deployed: Mutex<Option<String>>,
@@ -322,6 +325,7 @@ impl Daemon {
             playback: Mutex::new(None),
             peers: Mutex::new(BTreeSet::new()),
             heartbeats: Mutex::new(HashMap::new()),
+            metrics: Mutex::new(HashMap::new()),
             deployed: Mutex::new(None),
             origin: Mutex::new(None),
             forwarded: Mutex::new(None),
@@ -454,7 +458,9 @@ impl Daemon {
         let heartbeat_sub = session
             .declare_subscriber(keys.all_metrics())
             .callback(move |sample| {
-                if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&sample.payload().to_bytes()) {
+                let bytes = sample.payload().to_bytes();
+                if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&bytes) {
+                    hb.metrics.lock().insert(m.group.clone(), bytes.into_owned());
                     hb.heartbeats
                         .lock()
                         .insert(m.group, (m.pid, Instant::now()));
@@ -466,6 +472,46 @@ impl Daemon {
         let loop_stop = stop.clone();
         let started = Instant::now();
         let heartbeat_timeout = config.heartbeat_timeout;
+
+        // The status is also answered on request, so a client need not wait
+        // for the next publication.
+        let status_queryable = session
+            .declare_queryable(keys.status())
+            .wait()
+            .map_err(|e| anyhow!("{e}"))?;
+        // Likewise the groups' last metrics, which hosts publish twice a
+        // second.
+        let metrics_queryable = session
+            .declare_queryable(keys.all_metrics())
+            .wait()
+            .map_err(|e| anyhow!("{e}"))?;
+        let status_state = state.clone();
+        std::thread::Builder::new()
+            .name("ruro-status".into())
+            .spawn(move || {
+                while let Ok(query) = status_queryable.recv() {
+                    let status = status(&status_state, started);
+                    let _ = query
+                        .reply(status_state.keys.status(), ruro_proto::encode(&status))
+                        .wait();
+                }
+            })?;
+        let metrics_state = state.clone();
+        std::thread::Builder::new()
+            .name("ruro-metrics".into())
+            .spawn(move || {
+                while let Ok(query) = metrics_queryable.recv() {
+                    let latest: Vec<(String, Vec<u8>)> = metrics_state
+                        .metrics
+                        .lock()
+                        .iter()
+                        .map(|(g, m)| (g.clone(), m.clone()))
+                        .collect();
+                    for (group, bytes) in latest {
+                        let _ = query.reply(metrics_state.keys.metrics(&group), bytes).wait();
+                    }
+                }
+            })?;
         let st = state.clone();
         let thread = std::thread::Builder::new()
             .name("ruro-supervisor".into())

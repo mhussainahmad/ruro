@@ -849,3 +849,53 @@ fn uploaded_host_binaries_run_groups() {
     assert!(format!("{err:#}").contains("no-such-host"));
     request(&s, &d.keys, Ctl::Stop, "").unwrap();
 }
+
+/// Replies to `key`, as (key, payload) pairs.
+fn query(session: &zenoh::Session, key: &str) -> Vec<(String, Vec<u8>)> {
+    let replies = session
+        .get(key)
+        .timeout(Duration::from_secs(5))
+        .wait()
+        .unwrap();
+    let mut out = Vec::new();
+    while let Ok(r) = replies.recv() {
+        if let Ok(s) = r.result() {
+            out.push((s.key_expr().to_string(), s.payload().to_bytes().into_owned()));
+        }
+    }
+    out
+}
+
+#[test]
+fn status_and_metrics_are_answered_on_request() {
+    let (d1, d2, s) = two_daemons("asked", "askedpeer");
+    let right = d2.name().to_owned();
+    request(&s, &d1.keys, Ctl::Deploy, &spanning_graph(&right)).unwrap();
+    wait_metrics(&s, &d1.keys, "b", |m| node_hz(m, "gain") > 50.0);
+    wait_metrics(&s, &d2.keys, "a", |m| node_hz(m, "src") > 50.0);
+
+    // Both daemons, the peer through the first, without waiting for the
+    // next publication: the request ends when both have answered.
+    let start = Instant::now();
+    let statuses: Vec<DaemonStatus> = query(&s, "ruro/*/status")
+        .iter()
+        .map(|(_, b)| ruro_proto::decode_status(b).unwrap())
+        .collect();
+    assert!(start.elapsed() < Duration::from_secs(4), "{:?}", start.elapsed());
+    let mut names: Vec<&str> = statuses.iter().map(|st| st.name.as_str()).collect();
+    names.sort();
+    let mut expected = vec![d1.name(), right.as_str()];
+    expected.sort();
+    assert_eq!(names, expected);
+    assert!(statuses.iter().all(|st| st.graph.as_deref() == Some("rec-span")));
+
+    // The groups' last metrics, from each daemon.
+    let metrics = query(&s, "ruro/*/metrics/*");
+    let mut groups: Vec<String> = metrics
+        .iter()
+        .map(|(_, b)| ruro_proto::decode::<GroupMetrics>(b).unwrap().group)
+        .collect();
+    groups.sort();
+    assert_eq!(groups, ["a", "b", "c"]);
+    request(&s, &d1.keys, Ctl::Stop, "").unwrap();
+}

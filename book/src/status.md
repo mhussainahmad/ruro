@@ -27,6 +27,10 @@ optional ML and camera features):
   rendered from the same tests.
 - **Python nodes:** the `ruro` package's tests, and a daemon running Python and Rust nodes
   in one graph.
+- **Nodes in other languages:** a plain Python program speaking the protocol (ports,
+  parameters, images, the e-stop, both transports, crash and restart, a hang, garbled
+  output), a graph running one through a daemon, and the MATLAB helper with the example
+  nodes under GNU Octave 8.4 (CI's `octave` job). MATLAB itself has not been tried.
 - **ROS 2 bridge:** encoding, type hashes (all bundled message, service and action types
   checked against ROS 2 Jazzy's), the QoS written into discovery tokens (checked against
   tokens captured from Jazzy nodes), publishing, subscribing, services, actions and

@@ -7,6 +7,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Nodes in other languages.** A manifest (`*.node.yaml`, listed in `RURO_PROCESS_NODES`)
+  makes any program a node type, with typed ports, parameters, the e-stop and supervision:
+  the host runs it per node and exchanges one JSON line per step over its standard input
+  and output, or over TCP. `sdk/matlab` has a helper for MATLAB and GNU Octave, and
+  `examples/process` example nodes. See the book's "Nodes in other languages".
+
 ## [0.1.0] - 2026-10-22
 
 The first release.

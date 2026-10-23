@@ -39,6 +39,7 @@ RUN apt-get update \
     && useradd --system --uid "${UID}" --user-group --home-dir /var/lib/ruro --create-home ruro
 COPY --from=build /out/ruro /out/ruro-host /usr/bin/
 COPY examples/ /usr/share/ruro/examples/
+COPY sdk/ /usr/share/ruro/sdk/
 USER ruro
 WORKDIR /var/lib/ruro
 ENV RURO_LOG=info,zenoh=warn

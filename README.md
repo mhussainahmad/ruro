@@ -38,7 +38,9 @@ the `ruro` CLI.
   signed over-the-air daemon updates, rolled back automatically when the new daemon fails
   to start or dies soon after.
 - **Node SDKs.** Rust (`#[derive(Node)]`, `ruro new`, `ruro build`) and Python (with
-  NumPy views of images and hot reload).
+  NumPy views of images and hot reload). Any other program, in any language, can be a node
+  through a short manifest and a line-based JSON protocol, with a helper for MATLAB and
+  GNU Octave.
 - **ROS 2 topics, services and actions, any message type, and your launch files.** Over
   rmw_zenoh with ROS 2 QoS, without a ROS installation on the ruro side. Messages of any
   type pass through byte for byte; `ruro ros2 import` turns launch files into graphs, and
@@ -170,7 +172,8 @@ The user guide is an [mdBook](https://rust-lang.github.io/mdBook/) in [`book/`](
 - [Installation](book/src/installation.md), [Quick start](book/src/quick-start.md),
   [Concepts](book/src/concepts.md)
 - [Writing nodes in Rust](book/src/writing-nodes.md),
-  [Node packages and hosts](book/src/packages.md), [Python nodes](book/src/python.md)
+  [Node packages and hosts](book/src/packages.md), [Python nodes](book/src/python.md),
+  [Nodes in other languages](book/src/other-languages.md)
 - [Studio](book/src/studio.md), [Studio plugins](book/src/studio-plugins.md)
 - [Runtime features](book/src/runtime.md), [Real-time scheduling](book/src/realtime.md),
   [Record and replay](book/src/record-replay.md)

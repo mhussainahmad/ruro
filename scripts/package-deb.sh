@@ -133,6 +133,10 @@ while IFS= read -r -d '' f; do
     install -Dm644 "examples/$f" "$examples/$f"
 done < <(cd examples && find . -type f ! -name '.*' ! -path '*/__pycache__/*' -printf '%P\0')
 ln -s ../../ruro/examples "$doc/examples"
+# Helpers for nodes in other languages; examples/process finds them at ../../sdk.
+while IFS= read -r -d '' f; do
+    install -Dm644 "sdk/$f" "$stage/usr/share/ruro/sdk/$f"
+done < <(cd sdk && find . -type f ! -name '.*' -printf '%P\0')
 if [[ -f CHANGELOG.md ]]; then
     gzip -9n <CHANGELOG.md >"$doc/changelog.gz"
     chmod 644 "$doc/changelog.gz"

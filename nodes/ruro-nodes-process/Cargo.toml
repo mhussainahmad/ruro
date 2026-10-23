@@ -1,0 +1,27 @@
+[package]
+name = "ruro-nodes-process"
+description = "ruro nodes implemented by other programs, in any language"
+keywords = ["robotics", "dataflow", "nodes", "matlab", "interop"]
+categories = ["science::robotics"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-nodes-process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro-msg = { workspace = true }
+ruro-node = { workspace = true }
+ruro-graph = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-saphyr = { workspace = true }
+indexmap = { workspace = true }
+tracing = { workspace = true }
+base64 = { workspace = true }
+libc = { workspace = true }

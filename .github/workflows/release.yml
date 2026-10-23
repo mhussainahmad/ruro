@@ -56,7 +56,7 @@ jobs:
             ${{ matrix.strip || 'strip' }} --strip-unneeded "dist/$name/$bin"
           done
           cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
-          cp -r examples packaging/systemd "dist/$name/"
+          cp -r examples sdk packaging/systemd "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           rm -rf "dist/${name:?}"
       - uses: actions/upload-artifact@v4

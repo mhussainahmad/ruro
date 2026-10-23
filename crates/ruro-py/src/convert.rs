@@ -192,26 +192,7 @@ raw_messages!(
 /// Calls `$mac!` with every message type usable from Python.
 macro_rules! with_message_types {
     ($mac:ident) => {
-        $mac!(
-            Scalar,
-            Text,
-            Flag,
-            Bytes,
-            Vec3,
-            Pose,
-            Twist,
-            JointState,
-            JointCommand,
-            Transform,
-            Transforms,
-            Imu,
-            LaserScan,
-            Odometry,
-            CameraInfo,
-            Joy,
-            Image,
-            PointCloud,
-        );
+        ruro_msg::for_each_std_message! { $mac }
     };
 }
 pub(crate) use with_message_types;

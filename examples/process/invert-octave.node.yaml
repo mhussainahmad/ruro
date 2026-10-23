@@ -1,0 +1,8 @@
+# Image processing in Octave (invert.m): images cross as base64, which
+# ruro_bytes turns into a height x width x channels array and back.
+kind: example/octave-invert
+doc: Inverts 8-bit images, in Octave.
+command: [octave-cli, --quiet, --norc, --eval, "addpath('../../sdk/matlab'); ruro_node(@invert)"]
+inputs: { image: std/Image }
+outputs: { inverted: std/Image }
+start_timeout: 60

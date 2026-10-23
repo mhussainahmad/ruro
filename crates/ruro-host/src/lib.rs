@@ -91,6 +91,7 @@ pub fn describe() -> String {
     ruro_nodes_ml::link();
     ruro_nodes_ros2::link();
     ruro_nodes_gpu::link();
+    ruro_nodes_process::link();
     serde_json::to_string(&ruro_node::registry()).expect("registry is serializable")
 }
 
@@ -102,6 +103,7 @@ pub fn main() {
     ruro_nodes_ml::link();
     ruro_nodes_ros2::link();
     ruro_nodes_gpu::link();
+    ruro_nodes_process::link();
     let cli = Cli::parse();
     let result = match cli.cmd {
         Cmd::Describe => {

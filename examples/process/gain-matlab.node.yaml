@@ -1,0 +1,12 @@
+# The same node in MATLAB. MATLAB cannot read its standard input when another
+# program starts it, so it connects to the host over TCP instead, and gets
+# longer to start.
+kind: example/matlab-gain
+doc: Multiplies its input by k, in MATLAB.
+command: [matlab, -batch, "addpath('../../sdk/matlab'); ruro_node(@gain)"]
+transport: tcp
+inputs: { input: std/Scalar }
+outputs: { output: std/Scalar }
+params:
+  k: { default: 2.0, min: -100, max: 100, doc: the gain }
+start_timeout: 180

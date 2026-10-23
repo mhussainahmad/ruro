@@ -153,6 +153,34 @@ macro_rules! register_schema {
     };
 }
 
+/// Calls `$mac!` with the name of every standard message type, for bindings
+/// to other languages that need one case per type.
+#[macro_export]
+macro_rules! for_each_std_message {
+    ($mac:ident) => {
+        $mac!(
+            Scalar,
+            Text,
+            Flag,
+            Bytes,
+            Vec3,
+            Pose,
+            Twist,
+            JointState,
+            JointCommand,
+            Transform,
+            Transforms,
+            Imu,
+            LaserScan,
+            Odometry,
+            CameraInfo,
+            Joy,
+            Image,
+            PointCloud,
+        );
+    };
+}
+
 #[doc(hidden)]
 pub mod __private {
     pub use inventory;

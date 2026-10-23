@@ -100,6 +100,26 @@ jobs:
           maturin develop --locked -m crates/ruro-py/Cargo.toml --extras test
           cd crates/ruro-py && pytest
 
+  octave:
+    # Nodes in other languages: the MATLAB helper (sdk/matlab) and the
+    # example nodes, under GNU Octave, over stdio and over TCP as MATLAB uses.
+    name: process nodes in octave
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Octave
+        run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          octave octave-instrument-control
+      - name: Test
+        env:
+          RURO_REQUIRE_OCTAVE: 1
+        run: cargo test --locked -p ruro-nodes-process --test octave
+
   cross:
     name: build (${{ matrix.target }})
     runs-on: ubuntu-24.04

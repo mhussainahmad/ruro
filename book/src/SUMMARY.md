@@ -13,6 +13,7 @@
 - [Writing nodes in Rust](writing-nodes.md)
   - [Node packages and hosts](packages.md)
 - [Python nodes](python.md)
+- [Nodes in other languages](other-languages.md)
 - [Studio](studio.md)
   - [Studio plugins](studio-plugins.md)
 - [Runtime features](runtime.md)

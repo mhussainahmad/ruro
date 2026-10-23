@@ -1,0 +1,11 @@
+# A node type implemented in GNU Octave (gain.m), started by the host for
+# every node of this type in a graph. List this file (or its directory) in
+# RURO_PROCESS_NODES; see the book's "Nodes in other languages".
+kind: example/octave-gain
+doc: Multiplies its input by k, in Octave.
+command: [octave-cli, --quiet, --norc, --eval, "addpath('../../sdk/matlab'); ruro_node(@gain)"]
+inputs: { input: std/Scalar }
+outputs: { output: std/Scalar }
+params:
+  k: { default: 2.0, min: -100, max: 100, doc: the gain }
+start_timeout: 60

@@ -2174,6 +2174,8 @@ fn connect_to_another_daemon() {
     let form = h.state_mut().connect_form.as_mut().unwrap();
     form.endpoint = " tls/127.0.0.1:1 ".into();
     form.tls_ca = "/etc/ruro/ca.pem".into();
+    form.tls_cert = "/etc/ruro/laptop.pem".into();
+    form.tls_key = " /etc/ruro/laptop-key.pem".into();
     form.token = "secret".into();
     h.get_by_label("Connect").click();
     h.run_steps(3);
@@ -2186,5 +2188,24 @@ fn connect_to_another_daemon() {
     assert_eq!(
         s.settings.tls_ca.as_deref(),
         Some(std::path::Path::new("/etc/ruro/ca.pem"))
+    );
+    // A client certificate, for daemons that require one (mutual TLS).
+    assert_eq!(
+        s.security.key.as_deref(),
+        Some(std::path::Path::new("/etc/ruro/laptop-key.pem"))
+    );
+    assert_eq!(
+        s.settings.tls_client,
+        Some((
+            "/etc/ruro/laptop.pem".into(),
+            "/etc/ruro/laptop-key.pem".into()
+        ))
+    );
+    // Shown again when the dialog reopens.
+    h.state_mut().push(Cmd::ConnectDialog);
+    h.run_steps(2);
+    assert_eq!(
+        h.state().connect_form.as_ref().unwrap().tls_cert,
+        "/etc/ruro/laptop.pem"
     );
 }

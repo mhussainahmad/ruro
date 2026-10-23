@@ -35,6 +35,9 @@ pub struct Settings {
     pub endpoint: Option<String>,
     /// The CA certificate given with it, for `tls/` endpoints.
     pub tls_ca: Option<PathBuf>,
+    /// The client certificate and key given with it, for mutual TLS. (The
+    /// token is never saved.)
+    pub tls_client: Option<(PathBuf, PathBuf)>,
 }
 
 impl Default for Settings {
@@ -52,6 +55,7 @@ impl Default for Settings {
             collapsed: Vec::new(),
             endpoint: None,
             tls_ca: None,
+            tls_client: None,
         }
     }
 }

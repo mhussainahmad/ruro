@@ -117,6 +117,10 @@ pub struct ConnectForm {
     pub endpoint: String,
     /// CA certificate for `tls/` endpoints; empty for none.
     pub tls_ca: String,
+    /// Client certificate and its key, for daemons that require them
+    /// (mutual TLS); empty for none.
+    pub tls_cert: String,
+    pub tls_key: String,
     /// Access token; empty for none.
     pub token: String,
 }
@@ -128,6 +132,8 @@ pub enum Cmd {
     Connect {
         endpoint: String,
         tls_ca: Option<PathBuf>,
+        /// Client certificate and key, for mutual TLS.
+        client: Option<(PathBuf, PathBuf)>,
         token: Option<String>,
     },
     // Documents.
@@ -376,6 +382,12 @@ impl Studio {
             if opts.security.ca.is_none() {
                 opts.security.ca = settings.tls_ca.clone();
             }
+            if opts.security.cert.is_none()
+                && let Some((cert, key)) = &settings.tls_client
+            {
+                opts.security.cert = Some(cert.clone());
+                opts.security.key = Some(key.clone());
+            }
         }
         // Off Linux there is no local daemon to start: ask where the robot is.
         let ask_connect =
@@ -619,22 +631,25 @@ impl Studio {
             Cmd::OpenDialog => self.open_dialog(dialogs::Purpose::Open),
             Cmd::QuickOpen => self.palette = Some(Palette::new(PaletteMode::Open)),
             Cmd::ConnectDialog => {
+                let path = |p: &Option<PathBuf>| {
+                    p.as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
+                };
                 self.connect_form = Some(ConnectForm {
                     endpoint: self.endpoint.clone(),
-                    tls_ca: self
-                        .security
-                        .ca
-                        .as_ref()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default(),
+                    tls_ca: path(&self.security.ca),
+                    tls_cert: path(&self.security.cert),
+                    tls_key: path(&self.security.key),
                     token: self.security.token.clone().unwrap_or_default(),
                 })
             }
             Cmd::Connect {
                 endpoint,
                 tls_ca,
+                client,
                 token,
-            } => self.connect_to(ctx, endpoint, tls_ca, token),
+            } => self.connect_to(ctx, endpoint, tls_ca, client, token),
             Cmd::Open(p) => self.open(&p),
             Cmd::Save => self.save(None),
             Cmd::SaveAsDialog => self.open_dialog(dialogs::Purpose::SaveAs),
@@ -746,9 +761,13 @@ impl Studio {
         ctx: &egui::Context,
         endpoint: String,
         tls_ca: Option<PathBuf>,
+        client: Option<(PathBuf, PathBuf)>,
         token: Option<String>,
     ) {
         self.security.ca = tls_ca.clone();
+        let (cert, key) = client.clone().unzip();
+        self.security.cert = cert;
+        self.security.key = key;
         self.security.token = token;
         self.endpoint = endpoint.clone();
         // Dropping the old link ends its threads.
@@ -766,6 +785,7 @@ impl Studio {
         self.want_running_graph = true;
         self.settings.endpoint = Some(endpoint);
         self.settings.tls_ca = tls_ca;
+        self.settings.tls_client = client;
     }
 
     pub(crate) fn set_theme(&mut self, ctx: &egui::Context, kind: ThemeKind) {

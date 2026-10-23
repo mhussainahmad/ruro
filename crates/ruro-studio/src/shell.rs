@@ -1508,6 +1508,14 @@ pub fn connect_dialog(s: &mut Studio, ctx: &egui::Context) {
             label(ui, "CA certificate (for tls/ endpoints)");
             widgets::text_field(ui, &mut form.tls_ca, "path to ca.pem");
             ui.add_space(8.0);
+            label(
+                ui,
+                "Client certificate and key (if the daemon requires them)",
+            );
+            widgets::text_field(ui, &mut form.tls_cert, "path to laptop.pem");
+            ui.add_space(4.0);
+            widgets::text_field(ui, &mut form.tls_key, "path to laptop-key.pem");
+            ui.add_space(8.0);
             label(ui, "Token (if the daemon requires one)");
             ui.add(
                 egui::TextEdit::singleline(&mut form.token)
@@ -1546,9 +1554,16 @@ pub fn connect_dialog(s: &mut Studio, ctx: &egui::Context) {
                 .filter(|p| !p.is_empty())
                 .map(std::path::PathBuf::from);
             let token = Some(form.token.trim().to_owned()).filter(|t| !t.is_empty());
+            let path = |p: &str| {
+                Some(p.trim())
+                    .filter(|p| !p.is_empty())
+                    .map(std::path::PathBuf::from)
+            };
+            let client = path(&form.tls_cert).zip(path(&form.tls_key));
             s.push(Cmd::Connect {
                 endpoint: form.endpoint.trim().to_owned(),
                 tls_ca,
+                client,
                 token,
             });
         }

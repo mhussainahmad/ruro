@@ -45,9 +45,10 @@ nodes and upload host binaries.
 - A plain `tcp/` listener on a network interface accepts anyone who can reach it. Use one
   only on trusted networks, such as the robot's own network or a VPN, and restrict access
   with a firewall.
-- The studio connects with TLS and a token through **File > Connect to Daemon…** (the CA
-  certificate and the token; the token is not saved). It does not present client
-  certificates, so daemons that require them can only be used from the CLI.
+- The studio connects with TLS, a client certificate (for daemons that require one) and a
+  token through **File > Connect to Daemon…**, or with the same options as the CLI
+  (`--tls-ca`, `--tls-cert`, `--tls-key`, `--token-file`). It remembers the endpoint and the
+  certificate paths, never the token.
 - Plugins (`RURO_PLUGINS`) run inside the host process, and the programs of process nodes
   (`RURO_PROCESS_NODES`) run as the host's user, with its environment: both are code the
   daemon's operator chose to trust. Keep those variables, and the files they name, writable

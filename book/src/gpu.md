@@ -153,5 +153,6 @@ allocates another. A received buffer can be passed on to a third process unchang
 - **ONNX Runtime** takes `gpu/Tensor`s in `ml/onnx-cuda` (feature `onnx-cuda`), which
   returns its output in host memory; outputs that stay on the device are not supported yet.
   `ml/onnx` and `ml/policy` run on the CPU.
-- **Python nodes** cannot receive GPU messages.
+- **Python nodes** take and send `gpu/Tensor` (`ruro.GpuTensor`, through
+  `__cuda_array_interface__`), not yet `gpu/Image`.
 - One CUDA device per buffer; there are no peer copies between GPUs.

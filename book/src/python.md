@@ -72,6 +72,41 @@ class Brightness:
             self.outputs.mean.send(ruro.Scalar(float(image.array().mean())))
 ```
 
+### GPU tensors
+
+`ruro.GpuTensor` is a `gpu/Tensor` (see [GPU buffers](gpu.md)): `dtype`, `shape`, `strides`
+(in elements) and `device` (`cuda:0`, or `cpu`). One in device memory exposes
+`__cuda_array_interface__`, so PyTorch, CuPy and Numba read the same memory without a copy;
+it is read-only, because other receivers share it. `numpy()` downloads a copy, and
+`ruro.GpuTensor.from_numpy(array, device=0)` uploads one.
+
+An output of type `gpu/Tensor` takes a `GpuTensor`, any object with
+`__cuda_array_interface__` (a PyTorch CUDA tensor, a CuPy array: contiguous, and copied into a
+ruro buffer on its device, after waiting for the stream it names), or a NumPy array (a host
+tensor).
+
+```python
+import torch
+
+@ruro.node(kind="py/torch-model", inputs={"tensor": ruro.GpuTensor},
+           outputs={"scores": ruro.GpuTensor})
+class TorchModel:
+    def start(self, ctx):
+        self.model = torch.jit.load("model.pt").cuda().eval()
+
+    def step(self, ctx):
+        t = self.inputs.tensor.latest()   # e.g. from gpu/normalize
+        if t is not None:
+            with torch.no_grad():
+                x = torch.as_tensor(t, device="cuda")   # the same device memory
+                self.outputs.scores.send(self.model(x).contiguous())
+```
+
+Tested in-process and through a daemon with the Python node in a process of its own (the
+tensor arrives over CUDA IPC), on an RTX 4090, using the CUDA driver directly; not with
+PyTorch or CuPy themselves. `gpu/Image` is not available in Python yet: normalize images to
+tensors first.
+
 ## Testing
 
 `ruro.testing` runs a node in-process. Messages pass through the same encoding that

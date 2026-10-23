@@ -30,6 +30,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **ONNX Runtime on NVIDIA GPUs.** `ml/onnx-cuda` (feature `onnx-cuda`) runs models with
   ONNX Runtime's CUDA provider on `gpu/Tensor` inputs read in device memory, with an
   optional profile of where each operator ran.
+- **GPU tensors in Python.** `ruro.GpuTensor` (`gpu/Tensor`) exposes
+  `__cuda_array_interface__`, so PyTorch and CuPy read received device memory in place;
+  outputs take any CUDA array (copied into a ruro buffer) or NumPy array.
 
 ### Changed
 

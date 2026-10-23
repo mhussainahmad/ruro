@@ -7,11 +7,13 @@ Define a node with :func:`ruro.node`, test it in-process with
 
 Messages: the dataclasses in :mod:`ruro.msg` (``Scalar``, ``Twist``,
 ``Imu``...) plus :class:`Image` and :class:`PointCloud`, whose data is shared
-with numpy without copying (``img.array()``, ``cloud.array()``).
+with numpy without copying (``img.array()``, ``cloud.array()``), and
+:class:`GpuTensor` (``gpu/Tensor``), whose device memory PyTorch and CuPy
+read in place through ``__cuda_array_interface__``.
 """
 
 from . import _native
-from ._native import Ctx, Image, InputPort, OutputPort, PointCloud
+from ._native import Ctx, GpuTensor, Image, InputPort, OutputPort, PointCloud
 from .msg import (
     MESSAGES,
     Bytes,
@@ -37,6 +39,7 @@ from .node import Param, Params, Ports, node, param, registered
 
 MESSAGES[Image.TYPE] = Image
 MESSAGES[PointCloud.TYPE] = PointCloud
+MESSAGES[GpuTensor.TYPE] = GpuTensor
 
 __version__: str = _native.__version__
 
@@ -45,6 +48,7 @@ __all__ = [
     "CameraInfo",
     "Ctx",
     "Flag",
+    "GpuTensor",
     "Header",
     "Image",
     "Imu",

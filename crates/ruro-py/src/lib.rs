@@ -9,16 +9,24 @@
 //!   as `ruro-host-py`, so graphs can mix Rust and Python nodes in one
 //!   process with in-process wires between them.
 //!
-//! Python nodes use the standard message types. Small messages are converted
-//! to and from the dataclasses in `ruro.msg`; images and point clouds are
-//! shared with Python through the buffer protocol without copying.
+//! Python nodes use the standard message types and `gpu/Tensor`. Small
+//! messages are converted to and from the dataclasses in `ruro.msg`; images
+//! and point clouds are shared with Python through the buffer protocol, and
+//! GPU tensors through `__cuda_array_interface__`, without copying.
 
 mod convert;
 pub mod embed;
+mod gpu;
 mod harness;
 mod media;
 mod node;
 mod ports;
+
+/// The message types Python nodes use, under one path for the macros.
+pub(crate) mod msgs {
+    pub use ruro_gpu::Tensor as GpuTensor;
+    pub use ruro_msg::*;
+}
 
 use pyo3::prelude::*;
 
@@ -30,6 +38,8 @@ pub use convert::supported_types;
 pub fn native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<media::PyImage>()?;
     m.add_class::<media::PyPointCloud>()?;
+    m.add_class::<gpu::PyGpuTensor>()?;
+    m.add_function(wrap_pyfunction!(gpu::cuda_unavailable, m)?)?;
     m.add_class::<ports::PyInput>()?;
     m.add_class::<ports::PyOutput>()?;
     m.add_class::<node::PyCtx>()?;

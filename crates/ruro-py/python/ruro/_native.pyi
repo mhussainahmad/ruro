@@ -1,6 +1,6 @@
 # Type stubs for the native part of the ruro package.
 
-from typing import Any, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 SUPPORTED_TYPES: List[str]
 EMBEDDED: bool
@@ -32,6 +32,38 @@ class Image:
     def tobytes(self) -> bytes: ...
     def __len__(self) -> int: ...
     def __buffer__(self, flags: int) -> memoryview: ...
+
+class GpuTensor:
+    """An n-dimensional array in GPU (or host) memory (``gpu/Tensor``).
+
+    A received tensor on a CUDA device exposes ``__cuda_array_interface__``
+    (read-only), so ``torch.as_tensor(t, device="cuda")`` and
+    ``cupy.asarray(t)`` read its memory in place. Outputs of type
+    ``gpu/Tensor`` accept a ``GpuTensor``, any object with
+    ``__cuda_array_interface__`` (copied into a ruro buffer on its device) or
+    a NumPy array (a host tensor).
+    """
+
+    TYPE: str
+    @property
+    def dtype(self) -> str: ...
+    @property
+    def shape(self) -> Tuple[int, ...]: ...
+    @property
+    def strides(self) -> Tuple[int, ...]:
+        """In elements."""
+    @property
+    def device(self) -> str:
+        """``cuda:<n>`` or ``cpu``."""
+    @property
+    def __cuda_array_interface__(self) -> Dict[str, Any]: ...
+    def numpy(self) -> Any:
+        """A numpy copy."""
+    @staticmethod
+    def from_numpy(array: Any, device: Optional[int] = None) -> "GpuTensor": ...
+
+def cuda_unavailable() -> Optional[str]:
+    """Why CUDA cannot be used here, or None."""
 
 class PointCloud:
     """An unordered set of 3D points (``std/PointCloud``), shared with numpy without copying."""

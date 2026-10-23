@@ -580,6 +580,27 @@ impl DeviceBuffer {
         stream.synchronize()
     }
 
+    /// Copies `len` bytes from device address `src`, memory another library
+    /// owns (a PyTorch or CuPy array, say), into the start of this buffer,
+    /// and waits.
+    ///
+    /// # Safety
+    /// `src..src + len` must be device memory of this buffer's device that
+    /// nobody writes while the copy runs.
+    pub unsafe fn copy_from_raw(&mut self, src: u64, len: usize, stream: &Stream) -> Result<()> {
+        self.writable()?;
+        ensure!(
+            len <= self.len,
+            "{len} bytes do not fit a {} byte buffer",
+            self.len
+        );
+        self.check_device(stream)?;
+        // SAFETY: the destination range is inside the allocation; the
+        // source range is the caller's contract.
+        unsafe { cuda()?.memcpy_dtod(self.device, self.ptr, src, len, stream.raw())? };
+        stream.synchronize()
+    }
+
     fn check_device(&self, stream: &Stream) -> Result<()> {
         ensure!(
             stream.device() == self.device,

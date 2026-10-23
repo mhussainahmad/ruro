@@ -192,7 +192,7 @@ raw_messages!(
 /// Calls `$mac!` with every message type usable from Python.
 macro_rules! with_message_types {
     ($mac:ident) => {
-        ruro_msg::for_each_std_message! { $mac }
+        ruro_msg::for_each_std_message! { $mac, GpuTensor }
     };
 }
 pub(crate) use with_message_types;
@@ -201,14 +201,14 @@ macro_rules! type_list {
     ($($t:ident),* $(,)?) => {
         /// Type names of every message usable from Python.
         pub fn supported_types() -> Vec<&'static str> {
-            vec![$(<ruro_msg::$t as Message>::TYPE),*]
+            vec![$(<crate::msgs::$t as Message>::TYPE),*]
         }
 
         /// Encodes a Python value as message type `ty`.
         pub fn encode(ty: &str, obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
             match ty {
-                $(<ruro_msg::$t as Message>::TYPE => {
-                    Ok(<ruro_msg::$t as PyMessage>::from_py(obj)?.to_bytes())
+                $(<crate::msgs::$t as Message>::TYPE => {
+                    Ok(<crate::msgs::$t as PyMessage>::from_py(obj)?.to_bytes())
                 })*
                 other => Err(PyTypeError::new_err(format!("unsupported message type {other}"))),
             }
@@ -217,10 +217,10 @@ macro_rules! type_list {
         /// Decodes bytes of message type `ty` into a Python value.
         pub fn decode(py: Python<'_>, ty: &str, bytes: &[u8]) -> PyResult<Py<PyAny>> {
             match ty {
-                $(<ruro_msg::$t as Message>::TYPE => {
-                    let msg = <ruro_msg::$t as Message>::decode(bytes)
+                $(<crate::msgs::$t as Message>::TYPE => {
+                    let msg = <crate::msgs::$t as Message>::decode(bytes)
                         .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                    <ruro_msg::$t as PyMessage>::to_py(
+                    <crate::msgs::$t as PyMessage>::to_py(
                         py,
                         Arc::new(Sample { seq: 0, stamp_ns: 0, msg }),
                     )

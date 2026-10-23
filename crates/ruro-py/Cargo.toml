@@ -23,6 +23,7 @@ extension-module = ["pyo3/extension-module", "pyo3/abi3-py311"]
 ruro-msg = { workspace = true }
 ruro-node = { workspace = true }
 ruro-graph = { workspace = true }
+ruro-gpu = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -5515,6 +5515,7 @@ dependencies = [
  "parking_lot",
  "pyo3",
  "pyo3-build-config",
+ "ruro-gpu",
  "ruro-graph",
  "ruro-msg",
  "ruro-node",

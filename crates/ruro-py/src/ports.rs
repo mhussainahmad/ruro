@@ -12,19 +12,19 @@ macro_rules! port_enums {
     ($($t:ident),* $(,)?) => {
         /// An input of any message type usable from Python.
         pub enum AnyInput {
-            $($t(Input<ruro_msg::$t>),)*
+            $($t(Input<crate::msgs::$t>),)*
         }
 
         /// An output of any message type usable from Python.
         pub enum AnyOutput {
-            $($t(Output<ruro_msg::$t>),)*
+            $($t(Output<crate::msgs::$t>),)*
         }
 
         impl AnyInput {
             /// Declares an input of message type `ty` on `b`.
             pub fn declare(b: &mut Builder, ty: &str, name: &str) -> anyhow::Result<Self> {
                 Ok(match ty {
-                    $(<ruro_msg::$t as Message>::TYPE => Self::$t(b.input(name)?),)*
+                    $(<crate::msgs::$t as Message>::TYPE => Self::$t(b.input(name)?),)*
                     other => anyhow::bail!("Python nodes do not support message type {other}"),
                 })
             }
@@ -33,7 +33,7 @@ macro_rules! port_enums {
                 match self {
                     $(Self::$t(i) => {
                         let s = if latest { i.latest() } else { i.recv() };
-                        s.map(|s| <ruro_msg::$t as PyMessage>::to_py(py, s)).transpose()
+                        s.map(|s| <crate::msgs::$t as PyMessage>::to_py(py, s)).transpose()
                     })*
                 }
             }
@@ -46,7 +46,7 @@ macro_rules! port_enums {
 
             fn ty(&self) -> &'static str {
                 match self {
-                    $(Self::$t(_) => <ruro_msg::$t as Message>::TYPE,)*
+                    $(Self::$t(_) => <crate::msgs::$t as Message>::TYPE,)*
                 }
             }
         }
@@ -55,7 +55,7 @@ macro_rules! port_enums {
             /// Declares an output of message type `ty` on `b`.
             pub fn declare(b: &mut Builder, ty: &str, name: &str) -> anyhow::Result<Self> {
                 Ok(match ty {
-                    $(<ruro_msg::$t as Message>::TYPE => Self::$t(b.output(name)?),)*
+                    $(<crate::msgs::$t as Message>::TYPE => Self::$t(b.output(name)?),)*
                     other => anyhow::bail!("Python nodes do not support message type {other}"),
                 })
             }
@@ -63,7 +63,7 @@ macro_rules! port_enums {
             fn send(&self, obj: &Bound<'_, PyAny>) -> PyResult<()> {
                 match self {
                     $(Self::$t(o) => {
-                        let msg = <ruro_msg::$t as PyMessage>::from_py(obj)?;
+                        let msg = <crate::msgs::$t as PyMessage>::from_py(obj)?;
                         // Sending may encode into shared memory; release the
                         // interpreter while it does.
                         obj.py()
@@ -81,7 +81,7 @@ macro_rules! port_enums {
 
             fn ty(&self) -> &'static str {
                 match self {
-                    $(Self::$t(_) => <ruro_msg::$t as Message>::TYPE,)*
+                    $(Self::$t(_) => <crate::msgs::$t as Message>::TYPE,)*
                 }
             }
         }

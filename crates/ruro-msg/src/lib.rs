@@ -154,10 +154,11 @@ macro_rules! register_schema {
 }
 
 /// Calls `$mac!` with the name of every standard message type, for bindings
-/// to other languages that need one case per type.
+/// to other languages that need one case per type; names after the macro's
+/// (`for_each_std_message! { m, Extra }`) are passed after them.
 #[macro_export]
 macro_rules! for_each_std_message {
-    ($mac:ident) => {
+    ($mac:ident $(, $extra:ident)* $(,)?) => {
         $mac!(
             Scalar,
             Text,
@@ -177,6 +178,7 @@ macro_rules! for_each_std_message {
             Joy,
             Image,
             PointCloud,
+            $($extra,)*
         );
     };
 }

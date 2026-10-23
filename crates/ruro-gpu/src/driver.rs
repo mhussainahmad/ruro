@@ -132,6 +132,7 @@ struct Api {
         *mut *mut c_void,
         *mut *mut c_void,
     ) -> CuResult,
+    pointer_get_attribute: unsafe extern "C" fn(*mut c_void, c_int, CuDevicePtr) -> CuResult,
     _lib: Library,
 }
 
@@ -224,6 +225,7 @@ impl Cuda {
                 module_get_function: sym!("cuModuleGetFunction"),
                 module_unload: sym!("cuModuleUnload"),
                 launch_kernel: sym!("cuLaunchKernel"),
+                pointer_get_attribute: sym!("cuPointerGetAttribute"),
                 _lib: lib,
             }
         };
@@ -515,6 +517,36 @@ impl Cuda {
             "cuStreamCreate",
         )?;
         Ok(s)
+    }
+
+    /// The CUDA device that device address `ptr` belongs to (memory any
+    /// library of this process allocated).
+    pub fn device_of_pointer(&self, ptr: CuDevicePtr) -> Result<u32> {
+        /// `CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL`.
+        const DEVICE_ORDINAL: c_int = 9;
+        let mut ordinal: c_int = -1;
+        // SAFETY: a valid out-pointer for this attribute's int.
+        self.check(
+            unsafe {
+                (self.api.pointer_get_attribute)(
+                    (&mut ordinal as *mut c_int).cast(),
+                    DEVICE_ORDINAL,
+                    ptr,
+                )
+            },
+            "cuPointerGetAttribute",
+        )?;
+        u32::try_from(ordinal).map_err(|_| anyhow!("{ptr:#x} is not device memory"))
+    }
+
+    /// Waits for work queued on a stream another library created, given by
+    /// its handle (`__cuda_array_interface__`'s `stream`: 1 and 2 are the
+    /// legacy and per-thread default streams).
+    ///
+    /// # Safety
+    /// `handle` must be a live stream of `device`, or 1 or 2.
+    pub unsafe fn synchronize_raw_stream(&self, device: u32, handle: usize) -> Result<()> {
+        self.stream_synchronize(device, handle as CuStream)
     }
 
     pub(crate) fn stream_synchronize(&self, device: u32, s: CuStream) -> Result<()> {

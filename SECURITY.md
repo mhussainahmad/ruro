@@ -45,7 +45,25 @@ nodes and upload host binaries.
 - A plain `tcp/` listener on a network interface accepts anyone who can reach it. Use one
   only on trusted networks, such as the robot's own network or a VPN, and restrict access
   with a firewall.
-- The studio cannot use TLS or tokens yet, so daemons that require them can only be used
-  from the CLI. For studio use, keep the daemon on `127.0.0.1` without a token and reach it
-  through an SSH tunnel.
+- The studio connects with TLS and a token through **File > Connect to Daemon…** (the CA
+  certificate and the token; the token is not saved). It does not present client
+  certificates, so daemons that require them can only be used from the CLI.
+- Plugins (`RURO_PLUGINS`) run inside the host process, and the programs of process nodes
+  (`RURO_PROCESS_NODES`) run as the host's user, with its environment: both are code the
+  daemon's operator chose to trust. Keep those variables, and the files they name, writable
+  only by that operator.
 - The ROS 2 bridge nodes connect to their Zenoh router without TLS or authentication.
+
+## Supply chain
+
+- `cargo deny check` (configured in [`deny.toml`](deny.toml)) runs on every push and every
+  week: it fails on crates with known vulnerabilities in the
+  [RustSec advisory database](https://rustsec.org), on yanked crates, on licenses other than
+  the permissive ones listed there (no GPL, LGPL or AGPL code is linked), and on crates from
+  other sources than crates.io. Advisories that do not apply are listed in `deny.toml` with
+  the reason.
+- Releases attach a [CycloneDX](https://cyclonedx.org) software bill of materials for each
+  binary (`ruro-<version>.cdx.json`, `ruro-host-…`, `ruro-studio-…`), listing every crate in it
+  with its version and license, and SHA-256 sums of every file (`SHA256SUMS`).
+- Dependencies are pinned by `Cargo.lock`, and every build in CI and every release uses it
+  (`--locked`).

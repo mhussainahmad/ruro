@@ -4,3 +4,4 @@
 octave-workspace
 examples/native/*.o
 examples/native/*.so
+*.cdx.json

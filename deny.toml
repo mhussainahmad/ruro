@@ -1,0 +1,66 @@
+# Supply-chain checks (cargo deny check): licenses, security advisories,
+# duplicate or banned crates, and where crates come from. CI runs them.
+
+[graph]
+all-features = false
+
+[advisories]
+# The RustSec advisory database: vulnerable, unmaintained or yanked crates
+# fail the check unless listed here with a reason.
+yanked = "deny"
+# Unmaintained crates fail the check when ruro depends on them directly;
+# those its dependencies bring in (zenoh, mcap, parquet, the studio's
+# accessibility support) are reviewed when those dependencies update.
+unmaintained = "workspace"
+ignore = [
+    # lz4_flex 0.10, required by zenoh-transport 1.10 (the latest): only its
+    # transport_compression feature calls the decompression functions, and
+    # ruro does not enable it. ruro's own compression uses lz4_flex >= 0.12.1.
+    { id = "RUSTSEC-2026-0041", reason = "zenoh's lz4 code is not compiled in: transport_compression is off" },
+    # quick-xml 0.38, through zbus_xml in the studio's Linux accessibility
+    # support, which parses the D-Bus introspection data of the local
+    # accessibility bus. The rest of the build uses a patched quick-xml.
+    { id = "RUSTSEC-2026-0194", reason = "studio only: parses local accessibility-bus XML" },
+    { id = "RUSTSEC-2026-0195", reason = "studio only: parses local accessibility-bus XML" },
+]
+
+[licenses]
+# What ruro's binaries may contain. Copyleft licenses (GPL, LGPL, AGPL) are
+# not allowed; crates that offer one of them as an alternative (self_cell,
+# r-efi, unescaper) are used under their permissive license.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    # webpki-roots: the Mozilla CA list.
+    "CDLA-Permissive-2.0",
+    # File-level copyleft, for changes to those crates' own files only:
+    # zenoh (EPL-2.0), serialport and option-ext (MPL-2.0).
+    "EPL-2.0",
+    "MPL-2.0",
+    # Fonts embedded in the studio (egui's default fonts).
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Several versions of a crate in one build cost size, not correctness.
+multiple-versions = "allow"
+wildcards = "deny"
+# Path dependencies within the workspace have no version requirement to check.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

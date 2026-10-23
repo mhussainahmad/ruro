@@ -99,8 +99,37 @@ jobs:
   desktop:
     uses: ./.github/workflows/desktop.yml
 
+  sbom:
+    # A CycloneDX software bill of materials for each binary: every crate it
+    # contains, with versions and licenses.
+    name: sbom
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo-cyclonedx
+        run: |
+          curl -sSfL -o cdx.tar.xz https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.9/cargo-cyclonedx-x86_64-unknown-linux-gnu.tar.xz
+          tar xJf cdx.tar.xz --strip-components=1 -C "$HOME/.cargo/bin" cargo-cyclonedx-x86_64-unknown-linux-gnu/cargo-cyclonedx
+      - name: Generate
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || version="$(git rev-parse --short HEAD)"
+          cargo cyclonedx -f json --spec-version 1.5 --describe binaries -q
+          mkdir -p dist
+          for f in crates/ruro-cli/ruro_bin.cdx.json crates/ruro-host/ruro-host_bin.cdx.json crates/ruro-studio/ruro-studio_bin.cdx.json; do
+            bin=$(basename "$f" _bin.cdx.json)
+            cp "$f" "dist/$bin-$version.cdx.json"
+          done
+          ls dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: dist/*.cdx.json
+          if-no-files-found: error
+
   release:
-    needs: [binaries, deb, appimage, desktop]
+    needs: [binaries, deb, appimage, desktop, sbom]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     steps:
@@ -117,4 +146,4 @@ jobs:
         run: >
           gh release create "$GITHUB_REF_NAME" dist/*
           --draft --verify-tag --title "ruro ${GITHUB_REF_NAME#v}"
-          --notes "See CHANGELOG.md. Verify downloads against SHA256SUMS."
+          --notes "See CHANGELOG.md. Verify downloads against SHA256SUMS; the .cdx.json files list every crate in each binary (CycloneDX)."

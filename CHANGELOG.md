@@ -20,6 +20,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the host refuses plugins built against another ABI. `examples/native` has a C and a C++
   node with CMake and make builds. See the book's "Nodes in C and C++".
 
+### Changed
+
+- `ruro status` and `ruro fleet` answer in milliseconds: daemons reply to requests for their
+  status and their groups' metrics instead of clients waiting up to 1.5 s for the next
+  publication.
+
+### Fixed
+
+- Numbers parsed from JSON (process-node messages, parameter values) are the exact double
+  they were printed from; the last bit could differ before.
+
+### Security
+
+- `rustls` 0.23.46, `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10 (RUSTSEC-2026-0346 to
+  0349, 0381, 0382), and `lz4_flex` 0.12 for ruro's message compression (RUSTSEC-2026-0041).
+- `cargo deny` checks advisories, licenses and sources on every push and weekly; releases
+  attach a CycloneDX SBOM per binary. See SECURITY.md.
+
 ## [0.1.0] - 2026-10-22
 
 The first release.

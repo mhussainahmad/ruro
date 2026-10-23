@@ -60,6 +60,10 @@ optional ML and camera features):
   either system yet; `scripts/remote-check.sh` is the check to run (it passes from a Linux
   client against a daemon in a container, over TLS with a token).
 
+- **Supply chain** (`audit.yml`, also weekly): `cargo deny` over every crate the binaries
+  contain: no known vulnerability (the exceptions in `deny.toml` say why they do not apply),
+  only permissive licenses, only crates.io.
+
 ## Verified outside CI
 
 These were checked against the real software on a development machine, with opt-in tests

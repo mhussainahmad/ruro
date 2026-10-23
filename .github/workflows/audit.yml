@@ -1,0 +1,24 @@
+name: Audit
+
+# Supply-chain checks with cargo-deny (deny.toml): security advisories,
+# licenses, banned crates and sources. Every week too, because new advisories
+# are published for code that has not changed.
+
+on:
+  push:
+    branches: [main, 'ports/**']
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features

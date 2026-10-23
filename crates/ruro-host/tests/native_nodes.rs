@@ -138,12 +138,20 @@ wires:
     let src = values(&file, "src.value");
     let out = values(&file, "gain.output");
     assert!(out.len() > 20, "{} outputs", out.len());
+    // The groups start and stop recording at slightly different times
+    // (further apart under emulation), so outputs at the ends may come from
+    // inputs that were not recorded; every other output is three times an
+    // input.
     let tripled: Vec<f64> = src.iter().map(|v| v * 3.0).collect();
-    let matched = out.iter().filter(|v| tripled.contains(v)).count();
+    let matched: Vec<bool> = out.iter().map(|v| tripled.contains(v)).collect();
+    let first = matched
+        .iter()
+        .position(|m| *m)
+        .expect("no output matches an input");
+    let last = matched.iter().rposition(|m| *m).unwrap();
     assert!(
-        matched + 3.max(out.len() / 20) >= out.len(),
-        "{matched} of {} outputs are three times an input",
-        out.len()
+        matched[first..=last].iter().all(|m| *m) && last - first + 1 >= out.len() / 2,
+        "outputs matching an input: {matched:?}"
     );
 
     request(Ctl::Stop, "").unwrap();

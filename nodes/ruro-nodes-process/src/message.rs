@@ -290,6 +290,16 @@ mod tests {
     }
 
     #[test]
+    fn numbers_cross_exactly() {
+        // As a program prints them (shortest round-trip form) and back.
+        for x in [-2.8967501709585886_f64, 0.1 + 0.2, 1e-310, f64::MAX, -0.0] {
+            let text = serde_json::to_string(&Scalar(x).to_json()).unwrap();
+            let back = Scalar::from_json(serde_json::from_str(&text).unwrap()).unwrap();
+            assert_eq!(back.0.to_bits(), x.to_bits(), "{text}");
+        }
+    }
+
+    #[test]
     fn every_standard_type_is_supported() {
         assert!(supported("std/Image") && supported("std/Joy"));
         assert!(!supported("ros2/Any"));

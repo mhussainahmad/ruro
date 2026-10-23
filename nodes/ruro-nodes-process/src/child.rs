@@ -167,6 +167,17 @@ impl Child {
     pub fn pid(&self) -> u32 {
         self.process.id()
     }
+
+    /// Waits up to `timeout` for the program to exit by itself.
+    pub fn wait_exit(&mut self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = self.process.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 }
 
 impl Drop for Child {

@@ -187,7 +187,9 @@ impl DynNode for ProcessNode {
 
     fn stop(&mut self, _ctx: &mut Ctx) {
         if let Some(mut child) = self.child.take() {
-            let _ = child.request(&json!({"op": "stop"}), STOP_TIMEOUT);
+            if child.request(&json!({"op": "stop"}), STOP_TIMEOUT).is_ok() {
+                child.wait_exit(STOP_TIMEOUT);
+            }
             // Dropping it terminates whatever is left of it.
         }
     }

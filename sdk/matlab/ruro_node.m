@@ -35,6 +35,12 @@ function ruro_node(step, varargin)
 %
 %   See also RURO_BYTES.
 
+if exist('OCTAVE_VERSION', 'builtin')
+    % The host ends the program with SIGTERM if it does not exit by itself;
+    % Octave would then write an octave-workspace file.
+    sigterm_dumps_octave_core(false);
+    sighup_dumps_octave_core(false);
+end
 opts = struct('start', [], 'estop', [], 'stop', []);
 for i = 1:2:numel(varargin)
     opts.(varargin{i}) = varargin{i + 1};

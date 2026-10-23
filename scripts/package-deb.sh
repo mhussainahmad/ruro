@@ -133,6 +133,10 @@ while IFS= read -r -d '' f; do
     install -Dm644 "examples/$f" "$examples/$f"
 done < <(cd examples && find . -type f ! -name '.*' ! -path '*/__pycache__/*' -printf '%P\0')
 ln -s ../../ruro/examples "$doc/examples"
+# The C and C++ node headers, for `#include <ruro/ruro.h>` without -I.
+for f in sdk/include/ruro/*; do
+    install -Dm644 "$f" "$stage/usr/include/ruro/$(basename "$f")"
+done
 # Helpers for nodes in other languages; examples/process finds them at ../../sdk.
 while IFS= read -r -d '' f; do
     install -Dm644 "sdk/$f" "$stage/usr/share/ruro/sdk/$f"

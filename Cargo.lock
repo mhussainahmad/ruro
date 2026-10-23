@@ -5285,6 +5285,7 @@ dependencies = [
  "ruro-nodes-gpu",
  "ruro-nodes-hw",
  "ruro-nodes-ml",
+ "ruro-nodes-native",
  "ruro-nodes-process",
  "ruro-nodes-ros2",
  "ruro-nodes-sim",
@@ -5403,6 +5404,20 @@ dependencies = [
  "ruro-host",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "ruro-nodes-native"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "ruro-graph",
+ "ruro-msg",
+ "ruro-node",
+ "ruro-nodes-std",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

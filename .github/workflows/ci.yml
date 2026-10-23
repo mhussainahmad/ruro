@@ -55,6 +55,10 @@ jobs:
           --features ruro-nodes-ml/onnx,ruro-nodes-ml/lerobot,ruro-nodes-sim/mujoco,ruro-nodes-hw/h264,ruro-nodes-hw/realsense
           -- -D warnings
       - name: Test (workspace, default features)
+        env:
+          # The C and C++ plugin tests compile with cc and c++; fail rather
+          # than skip if they cannot.
+          RURO_REQUIRE_PLUGINS: 1
         run: cargo test --workspace --locked
       # The MuJoCo and RealSense library tests are skipped unless their
       # libraries are present; the ONNX, LeRobot and H.264 tests run here.
@@ -129,7 +133,9 @@ jobs:
       matrix:
         include:
           - target: aarch64-unknown-linux-gnu
-            gcc: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+            # g++ for the C++ test plugins, which the tests compile for the
+            # target and load under emulation.
+            gcc: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -158,6 +164,9 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
           QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
+          RURO_TEST_CC: aarch64-linux-gnu-gcc
+          RURO_TEST_CXX: aarch64-linux-gnu-g++
+          RURO_REQUIRE_PLUGINS: 1
           # Emulated daemons and hosts are slow; fewer at once keeps the
           # tests' timing assumptions within reach.
           RUST_TEST_THREADS: 2

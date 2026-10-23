@@ -32,6 +32,7 @@ ruro-nodes-ml = { workspace = true }
 ruro-nodes-ros2 = { workspace = true }
 ruro-nodes-gpu = { workspace = true }
 ruro-nodes-process = { workspace = true }
+ruro-nodes-native = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }

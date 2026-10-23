@@ -14,6 +14,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the host runs it per node and exchanges one JSON line per step over its standard input
   and output, or over TCP. `sdk/matlab` has a helper for MATLAB and GNU Octave, and
   `examples/process` example nodes. See the book's "Nodes in other languages".
+- **Nodes in C and C++.** Plugins (`RURO_PLUGINS`) built against `sdk/include/ruro/ruro.h`,
+  or `ruro.hpp` for C++17, run in the host's process with typed ports over C structs of
+  every standard message type, parameters, the e-stop and errors (C++ exceptions included);
+  the host refuses plugins built against another ABI. `examples/native` has a C and a C++
+  node with CMake and make builds. See the book's "Nodes in C and C++".
 
 ## [0.1.0] - 2026-10-22
 

@@ -1,7 +1,8 @@
 # Nodes in other languages
 
 Any program can be a ruro node: a MATLAB or Octave script, a Julia or Go program, a
-compiled C or C++ tool, or a shell script. A short YAML **manifest** declares the node type,
+compiled tool, or a shell script. (For C and C++ code that should run inside the host's
+process instead, without a process boundary, see [Nodes in C and C++](native-nodes.md).) A short YAML **manifest** declares the node type,
 and the host runs the program for every node of that type in a graph, exchanging one JSON
 line per step with it. In graphs, `ruro check`, `ruro nodes` and the studio, these node
 types behave like any other: typed ports, parameters with ranges, live tuning, metrics,
@@ -172,9 +173,11 @@ One step costs a round trip to the program: about 30 µs with a scalar, and abou
 with a 640x480 RGB image in each direction (base64 and JSON), measured with the Python test
 program on a development machine (`cargo test -p ruro-nodes-process --release -- --ignored
 --nocapture`). That suits controllers, planners and image processing at camera rates; for
-the per-message cost of in-process Rust nodes, write the node in Rust or Python.
+the per-message cost of in-process nodes, write the node in Rust, Python, or
+[C or C++](native-nodes.md).
 
-- Only the standard message types can be used, not types defined in node packages.
+- Only the standard message types can be used, not types defined in node packages (the
+  same holds for [C and C++ nodes](native-nodes.md)).
 - Programs send outputs in answer to a step. A program that produces data at its own pace,
   such as a driver, is polled by giving the node a `rate`.
 - The host is a Linux (or macOS) program, so the programs run there, not on a Windows or

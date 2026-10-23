@@ -31,6 +31,11 @@ optional ML and camera features):
   parameters, images, the e-stop, both transports, crash and restart, a hang, garbled
   output), a graph running one through a daemon, and the MATLAB helper with the example
   nodes under GNU Octave 8.4 (CI's `octave` job). MATLAB itself has not been tried.
+- **C and C++ nodes:** plugins compiled in the tests, on x86-64 and (cross-compiled, under
+  emulation) 64-bit ARM: every standard message type through C and back, field by field;
+  parameters, timing, the e-stop, errors and C++ exceptions; refusal of plugins built against
+  another `ruro.h`; the examples; and a C++ node in a graph through a daemon. Code generated
+  by MATLAB Coder or Simulink has not been tried.
 - **ROS 2 bridge:** encoding, type hashes (all bundled message, service and action types
   checked against ROS 2 Jazzy's), the QoS written into discovery tokens (checked against
   tokens captured from Jazzy nodes), publishing, subscribing, services, actions and

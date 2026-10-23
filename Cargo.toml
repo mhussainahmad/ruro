@@ -27,6 +27,7 @@ ruro-nodes-hw = { version = "0.1.0", path = "nodes/ruro-nodes-hw" }
 ruro-nodes-sim = { version = "0.1.0", path = "nodes/ruro-nodes-sim" }
 ruro-nodes-ml = { version = "0.1.0", path = "nodes/ruro-nodes-ml" }
 ruro-nodes-process = { version = "0.1.0", path = "nodes/ruro-nodes-process" }
+ruro-nodes-native = { version = "0.1.0", path = "nodes/ruro-nodes-native" }
 ruro-urdf = { version = "0.1.0", path = "crates/ruro-urdf" }
 ruro-schema = { version = "0.1.0", path = "crates/ruro-schema" }
 ruro-tf = { version = "0.1.0", path = "crates/ruro-tf" }

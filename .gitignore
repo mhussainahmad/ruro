@@ -2,3 +2,5 @@
 **/*.rs.bk
 *.profraw
 octave-workspace
+examples/native/*.o
+examples/native/*.so

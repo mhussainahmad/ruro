@@ -1,0 +1,26 @@
+[package]
+name = "ruro-nodes-native"
+description = "ruro nodes written in C and C++, loaded as plugins"
+keywords = ["robotics", "dataflow", "nodes", "ffi", "cpp"]
+categories = ["science::robotics"]
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/ruro-nodes-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ruro-msg = { workspace = true }
+ruro-node = { workspace = true }
+ruro-graph = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+ruro-nodes-std = { workspace = true }

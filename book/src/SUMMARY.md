@@ -40,6 +40,7 @@
   - [Composite nodes](reference/composites.md)
 - [Architecture](architecture.md)
 - [Performance](performance.md)
+- [Compatibility and support](compatibility.md)
 - [Project status](status.md)
 - [Roadmap](roadmap.md)
 

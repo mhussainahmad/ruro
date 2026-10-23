@@ -5409,6 +5409,7 @@ dependencies = [
  "parquet",
  "png",
  "ruro",
+ "ruro-gpu",
  "ruro-graph",
  "ruro-host",
  "serde",

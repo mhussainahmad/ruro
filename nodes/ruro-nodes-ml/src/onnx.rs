@@ -29,9 +29,47 @@ fn ort_err(e: impl std::fmt::Display) -> ruro::anyhow::Error {
 
 impl Model {
     pub fn load(path: &str, threads: usize) -> Result<Model> {
+        Self::load_on(path, threads, None)
+    }
+
+    /// Loads a model to run on the CUDA device `cuda` (feature
+    /// `onnx-cuda`), or on the CPU.
+    pub fn load_on(path: &str, threads: usize, cuda: Option<u32>) -> Result<Model> {
+        Self::load_profiled(path, threads, cuda, None)
+    }
+
+    /// As [`Model::load_on`]; with `profile`, ONNX Runtime writes a JSON
+    /// profile of every run (each operator's duration and the execution
+    /// provider it ran on) to a file starting with that path, written when
+    /// [`Model::end_profiling`] is called or the model is dropped.
+    pub fn load_profiled(
+        path: &str,
+        threads: usize,
+        cuda: Option<u32>,
+        profile: Option<&str>,
+    ) -> Result<Model> {
         let mut builder = Session::builder().map_err(ort_err)?;
         if threads > 0 {
             builder = builder.with_intra_threads(threads).map_err(ort_err)?;
+        }
+        if let Some(prefix) = profile {
+            builder = builder.with_profiling(prefix).map_err(ort_err)?;
+        }
+        if let Some(device) = cuda {
+            #[cfg(feature = "onnx-cuda")]
+            {
+                let ep = ort::ep::CUDA::default()
+                    .with_device_id(device as i32)
+                    .build()
+                    .error_on_failure();
+                builder = builder.with_execution_providers([ep]).map_err(|e| {
+                    anyhow!(
+                        "ONNX Runtime's CUDA provider: {e} (it needs the CUDA 13 runtime, cuBLAS, cuRAND and, for convolutions, cuDNN 9 on the library path)"
+                    )
+                })?;
+            }
+            #[cfg(not(feature = "onnx-cuda"))]
+            bail!("cuda:{device} needs a host built with the onnx-cuda feature");
         }
         let session = builder
             .commit_from_file(path)
@@ -55,6 +93,69 @@ impl Model {
 
     pub fn input(&self, name: &str) -> Option<&Port> {
         self.inputs.iter().find(|p| p.name == name)
+    }
+
+    /// Writes the profile started with [`Model::load_profiled`]; returns its
+    /// file name.
+    pub fn end_profiling(&mut self) -> Result<String> {
+        self.session.end_profiling().map_err(ort_err)
+    }
+
+    /// Runs the model with one float32 input given as a `gpu/Tensor`: one in
+    /// device memory is read there, without a copy to the host. Returns
+    /// every output, in host memory.
+    #[cfg(feature = "onnx-cuda")]
+    pub fn run_gpu(&mut self, input: &str, t: &ruro_gpu::Tensor) -> Result<Vec<(String, Tensor)>> {
+        use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
+        use ruro_gpu::{DType, Device};
+        ensure!(
+            t.dtype == DType::F32,
+            "the input tensor is {:?}, not f32",
+            t.dtype
+        );
+        ensure!(t.is_contiguous(), "the input tensor is not contiguous");
+        let shape: Vec<i64> = t.shape.iter().map(|&d| d as i64).collect();
+        let outputs = match t.device() {
+            Device::Cuda(n) => {
+                let buf = t.buffer().context("device tensor without a buffer")?;
+                let info = MemoryInfo::new(
+                    AllocationDevice::CUDA,
+                    n as i32,
+                    AllocatorType::Device,
+                    MemoryType::Default,
+                )
+                .map_err(ort_err)?;
+                // SAFETY: the pointer is the device memory of `t`, which
+                // outlives the run, and holds `shape` f32 values on device n.
+                let value = unsafe {
+                    ort::value::TensorRefMut::<f32>::from_raw(
+                        info,
+                        buf.device_ptr() as *mut std::ffi::c_void,
+                        shape.into(),
+                    )
+                }
+                .map_err(ort_err)?;
+                self.session
+                    .run(ort::inputs![input => value])
+                    .map_err(ort_err)?
+            }
+            Device::Cpu => {
+                let data = t.to_f32_vec()?;
+                let value = OrtTensor::from_array((shape, data)).map_err(ort_err)?;
+                self.session
+                    .run(ort::inputs![input => value])
+                    .map_err(ort_err)?
+            }
+        };
+        let mut result = Vec::new();
+        for (name, value) in &outputs {
+            let (shape, data) = value.try_extract_tensor::<f32>().map_err(ort_err)?;
+            result.push((
+                name.to_owned(),
+                Tensor::new(shape.iter().map(|&d| d as u32).collect(), data.to_vec()),
+            ));
+        }
+        Ok(result)
     }
 
     /// Runs the model on float32 inputs and returns every output as a tensor.
@@ -423,5 +524,103 @@ impl Node for Policy {
     fn on_estop(&mut self, _ctx: &mut Ctx) {
         self.held = true;
         self.queue.clear();
+    }
+}
+
+/// Runs an ONNX model on an NVIDIA GPU with ONNX Runtime's CUDA provider
+/// (feature `onnx-cuda`). The input is a float32 `gpu/Tensor`, for example
+/// from `gpu/normalize`: one in device memory is fed to the model where it
+/// is, without passing through the host. Publishes one output as an
+/// `ml/Tensor` in host memory, for `ml/yolo-decode` and other CPU nodes.
+#[cfg(feature = "onnx-cuda")]
+#[derive(Node)]
+#[node(kind = "ml/onnx-cuda")]
+pub struct OnnxCuda {
+    #[input]
+    tensor: Input<ruro_gpu::Tensor>,
+    /// The chosen model output, in host memory.
+    #[output]
+    output: Output<Tensor>,
+    /// `.onnx` model file.
+    #[param(default = "")]
+    model: String,
+    /// CUDA device the model runs on.
+    #[param(default = 0, min = 0, max = 64)]
+    device: u32,
+    /// Model input fed with the tensor; empty takes the first.
+    #[param(default = "")]
+    input_name: String,
+    /// Model output published; empty takes the first.
+    #[param(default = "")]
+    output_name: String,
+    /// Path prefix of an ONNX Runtime profile (JSON) to write when the node
+    /// stops; empty for none.
+    #[param(default = "")]
+    profile: String,
+    net: Option<Model>,
+}
+
+#[cfg(feature = "onnx-cuda")]
+impl Node for OnnxCuda {
+    fn start(&mut self, _ctx: &mut Ctx) -> Result {
+        ensure!(
+            !self.model.is_empty(),
+            "set the `model` parameter to an .onnx file"
+        );
+        let profile = Some(self.profile.as_str()).filter(|p| !p.is_empty());
+        let net = Model::load_profiled(&self.model, 0, Some(self.device), profile)?;
+        if !self.input_name.is_empty() {
+            ensure!(
+                net.input(&self.input_name).is_some(),
+                "model has no input `{}` (inputs: {:?})",
+                self.input_name,
+                net.inputs
+            );
+        }
+        info!(
+            "{} on cuda:{}: inputs {:?}, outputs {:?}",
+            self.model, self.device, net.inputs, net.outputs
+        );
+        self.net = Some(net);
+        Ok(())
+    }
+
+    fn step(&mut self, _ctx: &mut Ctx) -> Result {
+        let Some(t) = self.tensor.latest() else {
+            return Ok(());
+        };
+        if let ruro_gpu::Device::Cuda(n) = t.device() {
+            ensure!(
+                n == self.device,
+                "the tensor is on cuda:{n}, the model on cuda:{}",
+                self.device
+            );
+        }
+        let net = self.net.as_mut().context("model not loaded")?;
+        let input = if self.input_name.is_empty() {
+            net.inputs[0].name.clone()
+        } else {
+            self.input_name.clone()
+        };
+        let outputs = net.run_gpu(&input, &t)?;
+        let out = if self.output_name.is_empty() {
+            outputs.into_iter().next()
+        } else {
+            outputs.into_iter().find(|(n, _)| *n == self.output_name)
+        };
+        let (_, out) =
+            out.with_context(|| format!("model has no output `{}`", self.output_name))?;
+        self.output.send(out)
+    }
+
+    fn stop(&mut self, _ctx: &mut Ctx) {
+        if !self.profile.is_empty()
+            && let Some(net) = self.net.as_mut()
+        {
+            match net.end_profiling() {
+                Ok(file) => info!("ONNX Runtime profile: {file}"),
+                Err(e) => warn!("{e:#}"),
+            }
+        }
     }
 }

@@ -104,6 +104,25 @@ jobs:
           maturin develop --locked -m crates/ruro-py/Cargo.toml --extras test
           cd crates/ruro-py && pytest
 
+  onnx-cuda:
+    # ONNX Runtime with its CUDA provider (ml/onnx-cuda). CI has no GPU, so
+    # this only builds and lints it; the tests run where a GPU is
+    # (RURO_REQUIRE_CUDA). Its ONNX Runtime build needs glibc 2.38 or newer.
+    name: onnx-cuda (build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy
+        run: cargo clippy --locked -p ruro-nodes-ml --features onnx-cuda --all-targets -- -D warnings
+      - name: Test (skips without a GPU)
+        run: cargo test --locked -p ruro-nodes-ml --features onnx-cuda --test onnx_cuda
+
   octave:
     # Nodes in other languages: the MATLAB helper (sdk/matlab) and the
     # example nodes, under GNU Octave, over stdio and over TCP as MATLAB uses.

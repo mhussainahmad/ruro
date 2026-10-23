@@ -96,6 +96,9 @@ that skip in CI:
   Gazebo's `/clock`, and velocity commands move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).
 - **GPU buffers** on one machine with an RTX 4090 (driver 610.57.04): in one process, across
   two processes and under the daemon. See [GPU buffers](gpu.md).
+- **ONNX Runtime on the GPU** (`ml/onnx-cuda`) on the same machine, in Ubuntu 24.04 with
+  NVIDIA's CUDA 13 libraries from pip: device tensors run in place with the CPU's results,
+  every operator of the test model on the CUDA provider (from ONNX Runtime's profile).
 - **RTSP cameras** against the mediamtx server (H.264 from ffmpeg, MJPEG from GStreamer),
   not against IP cameras.
 - **MuJoCo** (`sim/mujoco`) against MuJoCo 3.15.0.
@@ -127,8 +130,8 @@ that skip in CI:
 
 - ROS 2: deadline, lifespan and liveliness are announced but not enforced (as in
   rmw_zenoh).
-- GPU buffers work between processes on one machine only, and ONNX Runtime does not take
-  them yet (its CUDA provider is not wired up). Python nodes cannot receive them.
+- GPU buffers work between processes on one machine only, and Python nodes cannot receive
+  them. `ml/onnx-cuda` needs glibc 2.38 or newer and returns its outputs in host memory.
 - H.265 RTSP streams are refused.
 - A daemon update that fails after its two-minute probation is not rolled back
   automatically (one that crashes or hangs during it is).

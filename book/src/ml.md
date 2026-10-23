@@ -26,8 +26,8 @@ The messages:
 ## ONNX Runtime (`--features ruro-nodes-ml/onnx`)
 
 Uses the `ort` crate, which downloads a CPU build of ONNX Runtime at build time and
-links it statically, which makes the host binary several tens of megabytes larger. GPU execution providers
-are not enabled.
+links it statically, which makes the host binary several tens of megabytes larger. For
+NVIDIA GPUs, see [below](#onnx-runtime-on-nvidia-gpus---features-ruro-nodes-mlonnx-cuda).
 
 - `ml/onnx`: `std/Image` (`image`) → model's first input; publishes the first output as
   `ml/Tensor` (`tensor`) and, with `postprocess: yolo`, `ml/Detections` (`detections`)
@@ -84,23 +84,49 @@ with the ones LeRobot derives from `info.json`, decodes the images and checks in
 timestamps and statistics. Loading through `LeRobotDataset` itself was not tried,
 because it requires PyTorch.
 
-## GPU buffers (future work)
+## ONNX Runtime on NVIDIA GPUs (`--features ruro-nodes-ml/onnx-cuda`)
 
-Images and tensors currently live in CPU memory. The planned design for zero-copy GPU
-data is a message that carries a handle instead of pixels:
+`ml/onnx-cuda` runs a model with ONNX Runtime's CUDA execution provider. Its input is a
+float32 `gpu/Tensor` (`tensor`), typically from `gpu/normalize` (see
+[GPU buffers](gpu.md)); a tensor in device memory is handed to ONNX Runtime by its device
+pointer and read where it is, so images go from `gpu/upload` to the model without passing
+through the host. It publishes one output (`output_name`, default the first) as an
+`ml/Tensor` (`output`) in host memory, for `ml/yolo-decode` and other CPU nodes. Other
+parameters: `model`, `device` (CUDA ordinal), `input_name` (default the first input), and
+`profile`, a path prefix for an ONNX Runtime profile (JSON, written when the node stops)
+with each operator's time and the execution provider it ran on. A host tensor is accepted
+too (ONNX Runtime copies it to the device).
 
-- a `GpuBuffer` message with device id, size, layout (shape, dtype, pitch) and an
-  exportable handle: a CUDA IPC memory handle (`cudaIpcGetMemHandle`) on NVIDIA, or a
-  Vulkan external-memory file descriptor (`VK_KHR_external_memory_fd`, DMA-BUF) for
-  vendor-neutral sharing;
-- in-process wires pass the handle by reference count like any message; cross-process
-  wires send the handle once, the receiver imports it (`cudaIpcOpenMemHandle` /
-  `vkImportMemoryFdKHR`) and caches the mapping; a pool of buffers recycled by sequence
-  number keeps allocations off the hot path;
-- synchronisation with exported events/semaphores so consumers wait on the producer's
-  stream instead of the host;
-- ONNX Runtime would consume them through I/O binding with the CUDA or TensorRT
-  execution provider.
+```yaml
+nodes:
+  camera: { type: hw/v4l2-camera, group: cam }
+  upload: { type: gpu/upload, group: cam }
+  normalize: { type: gpu/normalize, group: infer, params: { width: 640, height: 640 } }
+  model: { type: ml/onnx-cuda, group: infer, params: { model: yolov8n.onnx } }
+  boxes: { type: ml/yolo-decode, group: infer }
+wires:
+  - camera.image -> upload.image
+  - upload.out -> normalize.image
+  - normalize.tensor -> model.tensor
+  - model.output -> boxes.tensor
+```
 
-None of this is implemented yet. It will land once it can be tested on real GPUs;
-shipping untested GPU code is worse than shipping none.
+The feature downloads ONNX Runtime 1.28 with its CUDA 13 provider at build time. It needs,
+at run time:
+
+- an NVIDIA driver for CUDA 13 (R580 or newer);
+- the CUDA 13 runtime (`libcudart.so.13`), cuBLAS (`libcublas.so.13`, `libcublasLt.so.13`)
+  and cuRAND (`libcurand.so.10`) on the library path, and cuDNN 9 for models with
+  convolutions: from the CUDA toolkit, or from pip (`nvidia-cuda-runtime==13.*`,
+  `nvidia-cublas==13.*`, `nvidia-curand`, `nvidia-cudnn-cu13`) with their `lib` directories
+  in `LD_LIBRARY_PATH`;
+- glibc 2.38 or newer (Ubuntu 24.04, Debian 13): that ONNX Runtime build does not load, or
+  link, on older systems.
+
+Without them the node fails to start and says which library is missing.
+
+Tested (`tests/onnx_cuda.rs`) on an RTX 4090 with driver 610.57.04 in Ubuntu 24.04, with the
+pip libraries: a device tensor run in place gives the CPU's results, the node takes device
+and host tensors, and ONNX Runtime's profile shows every operator of the test model on
+`CUDAExecutionProvider`. CI builds and lints the feature but has no GPU to run it.
+

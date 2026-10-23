@@ -2,7 +2,8 @@
 
 > **Status:** tested on one machine with an NVIDIA RTX 4090 (driver 610.57.04), in one
 > process and between two processes. CI has no GPU, so the GPU tests are skipped there; they
-> print why. ONNX Runtime does not take GPU tensors yet (see [Limitations](#limitations)).
+> print why. `ml/onnx-cuda` feeds `gpu/Tensor`s to ONNX Runtime's CUDA provider (see
+> [Machine learning](ml.md#onnx-runtime-on-nvidia-gpus---features-ruro-nodes-mlonnx-cuda)).
 
 Images and tensors can live in GPU memory and move between nodes without being copied.
 Within a process group, receivers share the device buffer, as with every ruro message.
@@ -149,9 +150,8 @@ allocates another. A received buffer can be passed on to a third process unchang
   mappings of a producer that exited when it meets the restarted one.
 - **Synchronization** is done by the producer before sending; IPC events
   (`cuIpcGetEventHandle`) would let receivers wait on the device instead.
-- **ONNX Runtime** (`ml/onnx`) still runs on the CPU and takes host images. Feeding
-  `gpu/Tensor`s to its CUDA execution provider through `ort`'s IoBinding needs an ONNX
-  Runtime CUDA build and the CUDA runtime, cuBLAS and cuDNN libraries, which ruro does not
-  ship; that is the next step.
+- **ONNX Runtime** takes `gpu/Tensor`s in `ml/onnx-cuda` (feature `onnx-cuda`), which
+  returns its output in host memory; outputs that stay on the device are not supported yet.
+  `ml/onnx` and `ml/policy` run on the CPU.
 - **Python nodes** cannot receive GPU messages.
 - One CUDA device per buffer; there are no peer copies between GPUs.

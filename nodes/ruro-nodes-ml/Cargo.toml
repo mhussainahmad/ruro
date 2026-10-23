@@ -13,6 +13,10 @@ default = []
 # ONNX Runtime inference (`ml/onnx`, `ml/policy`). Downloads a CPU build of
 # ONNX Runtime at build time.
 onnx = ["dep:ort"]
+# ONNX Runtime on NVIDIA GPUs (`ml/onnx-cuda`), taking `gpu/Tensor` inputs
+# in place. Downloads ONNX Runtime with its CUDA 13 provider, which needs the
+# CUDA 13 runtime, cuBLAS, cuFFT and cuDNN 9 at run time.
+onnx-cuda = ["onnx", "ort/cuda", "dep:ruro-gpu"]
 # LeRobot dataset recording (`ml/lerobot-recorder`), writes Parquet.
 lerobot = ["dep:arrow-array", "dep:arrow-schema", "dep:parquet", "dep:png"]
 
@@ -21,6 +25,7 @@ ruro = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ort = { workspace = true, optional = true }
+ruro-gpu = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }

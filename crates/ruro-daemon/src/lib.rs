@@ -46,7 +46,7 @@ pub struct Config {
     /// Daemon name; defaults to the hostname.
     pub name: String,
     /// Zenoh endpoint to listen on, e.g. `tcp/127.0.0.1:7447` or
-    /// `tls/0.0.0.0:7447`. Hosts always use a private Unix socket.
+    /// `tls/[::]:7447`. Hosts always use a private Unix socket.
     pub listen: String,
     /// Host binary used to run groups.
     pub host: PathBuf,

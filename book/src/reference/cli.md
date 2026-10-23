@@ -89,7 +89,7 @@ ruro daemon [--name <NAME>] [--listen <ENDPOINT>] [--host <HOST>] [--peer <ENDPO
 | Option | Default | Meaning |
 |---|---|---|
 | `--name <NAME>` | hostname | Name other tools use to address this daemon. |
-| `--listen <ENDPOINT>` | `tcp/127.0.0.1:7447` | Endpoint to listen on. Use `tcp/0.0.0.0:7447`, or `tls/0.0.0.0:7447` with `--tls-cert`/`--tls-key`, to accept remote clients. |
+| `--listen <ENDPOINT>` | `tcp/127.0.0.1:7447` | Endpoint to listen on. Use `tcp/[::]:7447`, or `tls/[::]:7447` with `--tls-cert`/`--tls-key`, to accept remote clients (`[::]` takes IPv4 and IPv6; see [Multi-machine graphs](../multi-machine.md#connecting-daemons)). |
 | `--host <HOST>` | `RURO_HOST`, else `ruro-host` next to `ruro`, else `PATH` | Host binary used to run graph groups. |
 | `--peer <ENDPOINT>` | | Another daemon to connect to, e.g. `tcp/robot2:7447`. Repeatable. See [Multi-machine graphs](../multi-machine.md). |
 | `--heartbeat-timeout <SECONDS>` | 5 | Seconds without metrics after which a host is restarted (at least 0.5). |

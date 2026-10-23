@@ -12,9 +12,14 @@ operator station. One graph can span them.
 Start a daemon on each machine and connect them:
 
 ```sh
-robot$  ruro daemon --name robot --listen tcp/0.0.0.0:7447
+robot$  ruro daemon --name robot --listen tcp/[::]:7447
 laptop$ ruro daemon --name laptop --peer tcp/robot:7447
 ```
+
+`[::]` accepts connections over IPv4 and IPv6. Prefer it to `0.0.0.0`, which accepts IPv4
+only: a client whose lookup of `robot` (or `robot.local`) returns an IPv6 address first
+tries only that address, and is then refused. On a machine with IPv6 turned off, use
+`0.0.0.0`.
 
 `--peer` is repeatable. A daemon's name defaults to its hostname. On anything but a
 trusted network, protect the daemons with a token and TLS (see [Security](security.md));

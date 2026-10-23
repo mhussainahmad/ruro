@@ -7,7 +7,7 @@
 # `systemctl --user edit ruro-daemon`, for example:
 #
 #   [Service]
-#   Environment=RURO_LISTEN=tcp/0.0.0.0:7447
+#   Environment=RURO_LISTEN=tcp/[::]:7447
 #   Environment=RURO_HOST=%h/my-robot/target/release/my-host
 #
 # Real-time process groups additionally need RLIMIT_RTPRIO and RLIMIT_MEMLOCK

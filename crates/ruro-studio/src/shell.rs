@@ -1494,7 +1494,7 @@ pub fn connect_dialog(s: &mut Studio, ctx: &egui::Context) {
             ui.label(
                 RichText::new(
                     "The ruro daemon on your robot (or any Linux computer). Start it there with \
-                     `ruro daemon --listen tls/0.0.0.0:7447`; see the Security page of the book.",
+                     `ruro daemon --listen tls/[::]:7447`; see the Security page of the book.",
                 )
                 .color(TEXT_DIM()),
             );

@@ -2,10 +2,10 @@
 
 ruro runs on Linux. It is developed on x86-64; 64-bit ARM binaries of the headless tools are
 cross-compiled in CI (see [Cross-compiling for ARM](deployment.md#cross-compiling-for-arm)).
-There are no prebuilt releases yet: build from source, or build one of the packages below
-from a checkout. Releases will attach `ruro` and `ruro-host` for x86-64 and 64-bit ARM, the
-studio for x86-64, the Debian package, the AppImage, and the Windows and macOS packages, with
-their SHA-256 sums.
+Each [release](https://github.com/mhussainahmad/ruro/releases) attaches `ruro` and
+`ruro-host` for x86-64 and 64-bit ARM, the studio for x86-64, the Debian package, the
+AppImage, and the Windows and macOS packages, with their SHA-256 sums (`SHA256SUMS`). You can
+also build from source, or build any of the packages below from a checkout.
 
 ## Windows and macOS
 
@@ -21,11 +21,21 @@ start a local daemon there.
 | macOS 11 or newer (Apple silicon) | `ruro-macos-arm64.dmg` | `ruro studio.app`, with `ruro` inside it |
 
 Both are built by `.github/workflows/desktop.yml` on GitHub's Windows and macOS machines
-(download them from a run's artifacts until there is a release). To connect, start the
+(they are attached to each release, and to every run as artifacts). To connect, start the
 studio and use **File > Connect to Daemon…** (it opens by itself the first time): give the
 robot's endpoint, for example `tls/robot.local:7447`, the CA certificate and the token (see
 [Security](security.md)). The studio remembers the endpoint. From a terminal:
 `ruro --connect tls/robot.local:7447 --tls-ca ca.pem --token-file token status`.
+
+To check a client against a robot before relying on it, run `scripts/remote-check.sh` from a
+checkout on the client (Git Bash on Windows, with `RURO=path/to/ruro.exe`), giving it the same
+endpoint and options. With no graph on the daemon, it deploys `examples/pid.yaml` (simulated
+joints only), watches it run, streams a port, records on the robot, engages and releases the
+e-stop and stops the graph, printing PASS or FAIL for each step:
+
+```sh
+scripts/remote-check.sh tls/robot.local:7447 --tls-ca ca.pem --token-file token
+```
 
 They are not signed with a code-signing certificate:
 

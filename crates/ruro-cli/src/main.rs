@@ -103,7 +103,7 @@ enum Cmd {
         /// Name other tools use to address this daemon (default: hostname).
         #[arg(long)]
         name: Option<String>,
-        /// Endpoint to listen on. Use tcp/0.0.0.0:7447 (or tls/0.0.0.0:7447
+        /// Endpoint to listen on. Use tcp/[::]:7447 (or tls/[::]:7447
         /// with --tls-cert/--tls-key) to accept remote studios.
         #[arg(long, default_value = "tcp/127.0.0.1:7447")]
         listen: String,

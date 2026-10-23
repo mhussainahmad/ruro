@@ -9,7 +9,7 @@ only processes on the same machine can reach it. To accept remote clients, use T
 token:
 
 ```sh
-ruro daemon --listen tls/0.0.0.0:7447 \
+ruro daemon --listen tls/[::]:7447 \
     --tls-cert robot.pem --tls-key robot-key.pem --token "$(cat token)"
 
 ruro --connect tls/robot:7447 --tls-ca ca.pem --token "$(cat token)" status
@@ -32,7 +32,7 @@ ruro --connect tls/robot:7447 --tls-ca ca.pem --token "$(cat token)" status
 
   ```sh
   # robot: listens on TLS
-  ruro daemon --listen tls/0.0.0.0:7447 --tls-cert robot.pem --tls-key robot-key.pem \
+  ruro daemon --listen tls/[::]:7447 --tls-cert robot.pem --tls-key robot-key.pem \
       --token-file token
   # laptop: connects to it
   ruro daemon --peer tls/robot:7447 --tls-ca ca.pem --token-file token

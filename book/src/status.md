@@ -1,6 +1,6 @@
 # Project status
 
-ruro is at version 0.1.0 and has not had a release yet. Interfaces may still change. This
+ruro 0.1.0 is the first release. Interfaces may still change before 1.0. This
 page says how far each part has been verified, so you know what to trust and what to test
 yourself.
 
@@ -48,7 +48,8 @@ optional ML and camera features):
 - **Windows and macOS clients** (`desktop.yml`, on GitHub's Windows and macOS machines): the
   protocol and graph crates' tests pass, the CLI and the studio build and start, and the
   packages are made. Using them against a daemon on another machine has not been tried on
-  either system yet.
+  either system yet; `scripts/remote-check.sh` is the check to run (it passes from a Linux
+  client against a daemon in a container, over TLS with a token).
 
 ## Verified outside CI
 
@@ -116,4 +117,6 @@ that skip in CI:
 - H.265 RTSP streams are refused.
 - A daemon update that hangs, or fails after its two-minute probation, is not rolled back
   automatically.
-- The crates are not published on crates.io, and there are no prebuilt packages.
+- The crates are not published on crates.io, and the Python package is not on PyPI: build
+  them from a checkout. The packages on the release page are not signed with a
+  code-signing certificate (see [Installation](installation.md#windows-and-macos)).

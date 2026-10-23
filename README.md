@@ -52,7 +52,7 @@ the `ruro` CLI.
 
 ## Status
 
-ruro is early: version 0.1.0, not released, interfaces may change. The runtime, SDKs, CLI,
+ruro is early: 0.1.0 is its first release, and interfaces may change before 1.0. The runtime, SDKs, CLI,
 daemon, studio, ROS 2 bridge (against an in-process router), overlays, updates and
 record/replay are covered by tests that run in CI. Some parts were verified against the
 real software outside CI:
@@ -70,16 +70,24 @@ Others are implemented to their specifications but not yet verified against the 
 - the **hardware drivers** are tested only against protocol fixtures and simulated devices
   on pseudo-terminals, never against the physical devices (RealSense excepted);
 - **Isaac Sim** support is an example written from its documentation;
-- **multi-machine graphs** have been tested with two daemons on one machine.
+- **multi-machine graphs** have been tested between containers on their own network, not
+  yet between separate machines.
 
 The book's [project status](book/src/status.md) page has the details and the known gaps.
 
 ## What's next
 
-- A first release: crates on crates.io, the Python package on PyPI, prebuilt packages
+- Crates on crates.io and the Python package on PyPI (0.1.0 has prebuilt packages only)
 - Validating the hardware drivers on the physical devices, starting with the SO-100 arm
 - Verifying real-time behaviour on a PREEMPT_RT kernel
 - GPU tensors straight into ONNX Runtime's CUDA provider
+
+## Install
+
+Prebuilt packages are on the [release page](https://github.com/mhussainahmad/ruro/releases):
+`ruro` and `ruro-host` for Linux x86-64 and 64-bit ARM, the studio for Linux, a Debian
+package, an AppImage, and the studio and CLI for Windows and macOS (as clients of a daemon on
+Linux). See [Installation](book/src/installation.md).
 
 ## Quick start
 

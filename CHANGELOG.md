@@ -7,7 +7,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-First version, 0.1.0. Nothing has been released yet.
+## [0.1.0] - 2026-10-22
+
+The first release.
 
 ### Added
 
@@ -142,9 +144,15 @@ First version, 0.1.0. Nothing has been released yet.
   built with mdBook. The desktop file, icons and AppStream metadata are named after the
   studio's app id, `io.github.mhussainahmad.ruro.Studio`, which its window also uses. The
   Debian package installs the example graphs in `/usr/share/ruro/examples`.
+- **Windows and macOS clients.** The studio and the CLI build for Windows (x86-64) and macOS
+  (Apple silicon) and connect to a daemon on a Linux machine (**File > Connect to
+  Daemon…**, or `--connect`); the daemon and hosts stay on Linux. CI builds a zip and a
+  `.dmg`, and releases attach them with the Linux binaries, the Debian package and the
+  AppImage. `scripts/remote-check.sh` checks a client against a daemon on another machine.
 
 ### Known limitations
 
 See [Project status](book/src/status.md#known-gaps).
 
-[Unreleased]: https://github.com/mhussainahmad/ruro/commits/main
+[Unreleased]: https://github.com/mhussainahmad/ruro/compare/v0.1.0...main
+[0.1.0]: https://github.com/mhussainahmad/ruro/releases/tag/v0.1.0

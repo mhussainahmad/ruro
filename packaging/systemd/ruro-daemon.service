@@ -6,7 +6,7 @@
 #
 # Customise with `systemctl edit ruro-daemon` or /etc/default/ruro:
 #
-#   RURO_LISTEN=tcp/0.0.0.0:7447       # accept studio/CLI connections from the network
+#   RURO_LISTEN=tcp/[::]:7447          # accept studio/CLI connections from the network
 #   RURO_HOST=/usr/local/bin/my-host   # host binary that links your own nodes
 #   RURO_LOG=info,zenoh=warn           # log filter (journalctl -u ruro-daemon)
 #

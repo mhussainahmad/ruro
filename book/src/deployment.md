@@ -20,7 +20,7 @@ Configure it in `/etc/default/ruro` (or with `sudo systemctl edit ruro-daemon`):
 
 ```sh
 # /etc/default/ruro
-RURO_LISTEN=tls/0.0.0.0:7447         # accept connections from the network
+RURO_LISTEN=tls/[::]:7447            # accept connections from the network
 RURO_TLS_CERT=/etc/ruro/robot.pem    # with TLS and a token, see Security
 RURO_TLS_KEY=/etc/ruro/robot-key.pem
 RURO_TOKEN=change-me
@@ -66,7 +66,7 @@ systemctl --user enable --now ruro-daemon
 ```
 
 Override settings with `systemctl --user edit ruro-daemon`, for example
-`Environment=RURO_LISTEN=tcp/0.0.0.0:7447`.
+`Environment=RURO_LISTEN=tcp/[::]:7447`.
 
 ## Working remotely
 

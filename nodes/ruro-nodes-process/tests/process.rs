@@ -216,6 +216,65 @@ fn manifests_in_a_directory_are_registered() {
 }
 
 #[test]
+fn a_late_answer_is_not_taken_for_the_next_one() {
+    let kind = node("slowparam", "step_timeout: 1\n");
+    let mut h = Harness::new(&kind, json!({"mode": "slow_param", "k": 2.0})).unwrap();
+    h.push("input", Scalar(1.0)).unwrap();
+    h.step().unwrap();
+    assert_eq!(h.take::<Scalar>("output").unwrap()[0].0, 2.0);
+    let pid = pid_in(&info(&mut h));
+    // The change times out: the program is restarted with it.
+    let e = format!("{:#}", h.set_param("k", json!(3.0)).unwrap_err());
+    assert!(e.contains("did not answer"), "{e}");
+    assert!(wait_gone(pid));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        std::thread::sleep(Duration::from_millis(100));
+        h.push("input", Scalar(1.0)).unwrap();
+        if h.step().is_ok() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "not restarted");
+    }
+    // Each step gets its own answer, with the new value.
+    for v in [1.0, 2.0, 3.0] {
+        h.push("input", Scalar(v)).unwrap();
+        h.step().unwrap();
+        let out = h.take::<Scalar>("output").unwrap();
+        assert_eq!(out.last().unwrap().0, v * 3.0, "{out:?}");
+    }
+}
+
+#[test]
+fn output_that_is_not_utf8_is_logged_not_fatal() {
+    let kind = node("latin1", "");
+    let mut h = Harness::new(&kind, json!({"mode": "latin1", "k": 1.0})).unwrap();
+    for v in 0..5 {
+        h.push("input", Scalar(v as f64)).unwrap();
+        h.step().unwrap();
+        assert_eq!(h.take::<Scalar>("output").unwrap()[0].0, v as f64);
+    }
+}
+
+#[test]
+fn a_stranger_connecting_first_is_dropped() {
+    let kind = node("intruder", "transport: tcp\nenv: { TEST_INTRUDE: \"1\" }\n");
+    let mut h = Harness::new(&kind, json!(null)).unwrap();
+    h.push("input", Scalar(5.0)).unwrap();
+    h.step().unwrap();
+    assert_eq!(h.take::<Scalar>("output").unwrap()[0].0, 10.0);
+}
+
+#[test]
+fn nan_travels_as_null() {
+    let kind = node("nan", "");
+    let mut h = Harness::new(&kind, json!({"mode": "nan"})).unwrap();
+    h.push("input", Scalar(f64::NAN)).unwrap();
+    h.step().unwrap();
+    assert!(h.take::<Scalar>("output").unwrap()[0].0.is_nan());
+}
+
+#[test]
 #[ignore = "a measurement: cargo test -p ruro-nodes-process --release -- --ignored --nocapture"]
 fn step_round_trip() {
     let kind = node("bench", "");

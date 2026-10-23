@@ -24,14 +24,127 @@ macro_rules! serde_messages {
     ($($t:ident),* $(,)?) => {$(
         impl JsonMessage for ruro_msg::$t {
             fn to_json(&self) -> Value {
+                // Non-finite numbers (NaN, infinities) become `null`.
                 serde_json::to_value(self).expect("standard messages serialize")
             }
 
             fn from_json(v: Value) -> Result<Self> {
-                Ok(serde_json::from_value(v)?)
+                Ok(serde::Deserialize::deserialize(Lenient(v))?)
             }
         }
     )*};
+}
+
+/// Deserializes a JSON value as `serde_json` does, except that `null` where
+/// a number of a float field is expected reads as NaN: JSON has no NaN or
+/// infinity, and programs (MATLAB's `jsonencode`, Python's `json` with
+/// `allow_nan=False`) write them as `null`.
+struct Lenient(Value);
+
+impl<'de> serde::Deserializer<'de> for Lenient {
+    type Error = serde_json::Error;
+
+    fn deserialize_any<V: serde::de::Visitor<'de>>(self, v: V) -> Result<V::Value, Self::Error> {
+        match self.0 {
+            Value::Array(items) => v.visit_seq(LenientSeq(items.into_iter())),
+            Value::Object(map) => v.visit_map(LenientMap {
+                entries: map.into_iter(),
+                value: None,
+            }),
+            other => serde::Deserializer::deserialize_any(other, v),
+        }
+    }
+
+    fn deserialize_f64<V: serde::de::Visitor<'de>>(self, v: V) -> Result<V::Value, Self::Error> {
+        match self.0 {
+            Value::Null => v.visit_f64(f64::NAN),
+            other => serde::Deserializer::deserialize_f64(other, v),
+        }
+    }
+
+    fn deserialize_f32<V: serde::de::Visitor<'de>>(self, v: V) -> Result<V::Value, Self::Error> {
+        match self.0 {
+            Value::Null => v.visit_f32(f32::NAN),
+            other => serde::Deserializer::deserialize_f32(other, v),
+        }
+    }
+
+    fn deserialize_option<V: serde::de::Visitor<'de>>(self, v: V) -> Result<V::Value, Self::Error> {
+        match self.0 {
+            Value::Null => v.visit_none(),
+            other => v.visit_some(Lenient(other)),
+        }
+    }
+
+    fn deserialize_newtype_struct<V: serde::de::Visitor<'de>>(
+        self,
+        _name: &'static str,
+        v: V,
+    ) -> Result<V::Value, Self::Error> {
+        v.visit_newtype_struct(self)
+    }
+
+    fn deserialize_enum<V: serde::de::Visitor<'de>>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        v: V,
+    ) -> Result<V::Value, Self::Error> {
+        serde::Deserializer::deserialize_enum(self.0, name, variants, v)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 char str string bytes byte_buf
+        unit unit_struct seq tuple tuple_struct map struct identifier ignored_any
+    }
+}
+
+struct LenientSeq(std::vec::IntoIter<Value>);
+
+impl<'de> serde::de::SeqAccess<'de> for LenientSeq {
+    type Error = serde_json::Error;
+
+    fn next_element_seed<T: serde::de::DeserializeSeed<'de>>(
+        &mut self,
+        seed: T,
+    ) -> Result<Option<T::Value>, Self::Error> {
+        self.0
+            .next()
+            .map(|v| seed.deserialize(Lenient(v)))
+            .transpose()
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.0.len())
+    }
+}
+
+struct LenientMap {
+    entries: serde_json::map::IntoIter,
+    value: Option<Value>,
+}
+
+impl<'de> serde::de::MapAccess<'de> for LenientMap {
+    type Error = serde_json::Error;
+
+    fn next_key_seed<K: serde::de::DeserializeSeed<'de>>(
+        &mut self,
+        seed: K,
+    ) -> Result<Option<K::Value>, Self::Error> {
+        let Some((k, v)) = self.entries.next() else {
+            return Ok(None);
+        };
+        self.value = Some(v);
+        seed.deserialize(serde::de::value::StringDeserializer::new(k))
+            .map(Some)
+    }
+
+    fn next_value_seed<V: serde::de::DeserializeSeed<'de>>(
+        &mut self,
+        seed: V,
+    ) -> Result<V::Value, Self::Error> {
+        seed.deserialize(Lenient(self.value.take().expect("a key first")))
+    }
 }
 
 serde_messages!(
@@ -120,7 +233,10 @@ impl JsonMessage for Image {
             Some(e) => parse_encoding(e.as_str().context("`encoding` is not a string")?)?,
         };
         let data = bytes_of(field("data")?).context("`data`")?;
-        let expected = width as usize * height as usize * encoding.bytes_per_pixel();
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(encoding.bytes_per_pixel()))
+            .with_context(|| format!("a {width}x{height} image is too large"))?;
         ensure!(
             data.len() == expected,
             "`data` has {} bytes; a {width}x{height} {} image has {expected}",
@@ -280,6 +396,11 @@ mod tests {
         let short = json!({"width": 2, "height": 2, "data": "AQID"});
         let e = format!("{:#}", Image::from_json(short).unwrap_err());
         assert!(e.contains("has 3 bytes") && e.contains("has 12"), "{e}");
+        let huge = json!({"width": u32::MAX, "height": u32::MAX, "encoding": "rgba8", "data": ""});
+        assert!(
+            Image::from_json(huge).is_err(),
+            "sizes that overflow are refused"
+        );
 
         let cloud = PointCloud {
             points: vec![[1.0, 2.0, 3.0], [-1.0, 0.5, 0.0]],
@@ -287,6 +408,25 @@ mod tests {
         round_trip(cloud.clone());
         let listed = json!({"points": [[1.0, 2.0, 3.0], [-1.0, 0.5, 0.0]]});
         assert_eq!(PointCloud::from_json(listed).unwrap(), cloud);
+    }
+
+    #[test]
+    fn null_is_nan() {
+        use ruro_msg::{Header, LaserScan};
+        let mut scan = LaserScan {
+            header: Header::default(),
+            ranges: vec![1.0, f32::INFINITY, 2.0],
+            ..Default::default()
+        };
+        let v = scan.to_json();
+        assert_eq!(v["ranges"], json!([1.0, null, 2.0]));
+        let back = LaserScan::from_json(v).unwrap();
+        assert!(back.ranges[1].is_nan() && back.ranges[2] == 2.0);
+        scan.ranges.clear();
+        assert!(Scalar::from_json(json!(null)).unwrap().0.is_nan());
+        // Other mistakes are still refused.
+        assert!(Scalar::from_json(json!("x")).is_err());
+        assert!(LaserScan::from_json(json!({"ranges": "x"})).is_err());
     }
 
     #[test]

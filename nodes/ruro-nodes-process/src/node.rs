@@ -197,7 +197,15 @@ impl DynNode for ProcessNode {
     fn set_param(&mut self, name: &str, value: &Value) -> ruro_node::Result {
         if let Some(child) = self.child.as_mut() {
             let request = json!({"op": "param", "name": name, "value": value});
-            let reply = child.request(&request, self.manifest.step_timeout)?;
+            // A program that does not answer in time is restarted, with the
+            // new value: a late answer must not be taken for the next one.
+            let reply = match child.request(&request, self.manifest.step_timeout) {
+                Ok(r) => r,
+                Err(e) => {
+                    self.params.insert(name.to_owned(), value.clone());
+                    return Err(self.lost(e));
+                }
+            };
             refused(&reply)?;
         }
         self.params.insert(name.to_owned(), value.clone());
@@ -205,9 +213,12 @@ impl DynNode for ProcessNode {
     }
 
     fn on_estop(&mut self, _ctx: &mut Ctx) {
-        if let Some(child) = self.child.as_mut()
-            && let Err(e) = child.request(&json!({"op": "estop"}), self.manifest.step_timeout)
-        {
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
+        if let Err(e) = child.request(&json!({"op": "estop"}), self.manifest.step_timeout) {
+            // Restarted; it learns of the stop from `start` and every step.
+            let e = self.lost(e);
             tracing::warn!("{}: telling the program about the e-stop: {e:#}", self.id);
         }
     }

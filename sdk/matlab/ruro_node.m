@@ -14,7 +14,10 @@ function ruro_node(step, varargin)
 %   ctx     struct with steps, dt and time (seconds), now_ns and estopped.
 %   state   whatever my_step returned last time ([] at first).
 %   out     struct with one field per output to send on: a cell array of
-%           messages (a single message that is not a cell is sent as one).
+%           messages (a single message that is not a cell is sent as one;
+%           [] sends nothing). A vector field with one element, such as the
+%           positions of a one-joint std/JointState, must be given as a cell
+%           ({0.5}): jsonencode writes a 1x1 array as a plain number.
 %
 %   Options, as name-value pairs:
 %   'start'  @(params) -> state: called once before the first step; its
@@ -25,8 +28,9 @@ function ruro_node(step, varargin)
 %   Messages are the JSON forms of ruro's message types, decoded with
 %   jsondecode: a std/Scalar is a number, a std/Pose a struct with position
 %   and orientation, a std/Image a struct with width, height, encoding and
-%   data (base64; see ruro_bytes). An error raised by my_step is reported to
-%   the host as the step's error; the node keeps running.
+%   data (base64; see ruro_bytes). NaN and infinities travel as JSON null,
+%   which jsondecode reads back as NaN. An error raised by my_step is
+%   reported to the host as the step's error; the node keeps running.
 %
 %   MATLAB cannot read its standard input when started by another program, so
 %   give MATLAB nodes "transport: tcp" in their manifest: the host then passes
@@ -102,7 +106,9 @@ end
 names = fieldnames(out);
 for i = 1:numel(names)
     v = out.(names{i});
-    if ~iscell(v)
+    if isempty(v) && ~iscell(v) && ~isstruct(v)
+        out.(names{i}) = {};
+    elseif ~iscell(v)
         out.(names{i}) = {v};
     end
 end
@@ -120,7 +126,9 @@ port = str2double(addr(colon + 1:end));
 if exist('OCTAVE_VERSION', 'builtin')
     pkg load instrument-control
 end
-io.tcp = tcpclient(host, port);
+% A node may wait long between requests (a low rate, a paused graph): the
+% read must not give up before the host does.
+io.tcp = tcpclient(host, port, 'Timeout', 1e6);
 end
 
 function send(io, msg)
@@ -131,7 +139,8 @@ if isempty(io.tcp)
         fflush(stdout);
     end
 else
-    write(io.tcp, uint8(line));
+    % UTF-8 bytes, also for characters beyond ASCII.
+    write(io.tcp, unicode2native(line, 'UTF-8'));
 end
 end
 
@@ -162,7 +171,7 @@ while true
             buffer = [buffer, uint8(chunk(:)')]; %#ok<AGROW>
             nl = find(buffer == 10, 1);
         end
-        line = char(buffer(1:nl - 1));
+        line = native2unicode(buffer(1:nl - 1), 'UTF-8');
         buffer = buffer(nl + 1:end);
     end
     if strncmp(line, '@ruro ', 6)

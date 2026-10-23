@@ -73,6 +73,11 @@ unsafe fn to_vec<T: Copy>(ptr: *const T, len: usize, what: &str) -> Result<Vec<T
         return Ok(Vec::new());
     }
     ensure!(!ptr.is_null(), "{what}: NULL pointer with length {len}");
+    ensure!(
+        len.checked_mul(size_of::<T>())
+            .is_some_and(|b| b <= isize::MAX as usize),
+        "{what}: length {len} is too large"
+    );
     // SAFETY: the caller's contract.
     Ok(unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec())
 }
@@ -502,7 +507,10 @@ impl CMessage for Image {
             Ok(e) => Encoding::from_u8(e).map_err(|e| anyhow::anyhow!("{e}"))?,
             Err(_) => bail!("unknown image encoding {}", c.encoding),
         };
-        let expected = c.width as usize * c.height as usize * encoding.bytes_per_pixel();
+        let expected = (c.width as usize)
+            .checked_mul(c.height as usize)
+            .and_then(|n| n.checked_mul(encoding.bytes_per_pixel()))
+            .with_context(|| format!("a {}x{} image is too large", c.width, c.height))?;
         ensure!(
             c.data.len == expected,
             "image data has {} bytes; a {}x{} image of encoding {} has {expected}",
@@ -532,8 +540,9 @@ impl CMessage for PointCloud {
     }
 
     unsafe fn from_c(c: &ruro_point_cloud) -> Result<Self> {
+        let n = c.len.checked_mul(3).context("xyz: length too large")?;
         // SAFETY: the caller's contract: `xyz` holds 3 * len floats.
-        let flat = unsafe { to_vec(c.xyz, c.len * 3, "xyz")? };
+        let flat = unsafe { to_vec(c.xyz, n, "xyz")? };
         Ok(PointCloud {
             points: flat.as_chunks::<3>().0.to_vec(),
         })

@@ -97,13 +97,13 @@ The packages install the helper in `/usr/share/ruro/sdk/matlab`, next to the exa
 | `kind` | required | Node type name, with a namespace: `acme/filter`. |
 | `command` | required | The program and its arguments. A program given as a relative path with a `/` is relative to the manifest; a bare name is looked up on `PATH`. It runs in the manifest's directory, inheriting the host's environment. |
 | `doc` | | One-line description, shown in the studio. |
-| `inputs`, `outputs` | | Port names and message types: `{ image: std/Image }`. Any standard type (`ruro schema` lists them). |
+| `inputs`, `outputs` | | Port names and message types: `{ image: std/Image }`. Any standard type (`ruro schema` lists them). Names (of parameters too) are letters, digits and `_`, starting with a letter, so they work as field names in every language. |
 | `params` | | Name to `{ default, min, max, doc, kind }`. `kind` (`int`, `float`, `bool`, `string`) is taken from the default if omitted: `2` is an integer, `2.0` a number. |
 | `rate` | | Default trigger rate in Hz. Without one, the node steps when an input receives data. |
 | `transport` | `stdio` | `stdio`, or `tcp` for programs that cannot read their standard input. |
 | `env` | | Extra environment variables for the program. |
-| `start_timeout` | 30 | Seconds the program gets to start and answer `start`. |
-| `step_timeout` | 5 | Seconds it gets to answer any later request. |
+| `start_timeout` | 30 | Seconds the program gets to start and answer `start` (at most a day). |
+| `step_timeout` | 5 | Seconds it gets to answer any later request (at most a day). |
 
 `RURO_PROCESS_NODES` lists manifest files, or directories whose `*.node.yaml` files are
 manifests, separated by `:`. Hosts read it when they start (the daemon's hosts inherit the
@@ -126,7 +126,10 @@ host without the prefix (it sends an empty line after each request) are to be ig
 
 With `transport: stdio`, the lines go over the program's standard input and output. With
 `transport: tcp`, the program connects to `RURO_NODE_ADDR` (`127.0.0.1:<port>`) and the lines
-go over that connection; standard output is then only logged.
+go over that connection; standard output is then only logged. A connection whose first
+protocol line is not a hello with the right token (another local program) is dropped, and
+the host goes on waiting for the program's. Lines are UTF-8; bytes that are not are replaced
+in the log.
 
 The program starts by sending its hello: `{"ruro": 1}` (over TCP, with
 `"token": <RURO_NODE_TOKEN>`). Then the host sends requests, one at a time, and the program
@@ -147,9 +150,10 @@ change is refused. The program also gets `RURO_NODE_ID` (the node's id in the gr
 
 The host keeps the program in check:
 
-- an answer that does not come within the timeout, or a program that exits, fails that
-  step; the host kills the program and starts it again on a later step (after 0.5 s, then
-  doubling up to 10 s), sending `start` with the current parameters;
+- an answer that does not come within the timeout (to any request), or a program that
+  exits, fails that request; the host kills the program and starts it again on a later step
+  (after 0.5 s, then doubling up to 10 s), sending `start` with the current parameters, so a
+  late answer is never taken for the next request's;
 - the program runs in a process group of its own, which is terminated (`SIGTERM`, then
   `SIGKILL` after a second) when the node stops or the program is restarted; on Linux it
   also gets `SIGTERM` if its host dies.
@@ -159,7 +163,9 @@ The host keeps the program in check:
 Messages are their serde form, the field names `ruro schema <type>` prints: a `std/Scalar`
 is a number, `std/Text` a string, `std/Flag` a boolean, `std/Pose`
 `{"position": {"x", "y", "z"}, "orientation": {"x", "y", "z", "w"}}`, `std/JointState`
-`{"position": [...], "velocity": [...], "effort": [...]}`. Bytes travel as base64:
+`{"position": [...], "velocity": [...], "effort": [...]}`. JSON has no NaN or infinity:
+the host writes them as `null`, and reads `null` where a number is expected as NaN (as
+MATLAB's `jsondecode` and `jsonencode` do). Bytes travel as base64:
 
 | Type | JSON |
 |---|---|

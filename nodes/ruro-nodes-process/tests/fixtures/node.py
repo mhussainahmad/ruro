@@ -19,6 +19,10 @@ def channel():
     if not addr:
         return sys.stdin, sys.stdout
     host, port = addr.rsplit(":", 1)
+    if os.environ.get("TEST_INTRUDE"):
+        # Another program connecting first, with the wrong token.
+        intruder = socket.create_connection((host, int(port))).makefile("rw")
+        send(intruder, {"ruro": 1, "token": "not-the-token"})
     stream = socket.create_connection((host, int(port))).makefile("rw")
     return stream, stream
 
@@ -56,6 +60,8 @@ def main():
                 continue
             send(out, {})
         elif op == "param":
+            if params.get("mode") == "slow_param":
+                time.sleep(2)  # longer than the test's step_timeout
             if req["name"] == "locked":
                 send(out, {"error": "locked cannot change"})
             else:
@@ -81,8 +87,17 @@ def main():
                 continue
             if req["steps"] == 1:
                 print("warning: first step", file=sys.stderr, flush=True)
+            if mode == "latin1":
+                # Output that is not UTF-8.
+                sys.stdout.buffer.write(b"caf\xe9 au lait\n")
+                sys.stdout.flush()
+                sys.stderr.buffer.write(b"\xff\xfe bytes\n")
+                sys.stderr.flush()
             outputs = {
-                "output": [m["msg"] * params["k"] for m in req["inputs"].get("input", [])],
+                "output": [
+                    None if mode == "nan" else m["msg"] * params["k"]
+                    for m in req["inputs"].get("input", [])
+                ],
                 "info": [
                     "pid=%d estops=%d estopped=%s mode=%s"
                     % (os.getpid(), estops, req["estopped"], mode)

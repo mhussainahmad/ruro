@@ -79,17 +79,21 @@ impl Child {
             Some(listener) => {
                 let id2 = id.to_owned();
                 spawn_thread("stdout", move || log_lines(stdout, &id2));
-                let stream = match accept(&listener, &mut process, m.start_timeout) {
+                let (reader, hello) = match accept(&listener, &mut process, m.start_timeout, &token)
+                {
                     Ok(s) => s,
                     Err(e) => {
                         kill(&mut process);
                         return Err(e);
                     }
                 };
-                let reader = stream.try_clone()?;
+                let writer = reader.get_ref().try_clone()?;
+                // The hello was read while accepting; the reader goes on
+                // from there.
+                let _ = reply_tx.send(Event::Frame(hello));
                 let id = id.to_owned();
                 spawn_thread("reader", move || read_protocol(reader, &id, &reply_tx));
-                spawn_thread("writer", move || write_requests(stream, &request_rx));
+                spawn_thread("writer", move || write_requests(writer, &request_rx));
             }
         }
         let mut child = Self {
@@ -106,12 +110,6 @@ impl Child {
             version == Some(PROTOCOL),
             "the program's hello {hello} does not speak protocol {PROTOCOL} (expected `{PREFIX}{{\"ruro\": {PROTOCOL}}}` as its first protocol line)"
         );
-        if m.transport == Transport::Tcp {
-            ensure!(
-                hello.get("token").and_then(Value::as_str) == Some(token.as_str()),
-                "the connection did not present RURO_NODE_TOKEN"
-            );
-        }
         Ok(child)
     }
 
@@ -193,10 +191,28 @@ fn spawn_thread(what: &str, f: impl FnOnce() + Send + 'static) {
         .expect("spawning a thread");
 }
 
+/// The next line of `r`, without its line ending; bytes that are not UTF-8
+/// are replaced. `None` at the end of the stream or on a read error.
+fn next_line(r: &mut impl BufRead) -> Option<String> {
+    let mut buf = Vec::new();
+    match r.read_until(b'\n', &mut buf) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => {
+            while buf.last().is_some_and(|b| *b == b'\n' || *b == b'\r') {
+                buf.pop();
+            }
+            Some(String::from_utf8_lossy(&buf).into_owned())
+        }
+    }
+}
+
 /// Hands protocol lines to `tx` and logs everything else.
 fn read_protocol(stream: impl Read, id: &str, tx: &Sender<Event>) {
-    for line in BufReader::new(stream).lines() {
-        let Ok(line) = line else { break };
+    read_protocol_from(&mut BufReader::new(stream), id, tx);
+}
+
+fn read_protocol_from(stream: &mut impl BufRead, id: &str, tx: &Sender<Event>) {
+    while let Some(line) = next_line(stream) {
         let event = match line.strip_prefix(PREFIX) {
             Some(json) => match serde_json::from_str(json) {
                 Ok(v) => Event::Frame(v),
@@ -215,8 +231,8 @@ fn read_protocol(stream: impl Read, id: &str, tx: &Sender<Event>) {
 }
 
 fn log_lines(stream: impl Read, id: &str) {
-    for line in BufReader::new(stream).lines() {
-        let Ok(line) = line else { break };
+    let mut r = BufReader::new(stream);
+    while let Some(line) = next_line(&mut r) {
         log_line(id, &line);
     }
 }
@@ -248,16 +264,29 @@ fn write_requests(mut sink: impl Write, rx: &Receiver<Vec<u8>>) {
     }
 }
 
-/// Waits for the program to connect, while it runs.
-fn accept(listener: &TcpListener, process: &mut Process, timeout: Duration) -> Result<TcpStream> {
+/// Waits for the program to connect while it runs, and returns its
+/// connection, positioned after its hello, with the hello. Connections that
+/// do not open with a hello carrying `token` (another local program) are
+/// dropped, and the wait goes on.
+fn accept(
+    listener: &TcpListener,
+    process: &mut Process,
+    timeout: Duration,
+    token: &str,
+) -> Result<(BufReader<TcpStream>, Value)> {
     listener.set_nonblocking(true)?;
     let deadline = Instant::now() + timeout;
+    let mut refused = 0;
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
                 stream.set_nonblocking(false)?;
                 stream.set_nodelay(true)?;
-                return Ok(stream);
+                if let Some(hello) = read_hello(&stream, deadline, token) {
+                    stream.set_read_timeout(None)?;
+                    return Ok(hello);
+                }
+                refused += 1;
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(e) => return Err(e).context("accepting the program's connection"),
@@ -270,11 +299,45 @@ fn accept(listener: &TcpListener, process: &mut Process, timeout: Duration) -> R
         }
         ensure!(
             Instant::now() < deadline,
-            "the program did not connect to RURO_NODE_ADDR within {:.0} s",
-            timeout.as_secs_f64()
+            "the program did not connect to RURO_NODE_ADDR within {:.0} s{}",
+            timeout.as_secs_f64(),
+            if refused > 0 {
+                format!(" ({refused} connection(s) without its token were dropped)")
+            } else {
+                String::new()
+            }
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// The hello on a new connection, if it comes before `deadline` (and within
+/// a few seconds) and carries `token`.
+fn read_hello(
+    stream: &TcpStream,
+    deadline: Instant,
+    token: &str,
+) -> Option<(BufReader<TcpStream>, Value)> {
+    let wait = deadline
+        .saturating_duration_since(Instant::now())
+        .min(Duration::from_secs(5))
+        .max(Duration::from_millis(100));
+    stream.set_read_timeout(Some(wait)).ok()?;
+    let mut reader = BufReader::new(stream.try_clone().ok()?);
+    loop {
+        let line = next_line(&mut reader)?;
+        let Some(json) = line.strip_prefix(PREFIX) else {
+            continue;
+        };
+        let hello: Value = serde_json::from_str(json).ok()?;
+        let presented = hello.get("token").and_then(Value::as_str).unwrap_or("");
+        return same(presented.as_bytes(), token.as_bytes()).then_some((reader, hello));
+    }
+}
+
+/// Compares secrets in time independent of where they differ.
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 fn describe(status: ExitStatus) -> String {
@@ -331,6 +394,7 @@ fn own_process_group(cmd: &mut Command) {
 /// second.
 fn kill(process: &mut Process) {
     if let Ok(Some(_)) = process.try_wait() {
+        // Whatever it started may still run in its group.
         signal_group(process, true);
         return;
     }
@@ -354,7 +418,15 @@ fn signal_group(process: &mut Process, hard: bool) {
         let sig = if hard { libc::SIGKILL } else { libc::SIGTERM };
         let pgid = process.id() as libc::pid_t;
         // SAFETY: plain signal delivery to the group this module created.
-        unsafe { libc::kill(-pgid, sig) };
+        // Once its leader is reaped the group number could in principle be
+        // reused; only signal a group that still has members (and ours had
+        // the leader's id, which the system does not reuse while the group
+        // exists).
+        unsafe {
+            if libc::kill(-pgid, 0) == 0 {
+                libc::kill(-pgid, sig);
+            }
+        }
     }
     #[cfg(not(unix))]
     if hard {

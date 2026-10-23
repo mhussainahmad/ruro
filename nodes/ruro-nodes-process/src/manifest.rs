@@ -81,6 +81,8 @@ pub struct Manifest {
 }
 
 const DEFAULT_START: Duration = Duration::from_secs(30);
+/// A day: longer timeouts are mistakes.
+const MAX_TIMEOUT: Duration = Duration::from_secs(86_400);
 const DEFAULT_STEP: Duration = Duration::from_secs(5);
 
 impl Manifest {
@@ -114,6 +116,7 @@ impl Manifest {
             ports
                 .into_iter()
                 .map(|(name, ty)| {
+                    check_name(&name, what)?;
                     ensure!(
                         message::supported(&ty),
                         "{what} `{name}`: message type `{ty}` is not supported by process nodes (supported: {})",
@@ -129,6 +132,7 @@ impl Manifest {
             .params
             .into_iter()
             .map(|(name, p)| {
+                check_name(&name, "parameter")?;
                 let kind = match p.kind {
                     Some(k) => k,
                     None => infer_kind(&p.default)
@@ -150,8 +154,13 @@ impl Manifest {
         let timeout = |t: Option<f64>, default: Duration, what: &str| -> Result<Duration> {
             match t {
                 None => Ok(default),
-                Some(s) if s.is_finite() && s > 0.0 => Ok(Duration::from_secs_f64(s)),
-                Some(_) => bail!("`{what}` must be a positive number of seconds"),
+                Some(s) if s > 0.0 && s <= MAX_TIMEOUT.as_secs_f64() => {
+                    Ok(Duration::from_secs_f64(s))
+                }
+                Some(_) => bail!(
+                    "`{what}` must be a number of seconds above 0 and at most {}",
+                    MAX_TIMEOUT.as_secs()
+                ),
             }
         };
         Ok(Self {
@@ -183,6 +192,19 @@ impl Manifest {
             p.to_path_buf()
         }
     }
+}
+
+/// Port and parameter names become field names in the program (MATLAB
+/// structs, Python attributes): letters, digits and `_`, starting with a
+/// letter.
+fn check_name(name: &str, what: &str) -> Result<()> {
+    let mut chars = name.chars();
+    ensure!(
+        chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_'),
+        "{what} `{name}`: names are letters, digits and `_`, starting with a letter"
+    );
+    Ok(())
 }
 
 fn infer_kind(v: &Value) -> Result<ParamKind> {
@@ -260,5 +282,10 @@ step_timeout: 1.5
         let e = bad("kind: a/b\ncommand: [x]\nparams: { k: { default: 20, max: 10 } }\n");
         assert!(e.contains("default of parameter `k`"), "{e}");
         assert!(bad("kind: a/b\ncommand: [x]\nrat: 3\n").contains("rat"));
+        assert!(bad("kind: a/b\ncommand: [x]\nstep_timeout: 1e30\n").contains("at most 86400"));
+        assert!(
+            bad("kind: a/b\ncommand: [x]\ninputs: { my-in: std/Scalar }\n")
+                .contains("letters, digits")
+        );
     }
 }

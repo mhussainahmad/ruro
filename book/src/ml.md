@@ -121,7 +121,10 @@ at run time:
   `nvidia-cublas==13.*`, `nvidia-curand`, `nvidia-cudnn-cu13`) with their `lib` directories
   in `LD_LIBRARY_PATH`;
 - glibc 2.38 or newer (Ubuntu 24.04, Debian 13): that ONNX Runtime build does not load, or
-  link, on older systems.
+  link, on older systems;
+- `libonnxruntime_providers_cuda.so` and `libonnxruntime_providers_shared.so` next to the
+  host binary: the build copies them beside it in `target/<profile>/`, so copy them along
+  when installing the host elsewhere.
 
 Without them the node fails to start and says which library is missing.
 

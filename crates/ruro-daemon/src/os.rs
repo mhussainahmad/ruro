@@ -48,3 +48,46 @@ pub fn make_executable(path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 }
+
+/// The processes this process started that are still running (Linux).
+#[cfg(target_os = "linux")]
+pub fn child_pids() -> Vec<i32> {
+    let Ok(tasks) = std::fs::read_dir("/proc/self/task") else {
+        return Vec::new();
+    };
+    let mut pids: Vec<i32> = tasks
+        .filter_map(|t| t.ok())
+        .filter_map(|t| std::fs::read_to_string(t.path().join("children")).ok())
+        .flat_map(|c| {
+            c.split_whitespace()
+                .filter_map(|p| p.parse().ok())
+                .collect::<Vec<i32>>()
+        })
+        .collect();
+    pids.sort_unstable();
+    pids.dedup();
+    pids
+}
+
+/// Marks every open file descriptor but standard input, output and error
+/// close-on-exec, so that a program executed in place of this one inherits
+/// none of this one's sockets or locks.
+#[cfg(unix)]
+pub fn close_on_exec_all() {
+    let fds: Vec<i32> =
+        match std::fs::read_dir("/proc/self/fd").or_else(|_| std::fs::read_dir("/dev/fd")) {
+            Ok(dir) => dir
+                .filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+                .collect(),
+            Err(_) => (3..1024).collect(),
+        };
+    for fd in fds.into_iter().filter(|fd| *fd > 2) {
+        // SAFETY: fcntl on a descriptor number; harmless if it is not open.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags >= 0 {
+                libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+            }
+        }
+    }
+}

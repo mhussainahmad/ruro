@@ -18,8 +18,8 @@ optional ML and camera features):
   replayed into both), host binary uploads, TLS, mutual TLS and tokens.
 - **Daemon updates:** signature, target, architecture and version checks; refusals while a
   graph runs; updating a running daemon in place, refusing a binary that fails its trial
-  start, rolling back after a failed real start or a crash during the probation that
-  follows it, and the restart path used under systemd,
+  start, rolling back after a failed real start, or a crash or a hang during the probation
+  that follows it, and the restart path used under systemd,
   all with real daemon processes on one machine.
 - **Node SDK:** derives, schemas and compatibility checks, `ruro new` packages.
 - **Studio:** headless UI tests of editing, tabs, undo, subgraphs, comparing, recovery,
@@ -128,8 +128,8 @@ that skip in CI:
 - GPU buffers work between processes on one machine only, and ONNX Runtime does not take
   them yet (its CUDA provider is not wired up). Python nodes cannot receive them.
 - H.265 RTSP streams are refused.
-- A daemon update that hangs, or fails after its two-minute probation, is not rolled back
-  automatically.
+- A daemon update that fails after its two-minute probation is not rolled back
+  automatically (one that crashes or hangs during it is).
 - The crates are not published on crates.io, and the Python package is not on PyPI: build
   them from a checkout. The packages on the release page are not signed with a
   code-signing certificate (see [Installation](installation.md#windows-and-macos)).

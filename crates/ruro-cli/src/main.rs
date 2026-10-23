@@ -567,18 +567,52 @@ fn run_daemon(mut config: ruro_daemon::Config) -> Result<()> {
             None => return Err(e),
         },
     };
-    // Started: the update is on probation.
+    // Started: the update is on probation. A daemon that stops answering
+    // for a quarter of it (5 to 30 s) is rolled back like one that exits.
     let mut on_probation = None;
+    let mut probation_handoff = None;
     if let Some(h) = handoff.filter(|h| h.is_pending()) {
+        let kept = h.clone();
         match h.start_probation(&config) {
-            Ok(()) => on_probation = Some(std::time::Instant::now()),
+            Ok(()) => {
+                on_probation = Some(std::time::Instant::now());
+                probation_handoff = Some(kept);
+                // Debug builds only: lets the tests make an update hang.
+                if cfg!(debug_assertions)
+                    && std::env::var_os("RURO_TEST_FREEZE_ON_PROBATION").is_some()
+                {
+                    daemon.freeze();
+                }
+            }
             Err(e) => tracing::warn!("the update is kept without probation: {e:#}"),
         }
     }
+    let hang_limit = (probation / 4).clamp(Duration::from_secs(5), Duration::from_secs(30));
+    let mut last_check = std::time::Instant::now();
+    let mut silent_since: Option<std::time::Instant> = None;
     loop {
         if on_probation.is_some_and(|t| t.elapsed() >= probation) {
             Handoff::accept(&config.executable, &config.name);
             on_probation = None;
+        }
+        if let (Some(_), Some(h)) = (on_probation, &probation_handoff)
+            && last_check.elapsed() >= Duration::from_secs(1)
+        {
+            last_check = std::time::Instant::now();
+            if daemon.responsive(Duration::from_secs(1)) {
+                silent_since = None;
+            } else {
+                let since = *silent_since.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed() >= hang_limit {
+                    daemon.abandon();
+                    let what = format!(
+                        "stopped answering for {} s within {} s of starting",
+                        hang_limit.as_secs(),
+                        probation.as_secs()
+                    );
+                    return Err(h.clone().roll_back(&config, &what));
+                }
+            }
         }
         if stop.load(Ordering::Relaxed) {
             // Asked to stop: the update stays.

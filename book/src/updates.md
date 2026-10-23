@@ -159,11 +159,15 @@ package no longer changes the daemon that runs; update it with `ruro update`.
   starting`. Under systemd (`Restart=on-failure`) that happens on its own; a daemon run by
   hand is rolled back when you next start it. A daemon stopped on purpose (SIGTERM, Ctrl-C,
   a reboot) keeps the update, and so does one that outlives its probation.
+- A new daemon that hangs during its probation (it runs, but stops answering requests, or
+  its supervisor stops running, for a quarter of the probation: 5 to 30 s) is rolled back
+  too: its groups are killed and the previous binaries put back and started, which report
+  `rolled back to 0.1.0: 0.2.0 stopped answering for 30 s within 120 s of starting`.
 - To go back by hand, rename `ruro.prev` over `ruro` and restart the daemon, or install the
   older build with `ruro update --allow-downgrade`.
 
-Not covered: a new daemon that hangs rather than exits, or that fails after its probation.
-The previous binary is still there as `ruro.prev`.
+Not covered: a new daemon that fails after its probation; the previous binary is still there
+as `ruro.prev`.
 
 ## Limitations
 

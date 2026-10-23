@@ -432,3 +432,41 @@ fn an_update_that_outlives_its_probation_is_kept() {
     assert_eq!(st.update, None, "no rollback: {st:?}");
     assert!(f.path("bin/ruro.prev").exists(), "the update stays");
 }
+
+#[test]
+fn an_update_that_hangs_on_probation_is_rolled_back() {
+    let mut f = Fleet::new("hang");
+    // The new daemon starts, then stops answering (a test switch of debug
+    // builds freezes it once it is on probation).
+    let env = [
+        ("RURO_UPDATE_PROBATION", "20"),
+        ("RURO_TEST_FREEZE_ON_PROBATION", "1"),
+    ];
+    f.start(Some(OLD), &env);
+    let pid = f.daemon.as_ref().unwrap().id();
+    let new = f.signed(Path::new(RURO), "new", None);
+    // It may or may not see the new daemon report before it freezes.
+    let _ = f.cli(&["update", new.to_str().unwrap(), "--timeout", TIMEOUT]);
+
+    // After a quarter of the probation (5 s) without an answer, the
+    // previous binaries are back and running.
+    let st = f.wait_status(|s| {
+        s.update
+            .as_deref()
+            .is_some_and(|u| u.contains("rolled back"))
+    });
+    let note = st.update.unwrap();
+    assert!(
+        note.starts_with(&format!(
+            "rolled back to {OLD}: {VERSION} stopped answering"
+        )),
+        "{note}"
+    );
+    assert_eq!(st.pid, pid, "the previous binary runs in the same process");
+    assert!(
+        !f.path("bin/ruro.prev").exists(),
+        "the previous binary is back"
+    );
+    // And it answers.
+    assert!(f.cli(&["status"]).status.success());
+}

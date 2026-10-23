@@ -20,7 +20,7 @@ mod upload;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -182,6 +182,12 @@ pub(crate) struct State {
     pub restart: Mutex<Option<update::Restart>>,
     /// Set once that reply is out: the daemon may stop and restart.
     pub restart_ready: AtomicBool,
+    /// Milliseconds since the daemon started, when the supervisor loop last
+    /// ran: how [`Daemon::responsive`] tells it is not stuck.
+    pub supervisor_tick: AtomicU64,
+    /// Set by [`Daemon::freeze`]: the control and supervisor threads stop,
+    /// as if deadlocked.
+    pub frozen: AtomicBool,
     pub update_note: Option<String>,
 }
 
@@ -237,6 +243,7 @@ pub struct Daemon {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     state: Arc<State>,
+    started: Instant,
 }
 
 impl Daemon {
@@ -334,6 +341,8 @@ impl Daemon {
             updates,
             restart: Mutex::new(None),
             restart_ready: AtomicBool::new(false),
+            supervisor_tick: AtomicU64::new(0),
+            frozen: AtomicBool::new(false),
             update_note: config.update_note.clone(),
         });
         if config.estopped {
@@ -416,6 +425,9 @@ impl Daemon {
             .spawn(move || {
                 let _queryables = queryables;
                 while let Ok(query) = queries.recv() {
+                    while ctl_state.frozen.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                     let op = query
                         .key_expr()
                         .as_str()
@@ -523,6 +535,11 @@ impl Daemon {
                 let _heartbeat_sub = heartbeat_sub;
                 let mut last_status = Instant::now() - Duration::from_secs(1);
                 while !loop_stop.load(Ordering::Relaxed) {
+                    while st.frozen.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    st.supervisor_tick
+                        .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
                     {
                         let beats: Vec<_> = st.heartbeats.lock().drain().collect();
                         let mut sup = st.sup.lock();
@@ -585,6 +602,7 @@ impl Daemon {
             stop,
             thread: Some(thread),
             state,
+            started,
         })
     }
 
@@ -600,6 +618,50 @@ impl Daemon {
         let mut restart = self.state.restart.lock().take()?;
         restart.set_estop(self.state.estop.load(Ordering::Relaxed));
         Some(restart)
+    }
+
+    /// Whether the daemon still works: its supervisor loop ran recently and
+    /// it answers a ping within `timeout`. An updated daemon on probation
+    /// that stops answering is rolled back.
+    pub fn responsive(&self, timeout: Duration) -> bool {
+        let st = &self.state;
+        let tick = Duration::from_millis(st.supervisor_tick.load(Ordering::Relaxed));
+        if self.started.elapsed().saturating_sub(tick) > timeout.max(Duration::from_secs(2)) {
+            return false;
+        }
+        let Ok(replies) = st
+            .session
+            .get(st.keys.ctl(Ctl::Ping))
+            .timeout(timeout)
+            .wait()
+        else {
+            return false;
+        };
+        replies.recv().is_ok_and(|r| r.result().is_ok())
+    }
+
+    /// Kills the daemon's group processes without waiting for its threads,
+    /// for a daemon that stopped answering, and leaves nothing it holds
+    /// (sockets, locks) to a program executed in its place.
+    pub fn abandon(&self) {
+        #[cfg(unix)]
+        os::close_on_exec_all();
+        #[cfg(target_os = "linux")]
+        for pid in os::child_pids() {
+            // SAFETY: plain signal delivery to our own child.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        #[cfg(not(target_os = "linux"))]
+        if let Some(mut sup) = self.state.sup.try_lock_for(Duration::from_secs(1)) {
+            sup.stop_all();
+        }
+    }
+
+    /// Stops the control and supervisor threads as if they were deadlocked,
+    /// for testing how a hung daemon is handled.
+    #[doc(hidden)]
+    pub fn freeze(&self) {
+        self.state.frozen.store(true, Ordering::Relaxed);
     }
 
     /// Stops the deployed graph and the daemon.

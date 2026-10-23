@@ -19,6 +19,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every standard message type, parameters, the e-stop and errors (C++ exceptions included);
   the host refuses plugins built against another ABI. `examples/native` has a C and a C++
   node with CMake and make builds. See the book's "Nodes in C and C++".
+- A daemon update that hangs during its probation (stops answering, or its supervisor stops
+  running, for a quarter of it) is rolled back like one that crashes.
 
 ### Changed
 

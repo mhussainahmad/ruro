@@ -21,6 +21,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   node with CMake and make builds. See the book's "Nodes in C and C++".
 - A daemon update that hangs during its probation (stops answering, or its supervisor stops
   running, for a quarter of it) is rolled back like one that crashes.
+- **Python nodes from a package.** `ruro-python` (Ubuntu 24.04, Python 3.12) installs
+  `ruro-host-py` and the `ruro` Python package; releases attach it, and CI installs it with
+  `ruro` and runs the Python example through the daemon. The studio's Connect to Daemon
+  dialog takes a client certificate for daemons that require one.
 
 ### Changed
 

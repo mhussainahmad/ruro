@@ -54,12 +54,20 @@ fn prepare_path(py: Python<'_>) -> PyResult<()> {
             path.insert(i, dir.to_string_lossy().into_owned())?;
         }
     }
-    // Fall back to the package in the source tree if `ruro` is not installed.
+    // If `ruro` is not installed for this Python: the copy packaged with the
+    // host (`<prefix>/lib/ruro/python` for `<prefix>/bin/ruro-host-py`), or
+    // the one in the source tree.
     let util = py.import("importlib.util")?;
-    if util.call_method1("find_spec", ("ruro",))?.is_none()
-        && Path::new(SOURCE_PACKAGE_DIR).is_dir()
-    {
-        path.append(SOURCE_PACKAGE_DIR)?;
+    if util.call_method1("find_spec", ("ruro",))?.is_none() {
+        let packaged = std::env::current_exe()
+            .ok()
+            .and_then(|exe| Some(exe.parent()?.parent()?.join("lib/ruro/python")))
+            .filter(|dir| dir.join("ruro/__init__.py").is_file());
+        if let Some(dir) = packaged {
+            path.append(dir.to_string_lossy().into_owned())?;
+        } else if Path::new(SOURCE_PACKAGE_DIR).is_dir() {
+            path.append(SOURCE_PACKAGE_DIR)?;
+        }
     }
     Ok(())
 }

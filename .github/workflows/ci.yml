@@ -258,6 +258,36 @@ jobs:
           path: target/package/*.deb
           if-no-files-found: error
 
+  package-python:
+    # ruro-python, the host for Python nodes, links the libpython of the
+    # release it is built on: Ubuntu 24.04 (Python 3.12). Both packages are
+    # installed and the Python example graph is run through the daemon.
+    name: python debian package
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Packaging tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev python3-dev
+      - name: Build both .debs
+        env:
+          PYO3_PYTHON: /usr/bin/python3
+        run: scripts/package-deb.sh && scripts/package-deb-python.sh
+      - name: Install and run the Python example
+        run: |
+          dpkg-deb --info target/package/ruro-python_*.deb
+          sudo apt-get install -y ./target/package/ruro_*.deb ./target/package/ruro-python_*.deb
+          scripts/test-python-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-python
+          path: target/package/ruro-python_*.deb
+          if-no-files-found: error
+
   docker:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04

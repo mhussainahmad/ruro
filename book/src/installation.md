@@ -49,6 +49,7 @@ They are not signed with a code-signing certificate:
 |---|---|---|
 | [From source](#from-source) | everything | development, custom hosts, Python nodes |
 | [Debian package](#debian-package) | `ruro`, `ruro-host`, `ruro-studio`, systemd units | Debian/Ubuntu desktops and robots |
+| [Python package](#python-nodes-ruro-python) | `ruro-host-py` and the `ruro` Python package | Python nodes on Ubuntu 24.04 |
 | [AppImage](#appimage) | the studio plus `ruro` and `ruro-host` | trying the studio on any distribution |
 | [Flatpak](#flatpak) | the studio plus `ruro` and `ruro-host` | sandboxed desktop installs |
 | [Docker](#docker) | `ruro` and `ruro-host` (no studio) | headless robots and servers |
@@ -151,11 +152,33 @@ The package installs:
 - a system service `ruro-daemon.service` and a user service of the same name, both disabled
   (see [Deploying on robots](deployment.md));
 - the example graphs in `/usr/share/ruro/examples/` (also reachable as
-  `/usr/share/doc/ruro/examples/`), which the studio lists under **File → Open Example**.
+  `/usr/share/doc/ruro/examples/`), which the studio lists under **File → Open Example**;
+- the headers for [C and C++ nodes](native-nodes.md) in `/usr/include/ruro/`, and the
+  helpers for [other languages](other-languages.md) in `/usr/share/ruro/sdk/`.
 
 It also creates a `ruro` system user for the system service. It does not include the Python
-host, which would tie the package to one Python version, or the optional node features. The
-package's minimum glibc is that of the system it was built on; CI builds it on Ubuntu 22.04.
+host (see the next section) or the optional node features. The package's minimum glibc is
+that of the system it was built on; CI builds it on Ubuntu 22.04.
+
+### Python nodes: ruro-python
+
+The host for [Python nodes](python.md) links one Python version's library, so it is a
+package of its own, built for Ubuntu 24.04 (Python 3.12) and attached to releases:
+
+```sh
+sudo apt install ./ruro_*_amd64.deb ./ruro-python_*_amd64.deb
+RURO_PY_MODULES=/usr/share/ruro/examples/python/threshold.py \
+    ruro daemon --host /usr/bin/ruro-host-py
+ruro run /usr/share/ruro/examples/python-threshold.yaml
+```
+
+It installs `/usr/bin/ruro-host-py` and the `ruro` Python package it imports nodes with, in
+`/usr/lib/ruro/python`. Node modules use the system Python's packages (`python3-numpy` is
+recommended) or those of the active virtual environment (`VIRTUAL_ENV`). Build it from a
+checkout with `scripts/package-deb-python.sh` on the release it is meant for; on systems
+with Python older than 3.11 (Ubuntu 22.04), build the host from source against a newer
+Python. CI installs both packages and runs the Python example through the daemon
+(`scripts/test-python-deb.sh`).
 
 ## AppImage
 

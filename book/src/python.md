@@ -5,9 +5,11 @@ next to Rust nodes, with the same ports, parameters, metrics and studio support.
 `ruro-host-py`, a host with an embedded Python interpreter that also carries every node of
 the standard `ruro-host` (plus the `tf/*` transform nodes).
 
-> **Status:** implemented and tested: the Python package's tests (pytest) and Rust tests
-> that run Python and Rust nodes in one graph through a daemon. The Python host is not part
-> of the Debian package, AppImage or Docker image; build it from source.
+> **Status:** implemented and tested: the Python package's tests (pytest), Rust tests that
+> run Python and Rust nodes in one graph through a daemon, and the `ruro-python` Debian
+> package for Ubuntu 24.04, installed and run in CI (see
+> [Installation](installation.md#python-nodes-ruro-python)). The AppImage and the Docker image
+> do not include the Python host.
 
 ## A Python node
 

@@ -96,9 +96,9 @@ that skip in CI:
   Gazebo's `/clock`, and velocity commands move the rover. See [Gazebo and Isaac Sim](gazebo-isaac.md).
 - **GPU buffers** on one machine with an RTX 4090 (driver 610.57.04): in one process, across
   two processes and under the daemon. See [GPU buffers](gpu.md).
-- **GPU tensors in Python nodes** on the same machine: in-process (pytest) and through a
-  daemon with the Python node in its own process (CUDA IPC), checked with the CUDA driver
-  API; not tried with PyTorch or CuPy.
+- **GPU tensors in Python nodes** on the same machine: in-process with PyTorch 2.11 (shared
+  memory in, a result from another stream out) and the CUDA driver API, and through a daemon
+  with the Python node in its own process (CUDA IPC); not tried with CuPy.
 - **ONNX Runtime on the GPU** (`ml/onnx-cuda`) on the same machine, in Ubuntu 24.04 with
   NVIDIA's CUDA 13 libraries from pip: device tensors run in place with the CPU's results,
   every operator of the test model on the CUDA provider (from ONNX Runtime's profile).

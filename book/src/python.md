@@ -76,14 +76,16 @@ class Brightness:
 
 `ruro.GpuTensor` is a `gpu/Tensor` (see [GPU buffers](gpu.md)): `dtype`, `shape`, `strides`
 (in elements) and `device` (`cuda:0`, or `cpu`). One in device memory exposes
-`__cuda_array_interface__`, so PyTorch, CuPy and Numba read the same memory without a copy;
-it is read-only, because other receivers share it. `numpy()` downloads a copy, and
-`ruro.GpuTensor.from_numpy(array, device=0)` uploads one.
+`__cuda_array_interface__`, so PyTorch, CuPy and Numba read the same memory without a copy.
+Do not write to it: other receivers share it (it is not marked read-only, because PyTorch
+refuses read-only arrays); `.clone()` it to change it in place. `numpy()` downloads a copy,
+and `ruro.GpuTensor.from_numpy(array, device=0)` uploads one.
 
 An output of type `gpu/Tensor` takes a `GpuTensor`, any object with
 `__cuda_array_interface__` (a PyTorch CUDA tensor, a CuPy array: contiguous, and copied into a
-ruro buffer on its device, after waiting for the stream it names), or a NumPy array (a host
-tensor).
+ruro buffer on its device), or a NumPy array (a host tensor). Before the copy ruro waits for
+the stream the interface names, or for the whole device when it names none, as PyTorch's
+does not: a result computed on any PyTorch stream is complete when it is sent.
 
 ```python
 import torch
@@ -102,10 +104,11 @@ class TorchModel:
                 self.outputs.scores.send(self.model(x).contiguous())
 ```
 
-Tested in-process and through a daemon with the Python node in a process of its own (the
-tensor arrives over CUDA IPC), on an RTX 4090, using the CUDA driver directly; not with
-PyTorch or CuPy themselves. `gpu/Image` is not available in Python yet: normalize images to
-tensors first.
+Tested on an RTX 4090 in-process with PyTorch 2.11 (`torch.as_tensor` on a received
+tensor shares its memory; a result computed on a separate stream arrives intact) and with the
+CUDA driver directly, and through a daemon with the Python node in a process of its own (the
+tensor arrives over CUDA IPC). Not tried with CuPy. `gpu/Image` is not available in Python
+yet: normalize images to tensors first.
 
 ## Testing
 

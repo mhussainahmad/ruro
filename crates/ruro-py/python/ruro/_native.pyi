@@ -37,7 +37,8 @@ class GpuTensor:
     """An n-dimensional array in GPU (or host) memory (``gpu/Tensor``).
 
     A received tensor on a CUDA device exposes ``__cuda_array_interface__``
-    (read-only), so ``torch.as_tensor(t, device="cuda")`` and
+    (not to be written: other receivers share it), so
+    ``torch.as_tensor(t, device="cuda")`` and
     ``cupy.asarray(t)`` read its memory in place. Outputs of type
     ``gpu/Tensor`` accept a ``GpuTensor``, any object with
     ``__cuda_array_interface__`` (copied into a ruro buffer on its device) or

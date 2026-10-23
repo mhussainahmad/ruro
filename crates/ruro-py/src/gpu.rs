@@ -3,7 +3,9 @@
 //! A received tensor in device memory exposes `__cuda_array_interface__`
 //! (version 3), so `torch.as_tensor(t, device="cuda")`, `cupy.asarray(t)` or
 //! `numba.cuda.as_cuda_array(t)` see the same device memory, without a copy.
-//! It is read-only: other receivers share it. A node sends a tensor by
+//! Receivers must not write it: other receivers share it. (The interface
+//! still says it is writable, because PyTorch refuses read-only arrays.) A
+//! node sends a tensor by
 //! passing a `GpuTensor`, any object with `__cuda_array_interface__` (a
 //! PyTorch CUDA tensor, a CuPy array), which is copied into a ruro device
 //! buffer, or a NumPy array, which makes a host tensor.
@@ -124,8 +126,10 @@ impl PyGpuTensor {
         let d = PyDict::new(py);
         d.set_item("shape", PyTuple::new(py, &t.shape)?)?;
         d.set_item("typestr", typestr(t.dtype))?;
-        // Read-only: every receiver of the message shares this memory.
-        d.set_item("data", (buf.device_ptr(), true))?;
+        // Shared with every receiver of the message: not to be written. It
+        // is not marked read-only because PyTorch refuses such arrays
+        // ("the read only flag is not supported").
+        d.set_item("data", (buf.device_ptr(), false))?;
         let item = t.dtype.size();
         let bytes: Vec<i64> = t.strides.iter().map(|s| s * item as i64).collect();
         if t.is_contiguous() {
@@ -214,14 +218,17 @@ fn tensor_from_cuda_array(obj: &Bound<'_, PyAny>) -> PyResult<Tensor> {
         return Tensor::from_host(dtype, shape, Vec::new()).map_err(gpu_err);
     }
     let device = cuda.device_of_pointer(ptr).map_err(gpu_err)?;
-    // Wait for the producer's stream, as the interface asks of consumers.
-    if let Ok(stream) = cai.get_item("stream")
-        && !stream.is_none()
-    {
-        let handle: usize = stream.extract()?;
-        // SAFETY: the interface promises a live stream of the array's
-        // device, or 1 or 2 (the default streams).
-        unsafe { cuda.synchronize_raw_stream(device, handle) }.map_err(gpu_err)?;
+    // Wait for the producer: on the stream the interface names, as it asks
+    // of consumers; on the whole device when it names none (PyTorch leaves
+    // it out, and its streams do not order against the one the copy uses).
+    match cai.get_item("stream").ok().filter(|s| !s.is_none()) {
+        Some(stream) => {
+            let handle: usize = stream.extract()?;
+            // SAFETY: the interface promises a live stream of the array's
+            // device, or 1 or 2 (the default streams).
+            unsafe { cuda.synchronize_raw_stream(device, handle) }.map_err(gpu_err)?;
+        }
+        None => cuda.synchronize_device(device).map_err(gpu_err)?,
     }
     let mut t = Tensor::on_device(device, dtype, shape).map_err(gpu_err)?;
     let buf = t

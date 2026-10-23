@@ -133,6 +133,7 @@ struct Api {
         *mut *mut c_void,
     ) -> CuResult,
     pointer_get_attribute: unsafe extern "C" fn(*mut c_void, c_int, CuDevicePtr) -> CuResult,
+    ctx_synchronize: unsafe extern "C" fn() -> CuResult,
     _lib: Library,
 }
 
@@ -226,6 +227,7 @@ impl Cuda {
                 module_unload: sym!("cuModuleUnload"),
                 launch_kernel: sym!("cuLaunchKernel"),
                 pointer_get_attribute: sym!("cuPointerGetAttribute"),
+                ctx_synchronize: sym!("cuCtxSynchronize"),
                 _lib: lib,
             }
         };
@@ -547,6 +549,13 @@ impl Cuda {
     /// `handle` must be a live stream of `device`, or 1 or 2.
     pub unsafe fn synchronize_raw_stream(&self, device: u32, handle: usize) -> Result<()> {
         self.stream_synchronize(device, handle as CuStream)
+    }
+
+    /// Waits for all work queued on `device` by this process, on any stream.
+    pub fn synchronize_device(&self, device: u32) -> Result<()> {
+        self.bind(device)?;
+        // SAFETY: no arguments; the device's context is current.
+        self.check(unsafe { (self.api.ctx_synchronize)() }, "cuCtxSynchronize")
     }
 
     pub(crate) fn stream_synchronize(&self, device: u32, s: CuStream) -> Result<()> {

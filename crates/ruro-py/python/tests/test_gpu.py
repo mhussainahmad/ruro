@@ -82,7 +82,8 @@ def test_a_tensor_on_the_device(driver):
     cai = t.__cuda_array_interface__
     assert cai["shape"] == (3, 4) and cai["typestr"] == "<f4" and cai["version"] == 3
     ptr, readonly = cai["data"]
-    assert readonly, "shared memory is read-only"
+    # Not marked read-only, which PyTorch refuses; receivers must not write.
+    assert not readonly
     # The memory the interface points at holds the array.
     assert driver.read(ptr, a.nbytes) == a.tobytes()
     np.testing.assert_array_equal(t.numpy(), a)
@@ -141,3 +142,35 @@ def test_non_contiguous_arrays_are_refused(driver):
     h = harness(Forward)
     with pytest.raises(RuntimeError, match="not contiguous"):
         h.step()
+
+
+def test_with_pytorch():
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("PyTorch without CUDA")
+
+    @ruro.node(
+        kind="test/torch-scale",
+        inputs={"x": ruro.GpuTensor},
+        outputs={"y": ruro.GpuTensor},
+    )
+    class TorchScale:
+        def step(self, ctx):
+            t = self.inputs.x.latest()
+            if t is not None:
+                x = torch.as_tensor(t, device="cuda")
+                # The same device memory, not a copy.
+                assert x.data_ptr() == t.__cuda_array_interface__["data"][0]
+                # On a stream of its own, which the send must wait for.
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = (x * 3).contiguous()
+                self.outputs.y.send(y)
+
+    a = np.random.default_rng(1).standard_normal((4, 256, 256)).astype(np.float32)
+    h = harness(TorchScale)
+    h.push("x", ruro.GpuTensor.from_numpy(a, device=0))
+    h.step()
+    (y,) = h.take("y")
+    assert y.device == "cuda:0" and y.shape == (4, 256, 256)
+    np.testing.assert_allclose(y.numpy(), a * 3, rtol=1e-6)

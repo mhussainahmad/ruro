@@ -35,7 +35,10 @@ pub fn fleet(session: &zenoh::Session) -> Result<()> {
     let mut metrics: BTreeMap<(String, String), GroupMetrics> = BTreeMap::new();
     // Daemons answer status and metrics requests at once; the request ends
     // when every reachable one has answered.
-    for key in [Keys::all_status().to_string(), "ruro/*/metrics/*".to_owned()] {
+    for key in [
+        Keys::all_status().to_string(),
+        "ruro/*/metrics/*".to_owned(),
+    ] {
         let Ok(replies) = session.get(key.as_str()).timeout(LISTEN).wait() else {
             continue;
         };

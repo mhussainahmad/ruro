@@ -860,7 +860,10 @@ fn query(session: &zenoh::Session, key: &str) -> Vec<(String, Vec<u8>)> {
     let mut out = Vec::new();
     while let Ok(r) = replies.recv() {
         if let Ok(s) = r.result() {
-            out.push((s.key_expr().to_string(), s.payload().to_bytes().into_owned()));
+            out.push((
+                s.key_expr().to_string(),
+                s.payload().to_bytes().into_owned(),
+            ));
         }
     }
     out
@@ -881,13 +884,21 @@ fn status_and_metrics_are_answered_on_request() {
         .iter()
         .map(|(_, b)| ruro_proto::decode_status(b).unwrap())
         .collect();
-    assert!(start.elapsed() < Duration::from_secs(4), "{:?}", start.elapsed());
+    assert!(
+        start.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        start.elapsed()
+    );
     let mut names: Vec<&str> = statuses.iter().map(|st| st.name.as_str()).collect();
     names.sort();
     let mut expected = vec![d1.name(), right.as_str()];
     expected.sort();
     assert_eq!(names, expected);
-    assert!(statuses.iter().all(|st| st.graph.as_deref() == Some("rec-span")));
+    assert!(
+        statuses
+            .iter()
+            .all(|st| st.graph.as_deref() == Some("rec-span"))
+    );
 
     // The groups' last metrics, from each daemon.
     let metrics = query(&s, "ruro/*/metrics/*");

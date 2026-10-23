@@ -460,7 +460,9 @@ impl Daemon {
             .callback(move |sample| {
                 let bytes = sample.payload().to_bytes();
                 if let Ok(m) = ruro_proto::decode::<GroupMetrics>(&bytes) {
-                    hb.metrics.lock().insert(m.group.clone(), bytes.into_owned());
+                    hb.metrics
+                        .lock()
+                        .insert(m.group.clone(), bytes.into_owned());
                     hb.heartbeats
                         .lock()
                         .insert(m.group, (m.pid, Instant::now()));
@@ -508,7 +510,9 @@ impl Daemon {
                         .map(|(g, m)| (g.clone(), m.clone()))
                         .collect();
                     for (group, bytes) in latest {
-                        let _ = query.reply(metrics_state.keys.metrics(&group), bytes).wait();
+                        let _ = query
+                            .reply(metrics_state.keys.metrics(&group), bytes)
+                            .wait();
                     }
                 }
             })?;

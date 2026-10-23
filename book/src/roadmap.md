@@ -24,7 +24,7 @@ the order it will be done. An item is ticked only when a test proves it, and
 - [x] Simulated time follows a ROS `/clock`.
 - [x] ruro nodes offer ROS parameter services (`ros2 param get/set/list`).
 - [x] ruro nodes publish `/parameter_events` (rqt_reconfigure follows changes).
-- [ ] ruro nodes offer the type-description service.
+- [x] ruro nodes offer the type-description service.
 - [x] The generic bridges can be transient-local.
 
 ## Production

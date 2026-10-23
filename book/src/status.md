@@ -70,7 +70,9 @@ These were checked against the real software on a development machine, with opt-
 that skip in CI:
 
 - **ROS 2 interop** with ROS 2 Jazzy and rmw_zenoh_cpp 0.2.11 in a container
-  (`RURO_ROS2_CONTAINER`; image and script in `scripts/ros2/`): services in both
+  (`RURO_ROS2_CONTAINER`; image and script in `scripts/ros2/`): `get_type_description` of a
+  ruro node answering the same as a real node's, compared with `ros2 service call` for
+  `tf2_msgs/msg/TFMessage` (defaults included); services in both
   directions, actions with feedback and cancel in both directions, `/tf_static` latching
   both ways, the generic `ros2/sub` and `ros2/pub` bridges with types ruro does not bundle
   (byte-identical with what crossed the router), type hashes of all 380 message and 310
@@ -124,7 +126,7 @@ that skip in CI:
 ## Known gaps
 
 - ROS 2: deadline, lifespan and liveliness are announced but not enforced (as in
-  rmw_zenoh); a ruro ROS node offers no type description service.
+  rmw_zenoh).
 - GPU buffers work between processes on one machine only, and ONNX Runtime does not take
   them yet (its CUDA provider is not wired up). Python nodes cannot receive them.
 - H.265 RTSP streams are refused.

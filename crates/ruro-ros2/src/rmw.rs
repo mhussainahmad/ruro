@@ -594,6 +594,8 @@ pub struct Endpoint {
     zid: String,
     node_id: u32,
     _token: LivelinessToken,
+    /// `~/get_type_description`, which every ROS 2 node offers.
+    _type_description: Option<RawService>,
 }
 
 impl Endpoint {
@@ -615,12 +617,60 @@ impl Endpoint {
             .declare_token(key)
             .wait()
             .map_err(|e| anyhow!("declaring node token: {e}"))?;
-        Ok(Self {
+        let mut endpoint = Self {
             shared,
             cfg,
             zid,
             node_id,
             _token: token,
+            _type_description: None,
+        };
+        endpoint._type_description = Some(endpoint.type_description_service()?);
+        Ok(endpoint)
+    }
+
+    /// Answers `~/get_type_description` (REP 2011) for the types the
+    /// process knows: the bundled ones and those found on the search path.
+    fn type_description_service(&self) -> Result<RawService> {
+        use crate::msgs::type_description_interfaces::srv::{
+            GetTypeDescription, GetTypeDescription_Response,
+        };
+        let ns = self.cfg.namespace.trim_end_matches('/');
+        let name = format!("{ns}/{}/get_type_description", self.cfg.node_name);
+        self.service::<GetTypeDescription>(&name, Qos::services(), |req| {
+            let fail = |why: String| GetTypeDescription_Response {
+                successful: false,
+                failure_reason: why,
+                ..Default::default()
+            };
+            let Some(name) = crate::idl::TypeName::parse(&req.type_name) else {
+                return fail(format!("`{}` is not a type name", req.type_name));
+            };
+            let mut lib = crate::search::TypeLibrary::global()
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if let Err(e) = lib.load(&name) {
+                return fail(format!("{e:#}"));
+            }
+            let interfaces = lib.interfaces();
+            let hash = match crate::hash::type_hash(interfaces, &name) {
+                Ok(h) => h,
+                Err(missing) => return fail(format!("`{missing}` is not known here")),
+            };
+            if !req.type_hash.is_empty() && req.type_hash != hash {
+                return fail(format!(
+                    "`{}` has hash {hash} here, not {}",
+                    req.type_name, req.type_hash
+                ));
+            }
+            match crate::hash::type_description(interfaces, &name) {
+                Ok(d) => GetTypeDescription_Response {
+                    successful: true,
+                    type_description: d,
+                    ..Default::default()
+                },
+                Err(missing) => fail(format!("`{missing}` is not known here")),
+            }
         })
     }
 

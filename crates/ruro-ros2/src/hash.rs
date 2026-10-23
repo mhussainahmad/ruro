@@ -155,6 +155,135 @@ pub fn hashable_description(interfaces: &Interfaces, name: &TypeName) -> Result<
     Ok(out)
 }
 
+/// The type description of `name` as `type_description_interfaces` carries
+/// it (the `~/get_type_description` service): the same content as is
+/// hashed, plus the fields' default values.
+pub fn type_description(
+    interfaces: &Interfaces,
+    name: &TypeName,
+) -> Result<crate::msgs::type_description_interfaces::msg::TypeDescription, TypeName> {
+    use crate::msgs::type_description_interfaces::msg as td;
+    let individual = |spec: &MessageSpec| {
+        let placeholder = [Field {
+            name: "structure_needs_at_least_one_member".into(),
+            ty: crate::idl::FieldType {
+                base: BaseType::Primitive(Primitive::Uint8),
+                array: Array::None,
+            },
+            default: None,
+        }];
+        let fields: &[Field] = if spec.fields.is_empty() {
+            &placeholder
+        } else {
+            &spec.fields
+        };
+        td::IndividualTypeDescription {
+            type_name: spec.name.to_string(),
+            fields: fields
+                .iter()
+                .map(|f| {
+                    let (type_id, capacity, string_capacity, nested_type_name) = field_type(f);
+                    td::Field {
+                        name: f.name.clone(),
+                        r#type: td::FieldType {
+                            type_id,
+                            capacity: capacity as u64,
+                            string_capacity: string_capacity as u64,
+                            nested_type_name,
+                        },
+                        default_value: f
+                            .default
+                            .as_deref()
+                            .map(|d| python_default(f, d))
+                            .unwrap_or_default(),
+                    }
+                })
+                .collect(),
+        }
+    };
+    let spec = interfaces.get(name).ok_or_else(|| name.clone())?;
+    let refs = interfaces.references(name)?;
+    Ok(td::TypeDescription {
+        type_description: individual(spec),
+        referenced_type_descriptions: refs
+            .iter()
+            .map(|r| individual(interfaces.get(r).expect("references exist")))
+            .collect(),
+    })
+}
+
+/// A default value as rosidl renders it: Python's `str()` of the typed
+/// value (`1.0` for a float written `1`, `True` for `true`, a string without
+/// its quotes). Arrays are left as written.
+fn python_default(f: &Field, written: &str) -> String {
+    let w = written.trim();
+    if f.ty.array != Array::None {
+        return w.to_owned();
+    }
+    match &f.ty.base {
+        BaseType::Primitive(Primitive::Float32 | Primitive::Float64) => w
+            .parse::<f64>()
+            .map(python_float)
+            .unwrap_or_else(|_| w.to_owned()),
+        BaseType::Primitive(Primitive::Bool) => match w.to_ascii_lowercase().as_str() {
+            "true" | "1" => "True".into(),
+            "false" | "0" => "False".into(),
+            _ => w.to_owned(),
+        },
+        BaseType::String { .. } | BaseType::WString { .. } => {
+            let unquoted = w
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .or_else(|| w.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')));
+            unquoted.unwrap_or(w).to_owned()
+        }
+        BaseType::Primitive(_) => w
+            .parse::<i128>()
+            .map(|i| i.to_string())
+            .unwrap_or_else(|_| w.to_owned()),
+        BaseType::Named(_) => w.to_owned(),
+    }
+}
+
+/// `repr()` of a Python float: the shortest digits that round-trip, in
+/// fixed notation for exponents from -4 to 15, else in exponent notation.
+fn python_float(v: f64) -> String {
+    if v.is_nan() {
+        return "nan".into();
+    }
+    if v.is_infinite() {
+        return if v > 0.0 { "inf" } else { "-inf" }.into();
+    }
+    // Rust's `{:e}` gives the shortest round-trip digits: `-1.2345e-5`.
+    let sci = format!("{v:e}");
+    let (mantissa, exp) = sci.split_once('e').expect("exponent form");
+    let exp: i32 = exp.parse().expect("exponent");
+    let (sign, mantissa) = match mantissa.strip_prefix('-') {
+        Some(m) => ("-", m),
+        None => ("", mantissa),
+    };
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    if (-4..16).contains(&exp) {
+        let point = exp + 1;
+        let fixed = if point <= 0 {
+            format!("0.{}{digits}", "0".repeat((-point) as usize))
+        } else if point as usize >= digits.len() {
+            format!("{digits}{}.0", "0".repeat(point as usize - digits.len()))
+        } else {
+            let (int, frac) = digits.split_at(point as usize);
+            format!("{int}.{frac}")
+        };
+        format!("{sign}{fixed}")
+    } else {
+        let m = match digits.split_at(1) {
+            (d, "") => d.to_owned(),
+            (d, rest) => format!("{d}.{rest}"),
+        };
+        let e_sign = if exp < 0 { '-' } else { '+' };
+        format!("{sign}{m}e{e_sign}{:02}", exp.abs())
+    }
+}
+
 /// The `RIHS01_<sha256 hex>` hash of a message. Fails with the name of a
 /// referenced message that is not in `interfaces`.
 pub fn type_hash(interfaces: &Interfaces, name: &TypeName) -> Result<String, TypeName> {
@@ -171,6 +300,26 @@ pub fn type_hash(interfaces: &Interfaces, name: &TypeName) -> Result<String, Typ
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floats_print_as_python_does() {
+        for (v, py) in [
+            (1.0, "1.0"),
+            (0.0, "0.0"),
+            (-0.5, "-0.5"),
+            (0.1, "0.1"),
+            (100.0, "100.0"),
+            (1e-4, "0.0001"),
+            (1e-5, "1e-05"),
+            (1.5e-7, "1.5e-07"),
+            (1e16, "1e+16"),
+            (123456789012345.0, "123456789012345.0"),
+            (2.5e20, "2.5e+20"),
+            (std::f64::consts::PI, "3.141592653589793"),
+        ] {
+            assert_eq!(python_float(v), py, "{v}");
+        }
+    }
     use crate::idl::parse_message;
 
     #[test]

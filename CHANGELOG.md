@@ -25,6 +25,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ruro-host-py` and the `ruro` Python package; releases attach it, and CI installs it with
   `ruro` and runs the Python example through the daemon. The studio's Connect to Daemon
   dialog takes a client certificate for daemons that require one.
+- **ROS 2 type descriptions.** Every ruro ROS node offers `~/get_type_description`
+  (REP 2011); its answer for `tf2_msgs/msg/TFMessage` is the same as a Jazzy node's.
 
 ### Changed
 

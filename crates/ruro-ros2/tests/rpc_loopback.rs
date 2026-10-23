@@ -242,3 +242,83 @@ fn transient_local_reaches_late_subscribers() {
     assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), "m3");
     assert_eq!(vrx.recv_timeout(Duration::from_secs(5)).unwrap(), "m3");
 }
+
+#[test]
+fn every_node_describes_its_types() {
+    use ruro_ros2::msgs::type_description_interfaces::srv::{
+        GetTypeDescription, GetTypeDescription_Request,
+    };
+    let (_router, endpoint) = router();
+    let _node = Endpoint::open(config(&endpoint, "describer")).unwrap();
+    let asker = Endpoint::open(config(&endpoint, "asker")).unwrap();
+    let client = asker
+        .client::<GetTypeDescription>("/describer/get_type_description", Qos::services())
+        .unwrap();
+    assert!(client.raw().wait_for_server(Duration::from_secs(10)));
+    let ask = |type_name: &str, type_hash: &str| {
+        client
+            .call(
+                &GetTypeDescription_Request {
+                    type_name: type_name.into(),
+                    type_hash: type_hash.into(),
+                    include_type_sources: false,
+                },
+                Duration::from_secs(5),
+            )
+            .unwrap()
+    };
+
+    let r = ask("geometry_msgs/msg/PoseStamped", "");
+    assert!(r.successful, "{}", r.failure_reason);
+    let d = &r.type_description;
+    assert_eq!(
+        d.type_description.type_name,
+        "geometry_msgs/msg/PoseStamped"
+    );
+    let fields: Vec<&str> = d
+        .type_description
+        .fields
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert_eq!(fields, ["header", "pose"]);
+    // Referenced types, sorted by name, as in the hashed description.
+    let refs: Vec<&str> = d
+        .referenced_type_descriptions
+        .iter()
+        .map(|t| t.type_name.as_str())
+        .collect();
+    assert_eq!(
+        refs,
+        [
+            "builtin_interfaces/msg/Time",
+            "geometry_msgs/msg/Point",
+            "geometry_msgs/msg/Pose",
+            "geometry_msgs/msg/Quaternion",
+            "std_msgs/msg/Header"
+        ]
+    );
+    // Default values are given (Quaternion.w defaults to 1).
+    let quat = &d.referenced_type_descriptions[3];
+    assert_eq!(quat.fields[3].name, "w");
+    assert_eq!(quat.fields[3].default_value, "1.0");
+
+    // The hash is checked when given.
+    use ruro_ros2::RosMessage;
+    let string_hash = RosString::TYPE_HASH;
+    assert!(ask("std_msgs/msg/String", string_hash).successful);
+    let r = ask("std_msgs/msg/String", "RIHS01_00");
+    assert!(
+        !r.successful && r.failure_reason.contains("has hash"),
+        "{}",
+        r.failure_reason
+    );
+    let r = ask("no_such_pkg/msg/Thing", "");
+    assert!(!r.successful, "unknown types are refused");
+    let r = ask("not a type", "");
+    assert!(
+        r.failure_reason.contains("not a type name"),
+        "{}",
+        r.failure_reason
+    );
+}

@@ -442,5 +442,7 @@ against a machine running ROS 2 with rmw_zenoh check the same things by hand.
 - Type hashes follow REP 2011 (RIHS01), as used by Jazzy and later. Distributions without
   type hashes (Humble) are not supported.
 - There is no bridge node for joint commands (`std/JointCommand`).
-- ruro nodes offer no type description service, so `ros2 node info` and
-  `ros2 topic info --verbose` see less of them than of rclcpp nodes.
+- Every ruro ROS node offers `~/get_type_description` (REP 2011) for the types the process
+  knows, bundled or found on the search path; unlike rclcpp it also answers for types the
+  node does not use, and without a hash. Type sources (`include_type_sources`) are not
+  returned.
